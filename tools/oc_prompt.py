@@ -40,20 +40,28 @@ def main():
     req("POST", f"/api/session/{sid}/prompt", {"text": prompt})
     deadline = time.time() + a.timeout
     last = None
+    stable = 0
     while time.time() < deadline:
         time.sleep(5)
         cur = req("GET", f"/api/session/{sid}")
         d = cur.get("data", cur)
         outcome = d.get("outcome")
         idle = d.get("time", {}).get("idle")
-        state = (outcome, idle)
+        updated = d.get("time", {}).get("updated")
+        state = (outcome, idle, updated)
         if state != last:
-            print("state:", state, flush=True); last = state
-        if outcome in ("succeeded", "failed", "error") or (idle and outcome):
+            print("state:", state, flush=True); last = state; stable = 0
+        else:
+            stable += 1
+        if outcome in ("succeeded", "failed", "error"):
             break
-        # sessions that finish set outcome; also break if idle long after start
-        if idle and time.time() > deadline - a.timeout + 120 and outcome is None:
-            pass
+        # Fallback (fixed 2026-10-26 after an M0 false timeout): some finished
+        # sessions never set outcome. If the session is idle and its
+        # updated/idle stamps have been unchanged for 3 polls (~15s), treat
+        # it as finished and let the caller judge by the messages.
+        if idle and stable >= 3:
+            print("state: idle-stable, treating as finished", flush=True)
+            break
     msgs = req("GET", f"/api/session/{sid}/message")
     items = msgs.get("data", msgs)
     texts = []
@@ -67,7 +75,13 @@ def main():
         print(f"--- {role} ---\n{t[:4000]}")
     cur = req("GET", f"/api/session/{sid}"); d = cur.get("data", cur)
     print("FINAL outcome:", d.get("outcome"), "tokens:", d.get("tokens"))
-    sys.exit(0 if d.get("outcome") == "succeeded" else 2)
+    if d.get("outcome") == "succeeded":
+        sys.exit(0)
+    # Idle-stable finish with real assistant output and no failure markers
+    # counts as success; the coordinator still verifies artifacts itself.
+    has_text = any(t.strip() for _, t in texts)
+    failed = d.get("outcome") in ("failed", "error")
+    sys.exit(0 if (has_text and not failed) else 2)
 
 if __name__ == "__main__":
     main()
