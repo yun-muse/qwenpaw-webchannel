@@ -14,10 +14,11 @@ Files:
 | `plugin.py` | `register_channel(...)` — label + `relay_url` / `token` fields |
 | `channel.py` | `WebChannel(BaseChannel)`: relay I/O, streaming, approvals, local-API calls |
 | `frames.py` | frame builders/parser (`protocol/frames.md`), size check |
-| `util.py` | pure helpers: `StreamDiffer`, `SeqCounter`, `RingBuffer` + the M2 decisions |
+| `util.py` | pure helpers: `StreamDiffer`, `SeqCounter`, `RingBuffer`, `FileTransfers` + the M2/M5 decisions |
 | `relay_client.py` | `websockets` client: hello/auth, heartbeat, backoff, queue |
 | `tests/test_diff.py` | plain-python tests for the helpers (no pytest needed) |
 | `tests/test_m2.py` | plain-python tests for the A1/A3/A4/A5 decisions |
+| `tests/test_m5.py` | plain-python tests for the v2 chunked file transfer |
 
 ## Install
 
@@ -179,6 +180,49 @@ Remaining deviations are in the table below; everything else (frame names,
 per-chat `seq` from 1, ring buffer, `resume`/`resync`) is unchanged. New tests
 live in `tests/test_m2.py` and cover every decision above.
 
+## File transfer (protocol v2)
+
+Large attachments no longer have to fit one `msg` frame. The browser splits the
+file into `file_chunk` frames and the plugin assembles them
+(`protocol/frames.md` §8):
+
+```
+browser ── file_begin{chat,id,name,mime,size,chunks,sha256} ─▶ plugin
+        ── file_chunk{chat,id,i,data} × chunks (96 KB raw, base64) ─▶
+        ── file_end{chat,id} ─▶
+plugin  ── file_ready{chat,id}            (verified + staged) ─▶ browser
+        ── file_error{chat,id,code,msg?}  (E_CHECKSUM/E_TOOBIG/E_STATE) ─▶
+```
+
+Then the message itself uses a one-shot ref:
+
+```json
+{"t":"msg","chat":"…","text":"see attached","files":[{"ref":"u1"}]}
+```
+
+- `util.FileTransfers` is the pure state machine: `begin` / `chunk` / `end` /
+  `take` / `purge`, every call taking an explicit `now` (the channel passes
+  `time.monotonic()`), so TTL behaviour is testable.
+- Limits: **96 KB raw per chunk** (`CHUNK_RAW_BYTES`), **10 MB per file**
+  (`MAX_FILE_BYTES`), **10 min TTL** (`TRANSFER_TTL_S`). The received chunks of
+  one transfer never hold more than 10 MB.
+- Verification: assembled length == declared `size` **and** sha256 == declared
+  digest, else `E_CHECKSUM`. Chunks may arrive out of order; a duplicate index
+  overwrites, and a bad index/base64 drops the transfer (`E_STATE`).
+- A `file_begin` with an existing id restarts that transfer — the client's
+  whole-file retry after `E_CHECKSUM` reuses the same id.
+- Successful `file_begin`/`file_chunk` get no reply; only `file_end` is
+  acknowledged. Replies go through `_emit`, so they consume `seq` and are
+  replayable on `resume`.
+- `_resolve_file_entry` routes `{ref}` entries through
+  `FileTransfers.take()` and then `_store_file()`; everything else keeps the
+  v1 inline path (`decode_file_entry` + `_upload_file`). The upload POST lives
+  in `_store_file` only.
+- Relay: no changes needed (chunks are ordinary frames), but the hosted relay
+  allows 30 frames/s per tenant, so clients pace sends (~40 ms per chunk).
+  A client talking to a **v1** plugin gets no `file_ready` and must time out
+  rather than hang.
+
 ## HTTP library for approvals / history / stop / upload
 
 All local QwenPaw API calls use **httpx** with `X-Agent-Id: <bound workspace
@@ -243,6 +287,7 @@ defaults — follows `protocol/frames.md`, `docs/design.md` and
   manager queue path raises `NotImplementedError`.
 - Inbound frames go through `self._enqueue(native)` (set by `ChannelManager`
   via `set_enqueue`); the plugin never runs its own consumer loop.
-- Tests: `cd plugin && python3 tests/test_diff.py` and
-  `cd plugin && python3 tests/test_m2.py` → `ALL PASS` (pytest is not
+- Tests: `cd plugin && python3 tests/test_diff.py`,
+  `cd plugin && python3 tests/test_m2.py` and
+  `cd plugin && python3 tests/test_m5.py` → `ALL PASS` (pytest is not
   required; it collects the same `test_*` functions if installed).

@@ -10,6 +10,21 @@ import './App.css';
 /** protocol/frames.md §5 — UTF-8 bytes of the serialized JSON. */
 const MAX_FRAME_BYTES = 256 * 1024;
 
+/** protocol/frames.md §8 — largest file a chunked (v2) upload may carry. */
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+
+/** §8.1 — raw bytes per `file_chunk` frame (base64 in `data`). */
+const CHUNK_BYTES = 96 * 1024;
+
+/** §8.3 — the hosted relay allows 30 frames/s per tenant, so ~40 ms apart. */
+const CHUNK_PACE_MS = 40;
+
+/** §7 — a v1 container ignores `file_begin`, so `file_end` must not wait forever. */
+const UPLOAD_TIMEOUT_MS = 60_000;
+
+/** Raw size above which an inline v1 frame cannot fit: skip the base64 probe. */
+const INLINE_PROBE_BYTES = 180 * 1024;
+
 /** Client token for the hosted relay, kept for the tab's lifetime. */
 const TOKEN_KEY = 'webchannel.token';
 
@@ -90,11 +105,52 @@ interface ChatMessage {
   approval?: ApprovalMeta;
 }
 
-interface Attachment {
+interface AttachmentInline {
+  kind: 'inline';
   name: string;
   mime: string;
   data: string;
   size: number;
+}
+
+/**
+ * A v2 chunked upload (§8). `sent`/`chunks` drive the chip progress; `ref`
+ * only exists once the plugin answered `file_ready` and may be sent.
+ */
+interface AttachmentChunked {
+  kind: 'chunked';
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  chunks: number;
+  sent: number;
+  status: 'uploading' | 'ready' | 'failed';
+  ref?: string;
+}
+
+type Attachment = AttachmentInline | AttachmentChunked;
+
+/**
+ * One chunked transfer in flight. Kept in a ref (not state) so the frame
+ * dispatch and the pacing loop share it without stale closures.
+ */
+interface Upload {
+  id: string;
+  chat: string;
+  name: string;
+  mime: string;
+  size: number;
+  bytes: ArrayBuffer;
+  chunks: number;
+  /** lowercase hex sha256 of `bytes`, computed once (also for the retry) */
+  sha256: string;
+  /** set by remove / chat switch / failure: the pacing loop must stop */
+  cancelled: boolean;
+  /** the automatic `E_CHECKSUM` retry has already been used */
+  retried: boolean;
+  /** 60 s watchdog for the reply to `file_end` */
+  timer: ReturnType<typeof setTimeout> | null;
 }
 
 interface ChatRuntime {
@@ -111,6 +167,8 @@ interface ChatRuntime {
 }
 
 let nextId = 1;
+/** Suffix for chunked transfer ids, unique per pick within the tab. */
+let uploadCounter = 1;
 
 function newChatId(): string {
   return `chat-${Date.now().toString(36)}`;
@@ -126,6 +184,48 @@ function byteSize(value: unknown): number {
 
 function fmtKb(bytes: number): string {
   return `${Math.round(bytes / 1024)} KB`;
+}
+
+/** §8.1 — the digest travels as 64 lowercase hex chars. */
+function hexOf(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let hex = '';
+  for (let i = 0; i < bytes.length; i += 1) {
+    hex += bytes[i].toString(16).padStart(2, '0');
+  }
+  return hex;
+}
+
+/**
+ * Base64 in small sub-slices: spreading a 96 KB chunk into
+ * `String.fromCharCode` would blow the argument limit.
+ */
+function base64Of(bytes: Uint8Array): string {
+  const SLICE = 0x8000;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += SLICE) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + SLICE));
+  }
+  return btoa(binary);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function uploadPercent(file: AttachmentChunked): number {
+  if (file.chunks <= 0) return file.status === 'ready' ? 100 : 0;
+  return Math.min(100, Math.round((file.sent / file.chunks) * 100));
+}
+
+/** Composer chip caption for the current attachment state. */
+function chipNote(file: Attachment): string {
+  if (file.kind === 'inline') return 'sent with your next message';
+  if (file.status === 'uploading') return `uploading… ${uploadPercent(file)}%`;
+  if (file.status === 'ready') return 'uploaded — sent with your next message';
+  return 'upload failed — remove and pick the file again';
 }
 
 /** The one oversize-attachment message, shared by pick-time and send-time. */
@@ -409,6 +509,8 @@ export default function App() {
   const listRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const answeredApprovals = useRef<Set<string>>(new Set());
+  /** the chunked transfer in flight (one attachment at a time) */
+  const uploadRef = useRef<Upload | null>(null);
 
   const runtimeOf = (chat: string): ChatRuntime => {
     let rt = runtimes.current.get(chat);
@@ -475,6 +577,130 @@ export default function App() {
       }
       return out;
     });
+  };
+
+  /** Stop the pacing loop, disarm the watchdog, ignore late replies (§8.3). */
+  const cancelUpload = () => {
+    const up = uploadRef.current;
+    uploadRef.current = null;
+    if (!up) return;
+    up.cancelled = true;
+    if (up.timer) {
+      clearTimeout(up.timer);
+      up.timer = null;
+    }
+  };
+
+  /** The transfer is dead: chip stays failed, Send stays blocked until removal. */
+  const failUpload = (up: Upload, message: string) => {
+    if (up.timer) {
+      clearTimeout(up.timer);
+      up.timer = null;
+    }
+    if (uploadRef.current === up) uploadRef.current = null;
+    setComposerError(message);
+    setAttachment((prev) =>
+      prev && prev.kind === 'chunked' && prev.id === up.id ? { ...prev, status: 'failed' } : prev,
+    );
+  };
+
+  const sendUploadFrame = (frame: Frame): boolean => clientRef.current?.send(frame) ?? false;
+
+  /** `file_begin`, the paced chunks, then `file_end` (§8.1/§8.3). Re-run on retry. */
+  const runUpload = async (up: Upload) => {
+    if (up.cancelled) return;
+    // A retry restarts progress from 0 with the same id (§8.2).
+    setAttachment((prev) =>
+      prev && prev.kind === 'chunked' && prev.id === up.id
+        ? { ...prev, sent: 0, status: 'uploading' }
+        : prev,
+    );
+
+    if (!up.sha256) {
+      try {
+        up.sha256 = hexOf(await crypto.subtle.digest('SHA-256', up.bytes));
+      } catch {
+        failUpload(up, '无法计算文件校验值：浏览器不支持 SHA-256。');
+        return;
+      }
+      if (up.cancelled) return;
+    }
+
+    if (
+      !sendUploadFrame({
+        t: 'file_begin',
+        chat: up.chat,
+        id: up.id,
+        name: up.name,
+        mime: up.mime,
+        size: up.size,
+        chunks: up.chunks,
+        sha256: up.sha256,
+      })
+    ) {
+      failUpload(up, 'Not connected — reconnecting. Try again in a moment.');
+      return;
+    }
+
+    const bytes = new Uint8Array(up.bytes);
+    for (let i = 0; i < up.chunks; i += 1) {
+      // Pace every chunk (also the first, right after `file_begin`).
+      await sleep(CHUNK_PACE_MS);
+      if (up.cancelled) return;
+      const start = i * CHUNK_BYTES;
+      const data = base64Of(bytes.subarray(start, Math.min(start + CHUNK_BYTES, bytes.length)));
+      if (!sendUploadFrame({ t: 'file_chunk', chat: up.chat, id: up.id, i, data })) {
+        failUpload(up, 'Not connected — reconnecting. Try again in a moment.');
+        return;
+      }
+      setAttachment((prev) =>
+        prev && prev.kind === 'chunked' && prev.id === up.id ? { ...prev, sent: i + 1 } : prev,
+      );
+    }
+
+    if (up.chunks > 0) await sleep(CHUNK_PACE_MS);
+    if (up.cancelled) return;
+    if (!sendUploadFrame({ t: 'file_end', chat: up.chat, id: up.id })) {
+      failUpload(up, 'Not connected — reconnecting. Try again in a moment.');
+      return;
+    }
+    if (up.cancelled) return;
+    if (up.timer) clearTimeout(up.timer);
+    up.timer = setTimeout(() => {
+      up.timer = null;
+      if (up.cancelled || uploadRef.current !== up) return;
+      failUpload(up, '文件传输超时：插件未确认收到（可能插件版本不支持分片传输）');
+    }, UPLOAD_TIMEOUT_MS);
+  };
+
+  /** Start a v2 transfer for a file that cannot go inline and fits 10 MB. */
+  const startChunkedUpload = (file: File, bytes: ArrayBuffer, mime: string) => {
+    const up: Upload = {
+      id: `file-${Date.now().toString(36)}-${uploadCounter++}`,
+      chat: activeRef.current,
+      name: file.name,
+      mime,
+      size: file.size,
+      bytes,
+      chunks: Math.ceil(file.size / CHUNK_BYTES),
+      sha256: '',
+      cancelled: false,
+      retried: false,
+      timer: null,
+    };
+    uploadRef.current = up;
+    setComposerError(null);
+    setAttachment({
+      kind: 'chunked',
+      id: up.id,
+      name: up.name,
+      mime: up.mime,
+      size: up.size,
+      chunks: up.chunks,
+      sent: 0,
+      status: 'uploading',
+    });
+    void runUpload(up);
   };
 
   useEffect(() => {
@@ -708,6 +934,44 @@ export default function App() {
           break;
         }
 
+        case 'file_ready': {
+          const id = asString(frame.id);
+          const up = uploadRef.current;
+          if (!up || up.id !== id) break;
+          if (up.timer) {
+            clearTimeout(up.timer);
+            up.timer = null;
+          }
+          uploadRef.current = null;
+          setComposerError(null);
+          setAttachment((prev) =>
+            prev && prev.kind === 'chunked' && prev.id === id
+              ? { ...prev, status: 'ready', ref: id, sent: prev.chunks }
+              : prev,
+          );
+          break;
+        }
+
+        case 'file_error': {
+          const id = asString(frame.id);
+          const up = uploadRef.current;
+          if (!up || up.id !== id) break;
+          if (up.timer) {
+            clearTimeout(up.timer);
+            up.timer = null;
+          }
+          const code = asString(frame.code) || 'E_STATE';
+          const detail = asString(frame.msg);
+          // §8.3: a checksum mismatch retries the whole file once, same id.
+          if (code === 'E_CHECKSUM' && !up.retried) {
+            up.retried = true;
+            void runUpload(up);
+            break;
+          }
+          failUpload(up, `文件传输失败：${code}${detail ? ` — ${detail}` : ''}`);
+          break;
+        }
+
         case 'resync': {
           flushNow();
           const rt = runtimeOf(chat);
@@ -805,6 +1069,7 @@ export default function App() {
     setActiveChat(id);
     activeRef.current = id;
     clientRef.current?.setActiveChat(id);
+    cancelUpload();
     setComposerError(null);
     setAttachment(null);
     maybeRequestHist(id);
@@ -817,9 +1082,16 @@ export default function App() {
     setActiveChat(id);
     activeRef.current = id;
     clientRef.current?.setActiveChat(id);
+    cancelUpload();
     setComposerError(null);
     setAttachment(null);
     maybeRequestHist(id);
+  };
+
+  const removeAttachment = () => {
+    cancelUpload();
+    setAttachment(null);
+    setComposerError(null);
   };
 
   const send = () => {
@@ -829,9 +1101,16 @@ export default function App() {
     const text = input.trim();
     const file = attachment;
     if (!text && !file) return;
+    // §8: a chunked file may only be referenced once the plugin staged it.
+    if (file && file.kind === 'chunked' && file.status !== 'ready') return;
 
     const frame: Frame = { t: 'msg', chat, text };
-    if (file) frame.files = [{ name: file.name, mime: file.mime, data: file.data }];
+    if (file) {
+      frame.files =
+        file.kind === 'inline'
+          ? [{ name: file.name, mime: file.mime, data: file.data }]
+          : [{ ref: file.ref ?? file.id }];
+    }
 
     const size = byteSize(frame);
     if (size > MAX_FRAME_BYTES) {
@@ -891,35 +1170,49 @@ export default function App() {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
+    // One attachment at a time: a new pick replaces (and cancels) the old one.
+    cancelUpload();
+    const mime = file.type || 'application/octet-stream';
     const reader = new FileReader();
     reader.onerror = () => setComposerError('Could not read that file.');
     reader.onload = () => {
-      const result = typeof reader.result === 'string' ? reader.result : '';
-      const comma = result.indexOf(',');
-      const data = comma >= 0 ? result.slice(comma + 1) : '';
-      if (!data) {
+      const buffer = reader.result;
+      if (!(buffer instanceof ArrayBuffer)) {
         setComposerError('Could not read that file.');
         return;
       }
-      const mime = file.type || 'application/octet-stream';
-      const frame: Frame = {
-        t: 'msg',
-        chat: activeRef.current,
-        text: input.trim(),
-        files: [{ name: file.name, mime, data }],
-      };
-      const size = byteSize(frame);
-      if (size > MAX_FRAME_BYTES) {
-        setComposerError(oversizeError(size));
+      // Small enough to possibly fit: keep the exact v1 inline rule (§5).
+      if (file.size <= INLINE_PROBE_BYTES) {
+        const data = base64Of(new Uint8Array(buffer));
+        if (!data) {
+          setComposerError('Could not read that file.');
+          return;
+        }
+        const probe: Frame = {
+          t: 'msg',
+          chat: activeRef.current,
+          text: input.trim(),
+          files: [{ name: file.name, mime, data }],
+        };
+        if (byteSize(probe) <= MAX_FRAME_BYTES) {
+          setComposerError(null);
+          setAttachment({ kind: 'inline', name: file.name, mime, data, size: file.size });
+          return;
+        }
+      }
+      if (file.size > MAX_FILE_BYTES) {
+        setAttachment(null);
+        setComposerError(`附件太大：单个附件上限 10MB，当前约 ${fmtKb(file.size)}`);
         return;
       }
-      setComposerError(null);
-      setAttachment({ name: file.name, mime, data, size: file.size });
+      startChunkedUpload(file, buffer, mime);
     };
-    reader.readAsDataURL(file);
+    reader.readAsArrayBuffer(file);
   };
 
-  const canSend = state === 'live' && (input.trim().length > 0 || attachment != null);
+  const uploadBlocked = attachment?.kind === 'chunked' && attachment.status !== 'ready';
+  const canSend =
+    state === 'live' && (input.trim().length > 0 || attachment != null) && !uploadBlocked;
 
   if (needsLogin) {
     return (
@@ -988,24 +1281,33 @@ export default function App() {
           {composerError ? <div className="composer-error">{composerError}</div> : null}
           {attachment ? (
             <div className="chips">
-              <span className="chip" title={`${attachment.name} (${fmtKb(attachment.size)})`}>
+              <span
+                className={`chip${attachment.kind === 'chunked' ? ` upload-${attachment.status}` : ''}`}
+                title={`${attachment.name} (${fmtKb(attachment.size)})`}
+              >
                 {attachment.name}
-                <button
-                  className="chip-x"
-                  aria-label="Remove attachment"
-                  onClick={() => setAttachment(null)}
-                >
+                {attachment.kind === 'chunked' && attachment.status === 'uploading' ? (
+                  <span className="chip-upload">
+                    <span className="chip-bar">
+                      <i style={{ width: `${uploadPercent(attachment)}%` }} />
+                    </span>
+                    <span className="chip-count">
+                      {attachment.sent}/{attachment.chunks}
+                    </span>
+                  </span>
+                ) : null}
+                <button className="chip-x" aria-label="Remove attachment" onClick={removeAttachment}>
                   x
                 </button>
               </span>
-              <span className="chip-note">sent with your next message</span>
+              <span className="chip-note">{chipNote(attachment)}</span>
             </div>
           ) : null}
           <div className="composer-row">
             <button
               className="attach"
               onClick={() => fileRef.current?.click()}
-              title="Attach a file (v1: whole message ≤ 256 KB)"
+              title="Attach a file (≤ 10 MB via chunked upload; message ≤ 256 KB)"
             >
               Attach
             </button>

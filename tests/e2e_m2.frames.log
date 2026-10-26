@@ -1,239 +1,333 @@
 {"t":"ready","agentOnline":true}
-{"t":"error","code":"E_AUTH","detail":"approval not pending for this agent","chat":"m2main","req_id":"bogus-req-12345","seq":53}
-{"t":"start","chat":"m2main","seq":54,"stream_type":"reasoning"}
-{"t":"evt","chat":"m2main","seq":55,"data":{"text":"The","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":56,"data":{"text":" user is asking me","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":57,"data":{"text":" to write a short","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":58,"data":{"text":" paragraph about the ocean","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":59,"data":{"text":", at least three","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":60,"data":{"text":" sentences long. They","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":61,"data":{"text":"'ve asked this multiple","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":62,"data":{"text":" times already.","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":63,"data":{"text":" I should just","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":64,"data":{"text":" do","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":65,"data":{"text":" it again, providing","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":66,"data":{"text":" a fresh paragraph that","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":67,"data":{"text":" meets the criteria.","stream_type":"reasoning"}}
-{"t":"end","chat":"m2main","seq":68,"stream_type":"reasoning"}
-{"t":"start","chat":"m2main","seq":69,"stream_type":"message"}
-{"t":"evt","chat":"m2main","seq":70,"data":{"text":"The ocean rolls","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":71,"data":{"text":" in with a rhythm","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":72,"data":{"text":" older than memory","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":73,"data":{"text":", each","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":74,"data":{"text":" wave breaking","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":75,"data":{"text":" and","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":76,"data":{"text":" rec","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":77,"data":{"text":"eding like a slow","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":78,"data":{"text":", patient","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":79,"data":{"text":" breath. Salt","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":80,"data":{"text":" air st","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":81,"data":{"text":"ings the skin","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":82,"data":{"text":" while","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":83,"data":{"text":" the horizon bl","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":84,"data":{"text":"urs where","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":85,"data":{"text":" water","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":86,"data":{"text":" meets sky, endless","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":87,"data":{"text":" and un","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":88,"data":{"text":"broken. Down","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":89,"data":{"text":" below, sunlight","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":90,"data":{"text":" fades into","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":91,"data":{"text":" cool","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":92,"data":{"text":" blue silence where","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":93,"data":{"text":" creatures","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":94,"data":{"text":" drift","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":95,"data":{"text":" and","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":96,"data":{"text":" glow in","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":97,"data":{"text":" the deep","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":98,"data":{"text":", untouched by","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":99,"data":{"text":" the world above.","stream_type":"message"}}
-{"t":"end","chat":"m2main","seq":100,"stream_type":"message"}
-{"t":"msg","chat":"m2main","parts":[{"type":"text","text":"The ocean rolls in with a rhythm older than memory, each wave breaking and receding like a slow, patient breath. Salt air stings the skin while the horizon blurs where water meets sky, endless and unbroken. Down below, sunlight fades into cool blue silence where creatures drift and glow in the deep, untouched by the world above."}],"seq":101}
+{"t":"error","code":"E_AUTH","detail":"approval not pending for this agent","chat":"m2main","req_id":"bogus-req-12345","seq":1}
+{"t":"start","chat":"m2main","seq":2,"stream_type":"reasoning"}
+{"t":"evt","chat":"m2main","seq":3,"data":{"text":"The","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":4,"data":{"text":" user is asking me","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":5,"data":{"text":" to write a short","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":6,"data":{"text":" paragraph about the ocean","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":7,"data":{"text":", at least three","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":8,"data":{"text":" sentences long. This","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":9,"data":{"text":" is the fourth time","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":10,"data":{"text":" they've made","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":11,"data":{"text":" this exact same request","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":12,"data":{"text":". They","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":13,"data":{"text":" may","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":14,"data":{"text":" be testing whether","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":15,"data":{"text":" I'll vary","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":16,"data":{"text":" my","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":17,"data":{"text":" response or","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":18,"data":{"text":" noticing","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":19,"data":{"text":" repetition","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":20,"data":{"text":". I should write","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":21,"data":{"text":" a fresh,","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":22,"data":{"text":" distinct","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":23,"data":{"text":" paragraph about","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":24,"data":{"text":" the ocean that meets","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":25,"data":{"text":" the requirements","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":26,"data":{"text":" (at least three","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":27,"data":{"text":" sentences).","stream_type":"reasoning"}}
+{"t":"end","chat":"m2main","seq":28,"stream_type":"reasoning"}
+{"t":"start","chat":"m2main","seq":29,"stream_type":"message"}
+{"t":"evt","chat":"m2main","seq":30,"data":{"text":"The ocean crashes","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":31,"data":{"text":" against the shore with","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":32,"data":{"text":" relent","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":33,"data":{"text":"less energy, foam","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":34,"data":{"text":" spraying","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":35,"data":{"text":" high","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":36,"data":{"text":" before","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":37,"data":{"text":" van","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":38,"data":{"text":"ishing back","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":39,"data":{"text":" into the swell","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":40,"data":{"text":". Miles","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":41,"data":{"text":" offshore","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":42,"data":{"text":", the water deep","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":43,"data":{"text":"ens to a color","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":44,"data":{"text":" no","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":45,"data":{"text":" painter","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":46,"data":{"text":" could fully","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":47,"data":{"text":" capture","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":48,"data":{"text":", shifting","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":49,"data":{"text":" from storm","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":50,"data":{"text":"-gray to transluc","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":51,"data":{"text":"ent turquoise","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":52,"data":{"text":" with the angle","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":53,"data":{"text":" of the sun.","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":54,"data":{"text":" Some","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":55,"data":{"text":"where beneath","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":56,"data":{"text":" that","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":57,"data":{"text":" surface, currents","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":58,"data":{"text":" carry","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":59,"data":{"text":" warmth","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":60,"data":{"text":" and cold","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":61,"data":{"text":" across continents, quietly","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":62,"data":{"text":" shaping the weather","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":63,"data":{"text":" and","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":64,"data":{"text":" the fate","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":65,"data":{"text":" of every sh","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":66,"data":{"text":"oreline.","stream_type":"message"}}
+{"t":"end","chat":"m2main","seq":67,"stream_type":"message"}
+{"t":"msg","chat":"m2main","parts":[{"type":"text","text":"The ocean crashes against the shore with relentless energy, foam spraying high before vanishing back into the swell. Miles offshore, the water deepens to a color no painter could fully capture, shifting from storm-gray to translucent turquoise with the angle of the sun. Somewhere beneath that surface, currents carry warmth and cold across continents, quietly shaping the weather and the fate of every shoreline."}],"seq":68}
 {"t":"ready","agentOnline":true}
-{"t":"hist","chat":"m2main","messages":[{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user wants a short paragraph about the ocean, at least three sentences long. This is a simple creative writing request. No tools needed. I'll write a paragraph about the ocean."},{"role":"assistant","text":"The ocean stretches beyond the horizon, a vast expanse of deep blue that covers most of our planet. Its waves carry ancient stories, rhythmic and unceasing, while beneath the surface lies a world of mystery teeming with life unseen by human eyes. Standing at its edge, you feel both small and connected, reminded of nature's quiet power and the calm it can bring to a restless mind."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me to write a short paragraph about the ocean, at least three sentences long. This is exactly the same request they just made, and I already fulfilled it. I should provide a fresh paragraph rather than repeating the exact same one, since they're asking again. Let me write something new about the ocean."},{"role":"assistant","text":"The ocean breathes with the planet, its tides pulled by the moon's quiet command. Salt hangs in the air, sharp and ancient, while sunlight fractures into shifting gold across the rolling surface. Even in its calmest moments, the sea holds an endless depth—a reminder that some mysteries are meant to be felt, not solved."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me again to write a short paragraph about the ocean, at least three sentences long. I already did this twice in the previous turns. Let me provide a fresh, different paragraph that meets the criteria."},{"role":"assistant","text":"The ocean is a world unto itself, vast and restless under an open sky. Waves roll in with a steady heartbeat, carrying salt spray and the scent of distant shores. Beneath the surface, coral reefs glow with color and life thrives in the crushing dark, hidden from view but pulsing with its own quiet energy."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me to write a short paragraph about the ocean, at least three sentences long. They've asked this multiple times already. I should just do it again, providing a fresh paragraph that meets the criteria."},{"role":"assistant","text":"The ocean rolls in with a rhythm older than memory, each wave breaking and receding like a slow, patient breath. Salt air stings the skin while the horizon blurs where water meets sky, endless and unbroken. Down below, sunlight fades into cool blue silence where creatures drift and glow in the deep, untouched by the world above."}],"seq":102}
-{"t":"hist","chat":"m2main","messages":[{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user wants a short paragraph about the ocean, at least three sentences long. This is a simple creative writing request. No tools needed. I'll write a paragraph about the ocean."},{"role":"assistant","text":"The ocean stretches beyond the horizon, a vast expanse of deep blue that covers most of our planet. Its waves carry ancient stories, rhythmic and unceasing, while beneath the surface lies a world of mystery teeming with life unseen by human eyes. Standing at its edge, you feel both small and connected, reminded of nature's quiet power and the calm it can bring to a restless mind."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me to write a short paragraph about the ocean, at least three sentences long. This is exactly the same request they just made, and I already fulfilled it. I should provide a fresh paragraph rather than repeating the exact same one, since they're asking again. Let me write something new about the ocean."},{"role":"assistant","text":"The ocean breathes with the planet, its tides pulled by the moon's quiet command. Salt hangs in the air, sharp and ancient, while sunlight fractures into shifting gold across the rolling surface. Even in its calmest moments, the sea holds an endless depth—a reminder that some mysteries are meant to be felt, not solved."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me again to write a short paragraph about the ocean, at least three sentences long. I already did this twice in the previous turns. Let me provide a fresh, different paragraph that meets the criteria."},{"role":"assistant","text":"The ocean is a world unto itself, vast and restless under an open sky. Waves roll in with a steady heartbeat, carrying salt spray and the scent of distant shores. Beneath the surface, coral reefs glow with color and life thrives in the crushing dark, hidden from view but pulsing with its own quiet energy."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me to write a short paragraph about the ocean, at least three sentences long. They've asked this multiple times already. I should just do it again, providing a fresh paragraph that meets the criteria."},{"role":"assistant","text":"The ocean rolls in with a rhythm older than memory, each wave breaking and receding like a slow, patient breath. Salt air stings the skin while the horizon blurs where water meets sky, endless and unbroken. Down below, sunlight fades into cool blue silence where creatures drift and glow in the deep, untouched by the world above."}],"seq":102}
-{"t":"start","chat":"m2file","seq":19,"stream_type":"reasoning"}
-{"t":"evt","chat":"m2file","seq":20,"data":{"text":"The user attached another note.","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2file","seq":21,"data":{"text":" I should read it and reply with one","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2file","seq":22,"data":{"text":" short sentence confirming I got it.","stream_type":"reasoning"}}
-{"t":"end","chat":"m2file","seq":23,"stream_type":"reasoning"}
-{"t":"msg","chat":"m2file","parts":[{"type":"text","text":"🔧 **read_file**\n```\n{\"file_path\": \"media/932f7175ae8343498207bbfa12e411aa_note.txt\"}\n```"}],"seq":24}
+{"t":"hist","chat":"m2main","messages":[{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user wants a short paragraph about the ocean, at least three sentences long. This is a simple creative writing request. No tools needed. I'll write a paragraph about the ocean."},{"role":"assistant","text":"The ocean stretches beyond the horizon, a vast expanse of deep blue that covers most of our planet. Its waves carry ancient stories, rhythmic and unceasing, while beneath the surface lies a world of mystery teeming with life unseen by human eyes. Standing at its edge, you feel both small and connected, reminded of nature's quiet power and the calm it can bring to a restless mind."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me to write a short paragraph about the ocean, at least three sentences long. This is exactly the same request they just made, and I already fulfilled it. I should provide a fresh paragraph rather than repeating the exact same one, since they're asking again. Let me write something new about the ocean."},{"role":"assistant","text":"The ocean breathes with the planet, its tides pulled by the moon's quiet command. Salt hangs in the air, sharp and ancient, while sunlight fractures into shifting gold across the rolling surface. Even in its calmest moments, the sea holds an endless depth—a reminder that some mysteries are meant to be felt, not solved."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me again to write a short paragraph about the ocean, at least three sentences long. I already did this twice in the previous turns. Let me provide a fresh, different paragraph that meets the criteria."},{"role":"assistant","text":"The ocean is a world unto itself, vast and restless under an open sky. Waves roll in with a steady heartbeat, carrying salt spray and the scent of distant shores. Beneath the surface, coral reefs glow with color and life thrives in the crushing dark, hidden from view but pulsing with its own quiet energy."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me to write a short paragraph about the ocean, at least three sentences long. They've asked this multiple times already. I should just do it again, providing a fresh paragraph that meets the criteria."},{"role":"assistant","text":"The ocean rolls in with a rhythm older than memory, each wave breaking and receding like a slow, patient breath. Salt air stings the skin while the horizon blurs where water meets sky, endless and unbroken. Down below, sunlight fades into cool blue silence where creatures drift and glow in the deep, untouched by the world above."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me to write a short paragraph about the ocean, at least three sentences long. This is the fourth time they've made this exact same request. They may be testing whether I'll vary my response or noticing repetition. I should write a fresh, distinct paragraph about the ocean that meets the requirements (at least three sentences)."},{"role":"assistant","text":"The ocean crashes against the shore with relentless energy, foam spraying high before vanishing back into the swell. Miles offshore, the water deepens to a color no painter could fully capture, shifting from storm-gray to translucent turquoise with the angle of the sun. Somewhere beneath that surface, currents carry warmth and cold across continents, quietly shaping the weather and the fate of every shoreline."}],"seq":69}
+{"t":"hist","chat":"m2main","messages":[{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user wants a short paragraph about the ocean, at least three sentences long. This is a simple creative writing request. No tools needed. I'll write a paragraph about the ocean."},{"role":"assistant","text":"The ocean stretches beyond the horizon, a vast expanse of deep blue that covers most of our planet. Its waves carry ancient stories, rhythmic and unceasing, while beneath the surface lies a world of mystery teeming with life unseen by human eyes. Standing at its edge, you feel both small and connected, reminded of nature's quiet power and the calm it can bring to a restless mind."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me to write a short paragraph about the ocean, at least three sentences long. This is exactly the same request they just made, and I already fulfilled it. I should provide a fresh paragraph rather than repeating the exact same one, since they're asking again. Let me write something new about the ocean."},{"role":"assistant","text":"The ocean breathes with the planet, its tides pulled by the moon's quiet command. Salt hangs in the air, sharp and ancient, while sunlight fractures into shifting gold across the rolling surface. Even in its calmest moments, the sea holds an endless depth—a reminder that some mysteries are meant to be felt, not solved."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me again to write a short paragraph about the ocean, at least three sentences long. I already did this twice in the previous turns. Let me provide a fresh, different paragraph that meets the criteria."},{"role":"assistant","text":"The ocean is a world unto itself, vast and restless under an open sky. Waves roll in with a steady heartbeat, carrying salt spray and the scent of distant shores. Beneath the surface, coral reefs glow with color and life thrives in the crushing dark, hidden from view but pulsing with its own quiet energy."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me to write a short paragraph about the ocean, at least three sentences long. They've asked this multiple times already. I should just do it again, providing a fresh paragraph that meets the criteria."},{"role":"assistant","text":"The ocean rolls in with a rhythm older than memory, each wave breaking and receding like a slow, patient breath. Salt air stings the skin while the horizon blurs where water meets sky, endless and unbroken. Down below, sunlight fades into cool blue silence where creatures drift and glow in the deep, untouched by the world above."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me to write a short paragraph about the ocean, at least three sentences long. This is the fourth time they've made this exact same request. They may be testing whether I'll vary my response or noticing repetition. I should write a fresh, distinct paragraph about the ocean that meets the requirements (at least three sentences)."},{"role":"assistant","text":"The ocean crashes against the shore with relentless energy, foam spraying high before vanishing back into the swell. Miles offshore, the water deepens to a color no painter could fully capture, shifting from storm-gray to translucent turquoise with the angle of the sun. Somewhere beneath that surface, currents carry warmth and cold across continents, quietly shaping the weather and the fate of every shoreline."}],"seq":69}
+{"t":"start","chat":"m2file","seq":1,"stream_type":"reasoning"}
+{"t":"evt","chat":"m2file","seq":2,"data":{"text":"The user attached another note.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":3,"data":{"text":" I should read it and reply with one","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":4,"data":{"text":" short sentence confirming I got it.","stream_type":"reasoning"}}
+{"t":"end","chat":"m2file","seq":5,"stream_type":"reasoning"}
+{"t":"msg","chat":"m2file","parts":[{"type":"text","text":"🔧 **read_file**\n```\n{\"file_path\": \"media/68f5eca03ffa44c49485555741534d3a_note.txt\"}\n```"}],"seq":6}
 {"t":"ready","agentOnline":true}
-{"t":"msg","chat":"m2file","parts":[{"type":"text","text":"✅ **read_file**:\n```\nhello attachment from e2e_m2\n```"}],"seq":25}
-{"t":"msg","chat":"m2file","parts":[{"type":"text","text":"✅ **read_file**:\n```\nhello attachment from e2e_m2\n```"}],"seq":25}
-{"t":"start","chat":"m2file","seq":26,"stream_type":"reasoning"}
-{"t":"start","chat":"m2file","seq":26,"stream_type":"reasoning"}
-{"t":"evt","chat":"m2file","seq":27,"data":{"text":"The note says \"hello attachment","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2file","seq":27,"data":{"text":"The note says \"hello attachment","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2file","seq":28,"data":{"text":" from e2e_m2\". I need to reply with one short sentence confirming","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2file","seq":28,"data":{"text":" from e2e_m2\". I need to reply with one short sentence confirming","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2file","seq":29,"data":{"text":" I got it.","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2file","seq":29,"data":{"text":" I got it.","stream_type":"reasoning"}}
-{"t":"end","chat":"m2file","seq":30,"stream_type":"reasoning"}
-{"t":"end","chat":"m2file","seq":30,"stream_type":"reasoning"}
-{"t":"start","chat":"m2file","seq":31,"stream_type":"message"}
-{"t":"start","chat":"m2file","seq":31,"stream_type":"message"}
-{"t":"evt","chat":"m2file","seq":32,"data":{"text":"Got it—your note says","stream_type":"message"}}
-{"t":"evt","chat":"m2file","seq":32,"data":{"text":"Got it—your note says","stream_type":"message"}}
-{"t":"evt","chat":"m2file","seq":33,"data":{"text":" \"hello attachment from e2e_m2.\"","stream_type":"message"}}
-{"t":"evt","chat":"m2file","seq":33,"data":{"text":" \"hello attachment from e2e_m2.\"","stream_type":"message"}}
-{"t":"end","chat":"m2file","seq":34,"stream_type":"message"}
-{"t":"msg","chat":"m2file","parts":[{"type":"text","text":"Got it—your note says \"hello attachment from e2e_m2.\""}],"seq":35}
-{"t":"end","chat":"m2file","seq":34,"stream_type":"message"}
-{"t":"msg","chat":"m2file","parts":[{"type":"text","text":"Got it—your note says \"hello attachment from e2e_m2.\""}],"seq":35}
-{"t":"start","chat":"m2resume","seq":91,"stream_type":"reasoning"}
-{"t":"start","chat":"m2resume","seq":91,"stream_type":"reasoning"}
-{"t":"evt","chat":"m2resume","seq":92,"data":{"text":"The user wants a numbered","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2resume","seq":92,"data":{"text":"The user wants a numbered","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2resume","seq":93,"data":{"text":" list of 10 tips for better","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2resume","seq":93,"data":{"text":" list of 10 tips for better","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2resume","seq":94,"data":{"text":" sleep, each tip being one full sentence. Let me craft 10 detailed","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2resume","seq":95,"data":{"text":", well-written tips, each as a single","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2resume","seq":96,"data":{"text":" complete sentence.","stream_type":"reasoning"}}
-{"t":"end","chat":"m2resume","seq":97,"stream_type":"reasoning"}
-{"t":"start","chat":"m2resume","seq":98,"stream_type":"message"}
-{"t":"evt","chat":"m2resume","seq":99,"data":{"text":"1. Maintain a consistent sleep","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":100,"data":{"text":" schedule by going to bed and waking up at the same time every day, even","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":101,"data":{"text":" on weekends, to regulate your body's","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":102,"data":{"text":" internal clock.\n2. Create a relaxing bedtime routine that","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":103,"data":{"text":" helps you unwind, such as reading a book, taking a warm bath, or","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":104,"data":{"text":" practicing gentle stretching, so your brain associates","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":105,"data":{"text":" these activities with sleep.\n3. Make","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":106,"data":{"text":" your bedroom environment conducive to rest by keeping","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":107,"data":{"text":" it cool, dark, and quiet,","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":108,"data":{"text":" and investing in a comfortable mattress and pillows","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":109,"data":{"text":" that support your preferred sleeping position.\n4","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":110,"data":{"text":". Limit exposure to screens and blue light","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":111,"data":{"text":" at least one hour before bed, since","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":112,"data":{"text":" the light emitted by phones, tablets,","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":113,"data":{"text":" and computers can suppress melatonin production and","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":114,"data":{"text":" delay sleep onset.\n5. Avoid caffeine and other stimulants in the late","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":115,"data":{"text":" afternoon and evening, as they can linger","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":116,"data":{"text":" in your system for several hours and interfere","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":117,"data":{"text":" with your ability to fall asleep.\n6","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":118,"data":{"text":". Get regular physical activity during the day","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":119,"data":{"text":", but try to finish vigorous workouts at","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":120,"data":{"text":" least three hours before bedtime so your body has time to wind down.\n7.","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":121,"data":{"text":" Be mindful of your meals and avoid heavy, spicy, or large meals close","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":122,"data":{"text":" to bedtime, while also limiting excessive fluid intake","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":123,"data":{"text":" to reduce nighttime awakenings.\n8.","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":124,"data":{"text":" If you cannot fall asleep after about twenty","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":125,"data":{"text":" minutes, get out of bed and do a quiet, low-light activity until you","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":126,"data":{"text":" feel sleepy, then return to bed","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":127,"data":{"text":" to strengthen the association between bed and sleep.\n","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":128,"data":{"text":"9. Manage stress and racing thoughts through","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":129,"data":{"text":" techniques like deep breathing, meditation, or","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":130,"data":{"text":" journaling before bed, since mental arousal","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":131,"data":{"text":" is one of the most common barriers to restful sleep.\n10. Reserve","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":132,"data":{"text":" your bed primarily for sleep and intimacy,","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":133,"data":{"text":" avoiding work, eating, or prolonged wake","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":134,"data":{"text":"fulness in bed, so that your brain","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":135,"data":{"text":" learns to associate it with rest rather than","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":136,"data":{"text":" activity.","stream_type":"message"}}
-{"t":"end","chat":"m2resume","seq":137,"stream_type":"message"}
-{"t":"msg","chat":"m2resume","parts":[{"type":"text","text":"1. Maintain a consistent sleep schedule by going to bed and waking up at the same time every day, even on weekends, to regulate your body's internal clock.\n2. Create a relaxing bedtime routine that helps you unwind, such as reading a book, taking a warm bath, or practicing gentle stretching, so your brain associates these activities with sleep.\n3. Make your bedroom environment conducive to rest by keeping it cool, dark, and quiet, and investing in a comfortable mattress and pillows that support your preferred sleeping position.\n4. Limit exposure to screens and blue light at least one hour before bed, since the light emitted by phones, tablets, and computers can suppress melatonin production and delay sleep onset.\n5. Avoid caffeine and other stimulants in the late afternoon and evening, as they can linger in your system for several hours and interfere with your ability to fall asleep.\n6. Get regular physical activity during the day, but try to finish vigorous workouts at least three hours before bedtime so your body has time to wind down.\n7. Be mindful of your meals and avoid heavy, spicy, or large meals close to bedtime, while also limiting excessive fluid intake to reduce nighttime awakenings.\n8. If you cannot fall asleep after about twenty minutes, get out of bed and do a quiet, low-light activity until you feel sleepy, then return to bed to strengthen the association between bed and sleep.\n9. Manage stress and racing thoughts through techniques like deep breathing, meditation, or journaling before bed, since mental arousal is one of the most common barriers to restful sleep.\n10. Reserve your bed primarily for sleep and intimacy, avoiding work, eating, or prolonged wakefulness in bed, so that your brain learns to associate it with rest rather than activity."}],"seq":138}
+{"t":"msg","chat":"m2file","parts":[{"type":"text","text":"✅ **read_file**:\n```\nhello attachment from e2e_m2\n```"}],"seq":7}
+{"t":"msg","chat":"m2file","parts":[{"type":"text","text":"✅ **read_file**:\n```\nhello attachment from e2e_m2\n```"}],"seq":7}
+{"t":"start","chat":"m2file","seq":8,"stream_type":"reasoning"}
+{"t":"start","chat":"m2file","seq":8,"stream_type":"reasoning"}
+{"t":"evt","chat":"m2file","seq":9,"data":{"text":"The note says \"hello attachment","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":9,"data":{"text":"The note says \"hello attachment","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":10,"data":{"text":" from e2e_m2\". I need to reply with one short sentence confirming","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":10,"data":{"text":" from e2e_m2\". I need to reply with one short sentence confirming","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":11,"data":{"text":" I got it.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":11,"data":{"text":" I got it.","stream_type":"reasoning"}}
+{"t":"end","chat":"m2file","seq":12,"stream_type":"reasoning"}
+{"t":"end","chat":"m2file","seq":12,"stream_type":"reasoning"}
+{"t":"start","chat":"m2file","seq":13,"stream_type":"message"}
+{"t":"evt","chat":"m2file","seq":14,"data":{"text":"Got it — I received your attached","stream_type":"message"}}
+{"t":"start","chat":"m2file","seq":13,"stream_type":"message"}
+{"t":"evt","chat":"m2file","seq":14,"data":{"text":"Got it — I received your attached","stream_type":"message"}}
+{"t":"evt","chat":"m2file","seq":15,"data":{"text":" note.","stream_type":"message"}}
+{"t":"evt","chat":"m2file","seq":15,"data":{"text":" note.","stream_type":"message"}}
+{"t":"end","chat":"m2file","seq":16,"stream_type":"message"}
+{"t":"msg","chat":"m2file","parts":[{"type":"text","text":"Got it — I received your attached note."}],"seq":17}
+{"t":"end","chat":"m2file","seq":16,"stream_type":"message"}
+{"t":"msg","chat":"m2file","parts":[{"type":"text","text":"Got it — I received your attached note."}],"seq":17}
+{"t":"start","chat":"m2resume","seq":1,"stream_type":"reasoning"}
+{"t":"evt","chat":"m2resume","seq":2,"data":{"text":"The user wants","stream_type":"reasoning"}}
+{"t":"start","chat":"m2resume","seq":1,"stream_type":"reasoning"}
+{"t":"evt","chat":"m2resume","seq":2,"data":{"text":"The user wants","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":3,"data":{"text":" a numbered list of 10 tips for better sleep, each","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":3,"data":{"text":" a numbered list of 10 tips for better sleep, each","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":4,"data":{"text":" tip one full sentence. Let me craft 10 detailed, well","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":5,"data":{"text":"-written tips.\n\n1","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":6,"data":{"text":". Maintain a consistent sleep schedule by going","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":7,"data":{"text":" to bed and waking up at the same time every day, including","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":8,"data":{"text":" weekends, to strengthen your body's internal circadian rhythm","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":9,"data":{"text":".\n2. Create a calming pre-bed","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":10,"data":{"text":"time routine that signals to","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":11,"data":{"text":" your brain it is time to wind down, such as","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":12,"data":{"text":" reading a book, taking a warm bath, or practicing gentle","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":13,"data":{"text":" stretching.\n3. Optimize your bedroom","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":14,"data":{"text":" environment by keeping it cool, dark, and quiet, and invest","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":15,"data":{"text":" in a comfortable","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":16,"data":{"text":" mattress and supportive pillows suited","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":17,"data":{"text":" to your sleeping position.\n4. Limit exposure","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":18,"data":{"text":" to blue light from phones, tablets, computers, and tele","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":19,"data":{"text":"visions for at least one hour before bed, since it suppress","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":20,"data":{"text":"es melatonin and delays sleep onset.\n5. Avoid caffeine, nicotine","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":21,"data":{"text":", and other stimulants in the late afternoon and evening because","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":22,"data":{"text":" they can linger in your system for hours and disrupt","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":23,"data":{"text":" your ability to fall asleep.\n6. Engage in","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":24,"data":{"text":" regular physical activity during the day, but finish","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":25,"data":{"text":" vigorous exercise at least three hours before bedtime so your","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":26,"data":{"text":" body has time to relax","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":27,"data":{"text":".\n7. Be mindful of","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":28,"data":{"text":" your evening meals by","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":29,"data":{"text":" avoiding heavy, spicy, or very","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":30,"data":{"text":" large dinners close to bedtime, and","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":31,"data":{"text":" limit excessive fluid intake to prevent","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":32,"data":{"text":" nighttime awakenings.\n8. If you","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":33,"data":{"text":" cannot fall asleep after about twenty minutes,","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":34,"data":{"text":" get out of bed and do a quiet, low-light activity until","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":35,"data":{"text":" you feel sleepy, then return to bed to reinforce the association","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":36,"data":{"text":" between bed and sleep.\n9. Manage","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":37,"data":{"text":" stress and racing thoughts through techniques such as","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":38,"data":{"text":" deep breathing, meditation, or journaling","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":39,"data":{"text":" before bed, since mental arousal is a","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":40,"data":{"text":" common barrier to restful sleep.\n10. Reserve your bed primarily","stream_type":"reasoning"}}
 {"t":"ready","agentOnline":true}
-{"t":"evt","chat":"m2resume","seq":94,"data":{"text":" sleep, each tip being one full sentence. Let me craft 10 detailed","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2resume","seq":94,"data":{"text":" sleep, each tip being one full sentence. Let me craft 10 detailed","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2resume","seq":95,"data":{"text":", well-written tips, each as a single","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2resume","seq":95,"data":{"text":", well-written tips, each as a single","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2resume","seq":96,"data":{"text":" complete sentence.","stream_type":"reasoning"}}
-{"t":"end","chat":"m2resume","seq":97,"stream_type":"reasoning"}
-{"t":"evt","chat":"m2resume","seq":96,"data":{"text":" complete sentence.","stream_type":"reasoning"}}
-{"t":"end","chat":"m2resume","seq":97,"stream_type":"reasoning"}
-{"t":"start","chat":"m2resume","seq":98,"stream_type":"message"}
-{"t":"start","chat":"m2resume","seq":98,"stream_type":"message"}
-{"t":"evt","chat":"m2resume","seq":99,"data":{"text":"1. Maintain a consistent sleep","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":99,"data":{"text":"1. Maintain a consistent sleep","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":100,"data":{"text":" schedule by going to bed and waking up at the same time every day, even","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":101,"data":{"text":" on weekends, to regulate your body's","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":102,"data":{"text":" internal clock.\n2. Create a relaxing bedtime routine that","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":103,"data":{"text":" helps you unwind, such as reading a book, taking a warm bath, or","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":104,"data":{"text":" practicing gentle stretching, so your brain associates","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":105,"data":{"text":" these activities with sleep.\n3. Make","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":106,"data":{"text":" your bedroom environment conducive to rest by keeping","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":107,"data":{"text":" it cool, dark, and quiet,","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":108,"data":{"text":" and investing in a comfortable mattress and pillows","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":109,"data":{"text":" that support your preferred sleeping position.\n4","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":100,"data":{"text":" schedule by going to bed and waking up at the same time every day, even","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":101,"data":{"text":" on weekends, to regulate your body's","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":102,"data":{"text":" internal clock.\n2. Create a relaxing bedtime routine that","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":103,"data":{"text":" helps you unwind, such as reading a book, taking a warm bath, or","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":104,"data":{"text":" practicing gentle stretching, so your brain associates","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":105,"data":{"text":" these activities with sleep.\n3. Make","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":106,"data":{"text":" your bedroom environment conducive to rest by keeping","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":107,"data":{"text":" it cool, dark, and quiet,","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":108,"data":{"text":" and investing in a comfortable mattress and pillows","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":109,"data":{"text":" that support your preferred sleeping position.\n4","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":110,"data":{"text":". Limit exposure to screens and blue light","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":111,"data":{"text":" at least one hour before bed, since","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":112,"data":{"text":" the light emitted by phones, tablets,","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":113,"data":{"text":" and computers can suppress melatonin production and","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":114,"data":{"text":" delay sleep onset.\n5. Avoid caffeine and other stimulants in the late","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":115,"data":{"text":" afternoon and evening, as they can linger","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":116,"data":{"text":" in your system for several hours and interfere","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":117,"data":{"text":" with your ability to fall asleep.\n6","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":118,"data":{"text":". Get regular physical activity during the day","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":119,"data":{"text":", but try to finish vigorous workouts at","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":120,"data":{"text":" least three hours before bedtime so your body has time to wind down.\n7.","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":121,"data":{"text":" Be mindful of your meals and avoid heavy, spicy, or large meals close","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":122,"data":{"text":" to bedtime, while also limiting excessive fluid intake","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":123,"data":{"text":" to reduce nighttime awakenings.\n8.","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":124,"data":{"text":" If you cannot fall asleep after about twenty","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":125,"data":{"text":" minutes, get out of bed and do a quiet, low-light activity until you","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":126,"data":{"text":" feel sleepy, then return to bed","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":127,"data":{"text":" to strengthen the association between bed and sleep.\n","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":128,"data":{"text":"9. Manage stress and racing thoughts through","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":110,"data":{"text":". Limit exposure to screens and blue light","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":111,"data":{"text":" at least one hour before bed, since","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":112,"data":{"text":" the light emitted by phones, tablets,","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":113,"data":{"text":" and computers can suppress melatonin production and","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":114,"data":{"text":" delay sleep onset.\n5. Avoid caffeine and other stimulants in the late","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":115,"data":{"text":" afternoon and evening, as they can linger","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":116,"data":{"text":" in your system for several hours and interfere","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":117,"data":{"text":" with your ability to fall asleep.\n6","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":118,"data":{"text":". Get regular physical activity during the day","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":119,"data":{"text":", but try to finish vigorous workouts at","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":120,"data":{"text":" least three hours before bedtime so your body has time to wind down.\n7.","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":121,"data":{"text":" Be mindful of your meals and avoid heavy, spicy, or large meals close","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":122,"data":{"text":" to bedtime, while also limiting excessive fluid intake","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":123,"data":{"text":" to reduce nighttime awakenings.\n8.","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":124,"data":{"text":" If you cannot fall asleep after about twenty","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":125,"data":{"text":" minutes, get out of bed and do a quiet, low-light activity until you","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":126,"data":{"text":" feel sleepy, then return to bed","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":127,"data":{"text":" to strengthen the association between bed and sleep.\n","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":128,"data":{"text":"9. Manage stress and racing thoughts through","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":129,"data":{"text":" techniques like deep breathing, meditation, or","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":130,"data":{"text":" journaling before bed, since mental arousal","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":131,"data":{"text":" is one of the most common barriers to restful sleep.\n10. Reserve","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":132,"data":{"text":" your bed primarily for sleep and intimacy,","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":133,"data":{"text":" avoiding work, eating, or prolonged wake","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":134,"data":{"text":"fulness in bed, so that your brain","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":135,"data":{"text":" learns to associate it with rest rather than","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":136,"data":{"text":" activity.","stream_type":"message"}}
-{"t":"end","chat":"m2resume","seq":137,"stream_type":"message"}
-{"t":"msg","chat":"m2resume","parts":[{"type":"text","text":"1. Maintain a consistent sleep schedule by going to bed and waking up at the same time every day, even on weekends, to regulate your body's internal clock.\n2. Create a relaxing bedtime routine that helps you unwind, such as reading a book, taking a warm bath, or practicing gentle stretching, so your brain associates these activities with sleep.\n3. Make your bedroom environment conducive to rest by keeping it cool, dark, and quiet, and investing in a comfortable mattress and pillows that support your preferred sleeping position.\n4. Limit exposure to screens and blue light at least one hour before bed, since the light emitted by phones, tablets, and computers can suppress melatonin production and delay sleep onset.\n5. Avoid caffeine and other stimulants in the late afternoon and evening, as they can linger in your system for several hours and interfere with your ability to fall asleep.\n6. Get regular physical activity during the day, but try to finish vigorous workouts at least three hours before bedtime so your body has time to wind down.\n7. Be mindful of your meals and avoid heavy, spicy, or large meals close to bedtime, while also limiting excessive fluid intake to reduce nighttime awakenings.\n8. If you cannot fall asleep after about twenty minutes, get out of bed and do a quiet, low-light activity until you feel sleepy, then return to bed to strengthen the association between bed and sleep.\n9. Manage stress and racing thoughts through techniques like deep breathing, meditation, or journaling before bed, since mental arousal is one of the most common barriers to restful sleep.\n10. Reserve your bed primarily for sleep and intimacy, avoiding work, eating, or prolonged wakefulness in bed, so that your brain learns to associate it with rest rather than activity."}],"seq":138}
-{"t":"evt","chat":"m2resume","seq":129,"data":{"text":" techniques like deep breathing, meditation, or","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":130,"data":{"text":" journaling before bed, since mental arousal","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":131,"data":{"text":" is one of the most common barriers to restful sleep.\n10. Reserve","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":132,"data":{"text":" your bed primarily for sleep and intimacy,","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":133,"data":{"text":" avoiding work, eating, or prolonged wake","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":134,"data":{"text":"fulness in bed, so that your brain","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":135,"data":{"text":" learns to associate it with rest rather than","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":136,"data":{"text":" activity.","stream_type":"message"}}
-{"t":"end","chat":"m2resume","seq":137,"stream_type":"message"}
-{"t":"msg","chat":"m2resume","parts":[{"type":"text","text":"1. Maintain a consistent sleep schedule by going to bed and waking up at the same time every day, even on weekends, to regulate your body's internal clock.\n2. Create a relaxing bedtime routine that helps you unwind, such as reading a book, taking a warm bath, or practicing gentle stretching, so your brain associates these activities with sleep.\n3. Make your bedroom environment conducive to rest by keeping it cool, dark, and quiet, and investing in a comfortable mattress and pillows that support your preferred sleeping position.\n4. Limit exposure to screens and blue light at least one hour before bed, since the light emitted by phones, tablets, and computers can suppress melatonin production and delay sleep onset.\n5. Avoid caffeine and other stimulants in the late afternoon and evening, as they can linger in your system for several hours and interfere with your ability to fall asleep.\n6. Get regular physical activity during the day, but try to finish vigorous workouts at least three hours before bedtime so your body has time to wind down.\n7. Be mindful of your meals and avoid heavy, spicy, or large meals close to bedtime, while also limiting excessive fluid intake to reduce nighttime awakenings.\n8. If you cannot fall asleep after about twenty minutes, get out of bed and do a quiet, low-light activity until you feel sleepy, then return to bed to strengthen the association between bed and sleep.\n9. Manage stress and racing thoughts through techniques like deep breathing, meditation, or journaling before bed, since mental arousal is one of the most common barriers to restful sleep.\n10. Reserve your bed primarily for sleep and intimacy, avoiding work, eating, or prolonged wakefulness in bed, so that your brain learns to associate it with rest rather than activity."}],"seq":138}
-{"t":"start","chat":"m2appr","seq":18,"stream_type":"reasoning"}
-{"t":"evt","chat":"m2appr","seq":19,"data":{"text":"The user is asking","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2appr","seq":20,"data":{"text":" me to run the same command again. Let me do that.","stream_type":"reasoning"}}
-{"t":"end","chat":"m2appr","seq":21,"stream_type":"reasoning"}
-{"t":"msg","chat":"m2appr","parts":[{"type":"text","text":"🔧 **execute_shell_command**\n```\n{\"command\": \"echo m2-approval-probe\"}\n```"}],"seq":22}
-{"t":"msg","chat":"m2appr","parts":[{"type":"text","text":"✅ **execute_shell_command**:\n```\nm2-approval-probe\n```"}],"seq":23}
-{"t":"start","chat":"m2appr","seq":24,"stream_type":"reasoning"}
-{"t":"evt","chat":"m2appr","seq":25,"data":{"text":"The command printed \"m2","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2appr","seq":26,"data":{"text":"-approval-probe\". I'll report that.","stream_type":"reasoning"}}
-{"t":"end","chat":"m2appr","seq":27,"stream_type":"reasoning"}
-{"t":"start","chat":"m2appr","seq":28,"stream_type":"message"}
-{"t":"evt","chat":"m2appr","seq":29,"data":{"text":"The command printed:","stream_type":"message"}}
-{"t":"evt","chat":"m2appr","seq":30,"data":{"text":" `m2-approval-probe`","stream_type":"message"}}
-{"t":"end","chat":"m2appr","seq":31,"stream_type":"message"}
-{"t":"msg","chat":"m2appr","parts":[{"type":"text","text":"The command printed: `m2-approval-probe`"}],"seq":32}
+{"t":"evt","chat":"m2resume","seq":4,"data":{"text":" tip one full sentence. Let me craft 10 detailed, well","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":5,"data":{"text":"-written tips.\n\n1","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":6,"data":{"text":". Maintain a consistent sleep schedule by going","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":7,"data":{"text":" to bed and waking up at the same time every day, including","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":8,"data":{"text":" weekends, to strengthen your body's internal circadian rhythm","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":9,"data":{"text":".\n2. Create a calming pre-bed","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":10,"data":{"text":"time routine that signals to","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":11,"data":{"text":" your brain it is time to wind down, such as","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":12,"data":{"text":" reading a book, taking a warm bath, or practicing gentle","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":13,"data":{"text":" stretching.\n3. Optimize your bedroom","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":4,"data":{"text":" tip one full sentence. Let me craft 10 detailed, well","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":5,"data":{"text":"-written tips.\n\n1","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":6,"data":{"text":". Maintain a consistent sleep schedule by going","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":7,"data":{"text":" to bed and waking up at the same time every day, including","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":8,"data":{"text":" weekends, to strengthen your body's internal circadian rhythm","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":9,"data":{"text":".\n2. Create a calming pre-bed","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":10,"data":{"text":"time routine that signals to","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":11,"data":{"text":" your brain it is time to wind down, such as","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":12,"data":{"text":" reading a book, taking a warm bath, or practicing gentle","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":13,"data":{"text":" stretching.\n3. Optimize your bedroom","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":14,"data":{"text":" environment by keeping it cool, dark, and quiet, and invest","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":15,"data":{"text":" in a comfortable","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":16,"data":{"text":" mattress and supportive pillows suited","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":17,"data":{"text":" to your sleeping position.\n4. Limit exposure","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":18,"data":{"text":" to blue light from phones, tablets, computers, and tele","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":19,"data":{"text":"visions for at least one hour before bed, since it suppress","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":20,"data":{"text":"es melatonin and delays sleep onset.\n5. Avoid caffeine, nicotine","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":21,"data":{"text":", and other stimulants in the late afternoon and evening because","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":22,"data":{"text":" they can linger in your system for hours and disrupt","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":23,"data":{"text":" your ability to fall asleep.\n6. Engage in","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":24,"data":{"text":" regular physical activity during the day, but finish","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":25,"data":{"text":" vigorous exercise at least three hours before bedtime so your","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":26,"data":{"text":" body has time to relax","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":27,"data":{"text":".\n7. Be mindful of","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":28,"data":{"text":" your evening meals by","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":29,"data":{"text":" avoiding heavy, spicy, or very","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":30,"data":{"text":" large dinners close to bedtime, and","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":31,"data":{"text":" limit excessive fluid intake to prevent","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":32,"data":{"text":" nighttime awakenings.\n8. If you","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":33,"data":{"text":" cannot fall asleep after about twenty minutes,","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":34,"data":{"text":" get out of bed and do a quiet, low-light activity until","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":35,"data":{"text":" you feel sleepy, then return to bed to reinforce the association","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":36,"data":{"text":" between bed and sleep.\n9. Manage","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":37,"data":{"text":" stress and racing thoughts through techniques such as","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":14,"data":{"text":" environment by keeping it cool, dark, and quiet, and invest","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":15,"data":{"text":" in a comfortable","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":16,"data":{"text":" mattress and supportive pillows suited","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":17,"data":{"text":" to your sleeping position.\n4. Limit exposure","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":18,"data":{"text":" to blue light from phones, tablets, computers, and tele","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":19,"data":{"text":"visions for at least one hour before bed, since it suppress","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":20,"data":{"text":"es melatonin and delays sleep onset.\n5. Avoid caffeine, nicotine","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":21,"data":{"text":", and other stimulants in the late afternoon and evening because","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":22,"data":{"text":" they can linger in your system for hours and disrupt","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":23,"data":{"text":" your ability to fall asleep.\n6. Engage in","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":24,"data":{"text":" regular physical activity during the day, but finish","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":25,"data":{"text":" vigorous exercise at least three hours before bedtime so your","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":26,"data":{"text":" body has time to relax","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":27,"data":{"text":".\n7. Be mindful of","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":28,"data":{"text":" your evening meals by","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":29,"data":{"text":" avoiding heavy, spicy, or very","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":30,"data":{"text":" large dinners close to bedtime, and","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":31,"data":{"text":" limit excessive fluid intake to prevent","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":32,"data":{"text":" nighttime awakenings.\n8. If you","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":33,"data":{"text":" cannot fall asleep after about twenty minutes,","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":34,"data":{"text":" get out of bed and do a quiet, low-light activity until","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":35,"data":{"text":" you feel sleepy, then return to bed to reinforce the association","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":36,"data":{"text":" between bed and sleep.\n9. Manage","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":37,"data":{"text":" stress and racing thoughts through techniques such as","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":38,"data":{"text":" deep breathing, meditation, or journaling","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":39,"data":{"text":" before bed, since mental arousal is a","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":40,"data":{"text":" common barrier to restful sleep.\n10. Reserve your bed primarily","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":38,"data":{"text":" deep breathing, meditation, or journaling","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":39,"data":{"text":" before bed, since mental arousal is a","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":40,"data":{"text":" common barrier to restful sleep.\n10. Reserve your bed primarily","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":41,"data":{"text":" for sleep and intimacy, avoiding work,","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":41,"data":{"text":" for sleep and intimacy, avoiding work,","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":42,"data":{"text":" eating, or prolonged wakefulness in bed, so your","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":42,"data":{"text":" eating, or prolonged wakefulness in bed, so your","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":43,"data":{"text":" brain learns to associate it with rest rather","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":43,"data":{"text":" brain learns to associate it with rest rather","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":44,"data":{"text":" than activity.\n\nEach is","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":44,"data":{"text":" than activity.\n\nEach is","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":45,"data":{"text":" one full sentence. Good.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":45,"data":{"text":" one full sentence. Good.","stream_type":"reasoning"}}
+{"t":"end","chat":"m2resume","seq":46,"stream_type":"reasoning"}
+{"t":"end","chat":"m2resume","seq":46,"stream_type":"reasoning"}
+{"t":"start","chat":"m2resume","seq":47,"stream_type":"message"}
+{"t":"start","chat":"m2resume","seq":47,"stream_type":"message"}
+{"t":"evt","chat":"m2resume","seq":48,"data":{"text":"1","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":48,"data":{"text":"1","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":49,"data":{"text":". Maintain a consistent sleep schedule by going","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":49,"data":{"text":". Maintain a consistent sleep schedule by going","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":50,"data":{"text":" to bed and waking up at the same time every day, including weekends,","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":50,"data":{"text":" to bed and waking up at the same time every day, including weekends,","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":51,"data":{"text":" to strengthen your body's internal circadian rhythm","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":51,"data":{"text":" to strengthen your body's internal circadian rhythm","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":52,"data":{"text":".\n\n2. Create a calming pre-bedtime routine that signals to your brain it","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":52,"data":{"text":".\n\n2. Create a calming pre-bedtime routine that signals to your brain it","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":53,"data":{"text":" is time to wind down, such as reading a book, taking a warm bath","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":53,"data":{"text":" is time to wind down, such as reading a book, taking a warm bath","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":54,"data":{"text":", or practicing gentle stretching.\n\n3.","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":54,"data":{"text":", or practicing gentle stretching.\n\n3.","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":55,"data":{"text":" Optimize your bedroom environment by keeping it cool, dark, and quiet, and","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":55,"data":{"text":" Optimize your bedroom environment by keeping it cool, dark, and quiet, and","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":56,"data":{"text":" invest in a comfortable mattress and supportive pillows","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":56,"data":{"text":" invest in a comfortable mattress and supportive pillows","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":57,"data":{"text":" suited to your preferred sleeping position.\n\n4. Limit exposure","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":57,"data":{"text":" suited to your preferred sleeping position.\n\n4. Limit exposure","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":58,"data":{"text":" to blue light from phones, tablets, computers","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":58,"data":{"text":" to blue light from phones, tablets, computers","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":59,"data":{"text":", and televisions for at least one hour before bed, since it suppresses","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":59,"data":{"text":", and televisions for at least one hour before bed, since it suppresses","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":60,"data":{"text":" melatonin production and delays sleep onset.\n\n5. Avoid","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":60,"data":{"text":" melatonin production and delays sleep onset.\n\n5. Avoid","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":61,"data":{"text":" caffeine, nicotine, and other stimul","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":61,"data":{"text":" caffeine, nicotine, and other stimul","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":62,"data":{"text":"ants in the late afternoon and evening because","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":62,"data":{"text":"ants in the late afternoon and evening because","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":63,"data":{"text":" they can linger in your system for hours","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":63,"data":{"text":" they can linger in your system for hours","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":64,"data":{"text":" and disrupt your ability to fall asleep.\n\n","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":64,"data":{"text":" and disrupt your ability to fall asleep.\n\n","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":65,"data":{"text":"6. Engage in regular physical activity","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":65,"data":{"text":"6. Engage in regular physical activity","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":66,"data":{"text":" during the day, but finish vigorous exercise","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":66,"data":{"text":" during the day, but finish vigorous exercise","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":67,"data":{"text":" at least three hours before bedtime so your","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":67,"data":{"text":" at least three hours before bedtime so your","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":68,"data":{"text":" body has ample time to relax.\n\n7. Be mindful","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":68,"data":{"text":" body has ample time to relax.\n\n7. Be mindful","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":69,"data":{"text":" of your evening meals by avoiding heavy,","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":69,"data":{"text":" of your evening meals by avoiding heavy,","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":70,"data":{"text":" spicy, or very large dinners close","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":70,"data":{"text":" spicy, or very large dinners close","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":71,"data":{"text":" to bedtime, and limit excessive fluid intake","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":71,"data":{"text":" to bedtime, and limit excessive fluid intake","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":72,"data":{"text":" to prevent nighttime awakenings.\n\n8. If","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":73,"data":{"text":" you cannot fall asleep after about twenty minutes","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":72,"data":{"text":" to prevent nighttime awakenings.\n\n8. If","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":73,"data":{"text":" you cannot fall asleep after about twenty minutes","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":74,"data":{"text":", get out of bed and do a quiet, low-light activity until you feel","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":74,"data":{"text":", get out of bed and do a quiet, low-light activity until you feel","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":75,"data":{"text":" sleepy, then return to bed to reinforce","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":75,"data":{"text":" sleepy, then return to bed to reinforce","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":76,"data":{"text":" the association between bed and sleep.\n\n9","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":76,"data":{"text":" the association between bed and sleep.\n\n9","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":77,"data":{"text":". Manage stress and racing thoughts through techniques","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":77,"data":{"text":". Manage stress and racing thoughts through techniques","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":78,"data":{"text":" such as deep breathing, meditation, or","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":78,"data":{"text":" such as deep breathing, meditation, or","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":79,"data":{"text":" journaling before bed, since mental arousal is one of the most common","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":79,"data":{"text":" journaling before bed, since mental arousal is one of the most common","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":80,"data":{"text":" barriers to restful sleep.\n\n10","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":80,"data":{"text":" barriers to restful sleep.\n\n10","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":81,"data":{"text":". Reserve your bed primarily for sleep and","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":81,"data":{"text":". Reserve your bed primarily for sleep and","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":82,"data":{"text":" intimacy, avoiding work, eating, or prolonged wakefulness in bed, so your","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":82,"data":{"text":" intimacy, avoiding work, eating, or prolonged wakefulness in bed, so your","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":83,"data":{"text":" brain learns to associate it with rest rather than activity.","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":83,"data":{"text":" brain learns to associate it with rest rather than activity.","stream_type":"message"}}
+{"t":"end","chat":"m2resume","seq":84,"stream_type":"message"}
+{"t":"msg","chat":"m2resume","parts":[{"type":"text","text":"1. Maintain a consistent sleep schedule by going to bed and waking up at the same time every day, including weekends, to strengthen your body's internal circadian rhythm.\n\n2. Create a calming pre-bedtime routine that signals to your brain it is time to wind down, such as reading a book, taking a warm bath, or practicing gentle stretching.\n\n3. Optimize your bedroom environment by keeping it cool, dark, and quiet, and invest in a comfortable mattress and supportive pillows suited to your preferred sleeping position.\n\n4. Limit exposure to blue light from phones, tablets, computers, and televisions for at least one hour before bed, since it suppresses melatonin production and delays sleep onset.\n\n5. Avoid caffeine, nicotine, and other stimulants in the late afternoon and evening because they can linger in your system for hours and disrupt your ability to fall asleep.\n\n6. Engage in regular physical activity during the day, but finish vigorous exercise at least three hours before bedtime so your body has ample time to relax.\n\n7. Be mindful of your evening meals by avoiding heavy, spicy, or very large dinners close to bedtime, and limit excessive fluid intake to prevent nighttime awakenings.\n\n8. If you cannot fall asleep after about twenty minutes, get out of bed and do a quiet, low-light activity until you feel sleepy, then return to bed to reinforce the association between bed and sleep.\n\n9. Manage stress and racing thoughts through techniques such as deep breathing, meditation, or journaling before bed, since mental arousal is one of the most common barriers to restful sleep.\n\n10. Reserve your bed primarily for sleep and intimacy, avoiding work, eating, or prolonged wakefulness in bed, so your brain learns to associate it with rest rather than activity."}],"seq":85}
+{"t":"end","chat":"m2resume","seq":84,"stream_type":"message"}
+{"t":"msg","chat":"m2resume","parts":[{"type":"text","text":"1. Maintain a consistent sleep schedule by going to bed and waking up at the same time every day, including weekends, to strengthen your body's internal circadian rhythm.\n\n2. Create a calming pre-bedtime routine that signals to your brain it is time to wind down, such as reading a book, taking a warm bath, or practicing gentle stretching.\n\n3. Optimize your bedroom environment by keeping it cool, dark, and quiet, and invest in a comfortable mattress and supportive pillows suited to your preferred sleeping position.\n\n4. Limit exposure to blue light from phones, tablets, computers, and televisions for at least one hour before bed, since it suppresses melatonin production and delays sleep onset.\n\n5. Avoid caffeine, nicotine, and other stimulants in the late afternoon and evening because they can linger in your system for hours and disrupt your ability to fall asleep.\n\n6. Engage in regular physical activity during the day, but finish vigorous exercise at least three hours before bedtime so your body has ample time to relax.\n\n7. Be mindful of your evening meals by avoiding heavy, spicy, or very large dinners close to bedtime, and limit excessive fluid intake to prevent nighttime awakenings.\n\n8. If you cannot fall asleep after about twenty minutes, get out of bed and do a quiet, low-light activity until you feel sleepy, then return to bed to reinforce the association between bed and sleep.\n\n9. Manage stress and racing thoughts through techniques such as deep breathing, meditation, or journaling before bed, since mental arousal is one of the most common barriers to restful sleep.\n\n10. Reserve your bed primarily for sleep and intimacy, avoiding work, eating, or prolonged wakefulness in bed, so your brain learns to associate it with rest rather than activity."}],"seq":85}
+{"t":"start","chat":"m2appr","seq":1,"stream_type":"reasoning"}
+{"t":"evt","chat":"m2appr","seq":2,"data":{"text":"The user is asking me to","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":3,"data":{"text":" run the same command again. Let me do that.","stream_type":"reasoning"}}
+{"t":"end","chat":"m2appr","seq":4,"stream_type":"reasoning"}
+{"t":"msg","chat":"m2appr","parts":[{"type":"text","text":"🔧 **execute_shell_command**\n```\n{\"command\": \"echo m2-approval-probe\"}\n```"}],"seq":5}
+{"t":"msg","chat":"m2appr","parts":[{"type":"text","text":"✅ **execute_shell_command**:\n```\nm2-approval-probe\n```"}],"seq":6}
+{"t":"start","chat":"m2appr","seq":7,"stream_type":"reasoning"}
+{"t":"evt","chat":"m2appr","seq":8,"data":{"text":"The command printed \"m2","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":9,"data":{"text":"-approval-probe\". I'll report","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":10,"data":{"text":" that.","stream_type":"reasoning"}}
+{"t":"end","chat":"m2appr","seq":11,"stream_type":"reasoning"}
+{"t":"start","chat":"m2appr","seq":12,"stream_type":"reasoning"}
+{"t":"evt","chat":"m2appr","seq":13,"data":{"text":"The command printed \"m2","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":14,"data":{"text":"-approval-probe\". I'll report that.","stream_type":"reasoning"}}
+{"t":"end","chat":"m2appr","seq":15,"stream_type":"reasoning"}
+{"t":"start","chat":"m2appr","seq":16,"stream_type":"reasoning"}
+{"t":"evt","chat":"m2appr","seq":17,"data":{"text":"The command printed \"m2","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":18,"data":{"text":"-approval-probe\". I'll report that.","stream_type":"reasoning"}}
+{"t":"end","chat":"m2appr","seq":19,"stream_type":"reasoning"}
+{"t":"start","chat":"m2appr","seq":20,"stream_type":"message"}
+{"t":"evt","chat":"m2appr","seq":21,"data":{"text":"The command","stream_type":"message"}}
+{"t":"evt","chat":"m2appr","seq":22,"data":{"text":" printed:\n\n```\nm2-approval-probe\n```","stream_type":"message"}}
+{"t":"end","chat":"m2appr","seq":23,"stream_type":"message"}
+{"t":"msg","chat":"m2appr","parts":[{"type":"text","text":"The command printed:\n\n```\nm2-approval-probe\n```"}],"seq":24}

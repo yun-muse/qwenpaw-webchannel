@@ -1,4 +1,4 @@
-"""WebChannel frame builders/parser -- protocol/frames.md v1.
+"""WebChannel frame builders/parser -- protocol/frames.md v1 (+ v2 files).
 
 Pure stdlib only. Frame builders return plain dicts ready for
 ``json.dumps``; the relay forwards them verbatim.
@@ -11,20 +11,42 @@ loader, so imports fall back to absolute form.
 import json
 
 try:  # package-relative (tests, ``python -m plugin...``)
-    from .util import RingBuffer, SeqCounter, StreamDiffer
+    from .util import (
+        CHUNK_RAW_BYTES,
+        MAX_FILE_BYTES,
+        TRANSFER_TTL_S,
+        FileTransfers,
+        RingBuffer,
+        SeqCounter,
+        StreamDiffer,
+    )
 except ImportError:  # loaded as a top-level module by the plugin loader
-    from util import RingBuffer, SeqCounter, StreamDiffer
+    from util import (
+        CHUNK_RAW_BYTES,
+        MAX_FILE_BYTES,
+        TRANSFER_TTL_S,
+        FileTransfers,
+        RingBuffer,
+        SeqCounter,
+        StreamDiffer,
+    )
 
 __all__ = [
+    "CHUNK_RAW_BYTES",
+    "FileTransfers",
+    "MAX_FILE_BYTES",
     "MAX_FRAME_BYTES",
     "RingBuffer",
     "SeqCounter",
     "StreamDiffer",
+    "TRANSFER_TTL_S",
     "approval_frame",
     "check_size",
     "end_frame",
     "error_frame",
     "evt_frame",
+    "file_error_frame",
+    "file_ready_frame",
     "hist_frame",
     "msg_frame",
     "parse_inbound",
@@ -144,6 +166,32 @@ def hist_frame(chat, messages, more=False, seq=None):
     frame = {"t": "hist", "chat": chat, "messages": messages}
     if more:
         frame["more"] = True
+    if seq is not None:
+        frame["seq"] = seq
+    return frame
+
+
+def file_ready_frame(chat, transfer_id, seq=None):
+    """Chunked upload staged: ``{t:"file_ready", chat, id}`` (+``seq``).
+
+    Sent after ``file_end`` once the sha256 and size verified. The client may
+    then reference the file as ``{ref: <id>}`` in a ``msg.files[]`` entry.
+    """
+    frame = {"t": "file_ready", "chat": chat, "id": transfer_id}
+    if seq is not None:
+        frame["seq"] = seq
+    return frame
+
+
+def file_error_frame(chat, transfer_id, code, msg="", seq=None):
+    """Chunked upload failed: ``{t:"file_error", chat, id, code, msg?}``.
+
+    *code* is ``E_CHECKSUM`` / ``E_TOOBIG`` / ``E_STATE``; *msg* is a short
+    human-readable explanation and is omitted when empty.
+    """
+    frame = {"t": "file_error", "chat": chat, "id": transfer_id, "code": code}
+    if msg:
+        frame["msg"] = msg
     if seq is not None:
         frame["seq"] = seq
     return frame

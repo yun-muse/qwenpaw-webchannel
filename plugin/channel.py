@@ -5,12 +5,16 @@ Dials the relay as an agent, turns inbound ``msg`` frames into the native queue
 payload QwenPaw's manager expects, and turns streaming hooks / send calls into
 ``start`` / ``evt`` / ``end`` / ``msg`` / ``approval`` frames. Inbound ``stop``,
 ``hist``, ``approve`` and ``deny`` are served through the local QwenPaw HTTP API
-(``chat/stop``, ``chats``, ``console/upload``, ``approval/*``).
+(``chat/stop``, ``chats``, ``console/upload``, ``approval/*``). Protocol v2 adds
+chunked uploads -- ``file_begin`` / ``file_chunk`` / ``file_end`` answered with
+``file_ready`` / ``file_error`` -- whose files are staged for ten minutes and
+then referenced as ``msg.files[].ref``.
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -36,6 +40,8 @@ try:  # package-relative (tests, ``python -m plugin...``)
         end_frame,
         error_frame,
         evt_frame,
+        file_error_frame,
+        file_ready_frame,
         hist_frame,
         msg_frame,
         resync_frame,
@@ -44,6 +50,7 @@ try:  # package-relative (tests, ``python -m plugin...``)
     from .relay_client import RelayClient
     from .util import (
         ANSWER_STREAM_TYPE,
+        FileTransfers,
         approval_owner_ok,
         decode_file_entry,
         hist_limit,
@@ -61,6 +68,8 @@ except ImportError:  # loaded as a top-level module by the plugin loader
         end_frame,
         error_frame,
         evt_frame,
+        file_error_frame,
+        file_ready_frame,
         hist_frame,
         msg_frame,
         resync_frame,
@@ -69,6 +78,7 @@ except ImportError:  # loaded as a top-level module by the plugin loader
     from relay_client import RelayClient
     from util import (
         ANSWER_STREAM_TYPE,
+        FileTransfers,
         approval_owner_ok,
         decode_file_entry,
         hist_limit,
@@ -89,6 +99,13 @@ SENDER_ID = "web-user"
 # Uploads (A4) can be up to the relay's 256 KB frame budget; give the local
 # API room to write them to the console media dir.
 _UPLOAD_TIMEOUT_S = 60.0
+
+# Short human-readable ``file_error.msg`` bodies, keyed by protocol code.
+_FILE_ERROR_MSG = {
+    "E_CHECKSUM": "file checksum mismatch; resend the file once",
+    "E_TOOBIG": "file exceeds the 10 MB limit",
+    "E_STATE": "chunk or end without a valid begin",
+}
 
 # Content-part fields copied into ``parts[]`` dicts (getattr-based, defensive).
 _PART_FIELDS = (
@@ -167,6 +184,8 @@ class WebChannel(BaseChannel):
         self._active_streams: set = set()
         # Web chat id -> ChatSpec.id, resolved once per chat (A2/A3).
         self._chat_ids: Dict[str, str] = {}
+        # Protocol v2 chunked uploads: in-progress assemblies + staged files.
+        self._files = FileTransfers()
 
     # -- construction / session mapping ---------------------------------
 
@@ -375,11 +394,18 @@ class WebChannel(BaseChannel):
             await self._handle_approval(kind, frame)
         elif kind == "stop":
             await self._handle_stop(frame)
+        elif kind == "file_begin":
+            await self._handle_file_begin(frame)
+        elif kind == "file_chunk":
+            await self._handle_file_chunk(frame)
+        elif kind == "file_end":
+            await self._handle_file_end(frame)
         else:
             logger.debug("webchannel: ignoring inbound frame t=%s", kind)
 
     async def _handle_msg(self, frame: Dict[str, Any]) -> None:
         chat = str(frame.get("chat") or "default")
+        self._purge_files(time.monotonic())
         text = frame.get("text")
         text = text if isinstance(text, str) else ""
 
@@ -389,7 +415,7 @@ class WebChannel(BaseChannel):
         files = frame.get("files")
         if isinstance(files, list):
             for entry in files:
-                part = await self._upload_file(chat, entry)
+                part = await self._resolve_file_entry(chat, entry)
                 if part is not None:
                     content_parts.append(part)
         if not content_parts:
@@ -414,15 +440,36 @@ class WebChannel(BaseChannel):
             return
         enqueue(native)
 
-    async def _upload_file(self, chat: str, entry: Any) -> Optional[FileContent]:
-        """Store one inbound ``files[]`` item via the console upload API (A4).
+    async def _resolve_file_entry(
+        self, chat: str, entry: Any,
+    ) -> Optional[FileContent]:
+        """Turn one ``msg.files[]`` item into a ``FileContent`` (A4 + v2 refs).
 
-        The console channel receives attachments as ``FileContent(file_url=…)``
-        pointing at an absolute path inside its media dir, and
-        ``POST /api/console/upload`` is what produces exactly that, so the
-        plugin reuses it instead of inventing a second storage location.
-        Returns None (after logging) for an undecodable or failed item; the
-        rest of the message still goes through.
+        ``{"ref": "<id>"}`` (no ``data``) consumes a file staged by a chunked
+        upload; everything else takes the v1 inline ``{name, mime, data}``
+        path. Refs are one-shot, so an unknown/expired/consumed one is logged
+        and the entry skipped.
+        """
+        ref = entry.get("ref") if isinstance(entry, dict) else None
+        if isinstance(ref, str) and ref and "data" not in entry:
+            taken = self._files.take(ref, time.monotonic())
+            if taken is None:
+                logger.warning(
+                    "webchannel: chat=%s referenced file id=%r but it is "
+                    "unknown, expired or already used; entry dropped",
+                    chat, ref,
+                )
+                return None
+            name, mime, data = taken
+            return await self._store_file(chat, name, mime, data)
+        return await self._upload_file(chat, entry)
+
+    async def _upload_file(self, chat: str, entry: Any) -> Optional[FileContent]:
+        """Store one inline inbound ``files[]`` item (A4).
+
+        Decodes ``{name, mime, base64 data}`` and hands the bytes to
+        ``_store_file``. Returns None (after logging) for an undecodable or
+        failed item; the rest of the message still goes through.
         """
         decoded = decode_file_entry(entry)
         if decoded is None:
@@ -431,7 +478,19 @@ class WebChannel(BaseChannel):
                 chat,
             )
             return None
-        name, mime, data = decoded
+        return await self._store_file(chat, *decoded)
+
+    async def _store_file(
+        self, chat: str, name: str, mime: str, data: bytes,
+    ) -> Optional[FileContent]:
+        """Upload raw *data* via the console API; the matching ``FileContent``.
+
+        The console channel receives attachments as ``FileContent(file_url=…)``
+        pointing at an absolute path inside its media dir, and
+        ``POST /api/console/upload`` is what produces exactly that, so the
+        plugin reuses it instead of inventing a second storage location.
+        Returns None (after logging) when the upload fails.
+        """
         try:
             async with httpx.AsyncClient(timeout=_UPLOAD_TIMEOUT_S) as client:
                 response = await client.post(
@@ -464,6 +523,105 @@ class WebChannel(BaseChannel):
         )
         return FileContent(
             type=ContentType.FILE, filename=name, file_url=str(url),
+        )
+
+    # -- protocol v2: chunked file transfer -----------------------------
+
+    def _purge_files(self, now: float) -> None:
+        """Drop transfers/staged files older than the TTL (log the former)."""
+        for tid in self._files.purge(now):
+            logger.warning(
+                "webchannel: dropped expired file transfer id=%s", tid,
+            )
+
+    @staticmethod
+    def _file_target(frame: Dict[str, Any]):
+        """``(chat, transfer_id)``; *transfer_id* is None when unusable.
+
+        Without a non-empty string ``id`` there is nothing to reply about, so
+        the caller only logs and drops the frame.
+        """
+        chat = str(frame.get("chat") or "default")
+        tid = frame.get("id")
+        if not (isinstance(tid, str) and tid):
+            return chat, None
+        return chat, tid
+
+    async def _file_error(
+        self, chat: str, tid: str, code: str,
+    ) -> None:
+        """Reply ``file_error`` for a rejected ``file_*`` step."""
+        detail = _FILE_ERROR_MSG.get(code, "")
+        await self._emit(
+            chat,
+            lambda seq: file_error_frame(chat, tid, code, detail, seq=seq),
+        )
+
+    async def _handle_file_begin(self, frame: Dict[str, Any]) -> None:
+        """``file_begin``: validate metadata and start assembling."""
+        now = time.monotonic()
+        self._purge_files(now)
+        chat, tid = self._file_target(frame)
+        if tid is None:
+            logger.warning(
+                "webchannel: file_begin without a usable id for chat=%s "
+                "ignored",
+                chat,
+            )
+            return
+        ok, code = self._files.begin(tid, frame, now)
+        if not ok:
+            logger.warning(
+                "webchannel: file_begin for chat=%s id=%s rejected: %s",
+                chat, tid, code,
+            )
+            await self._file_error(chat, tid, code)
+
+    async def _handle_file_chunk(self, frame: Dict[str, Any]) -> None:
+        """``file_chunk``: store one chunk (no reply on success)."""
+        now = time.monotonic()
+        self._purge_files(now)
+        chat, tid = self._file_target(frame)
+        if tid is None:
+            logger.warning(
+                "webchannel: file_chunk without a usable id for chat=%s "
+                "ignored",
+                chat,
+            )
+            return
+        ok, code = self._files.chunk(tid, frame.get("i"), frame.get("data"), now)
+        if not ok:
+            logger.warning(
+                "webchannel: file_chunk for chat=%s id=%s i=%s rejected: %s",
+                chat, tid, frame.get("i"), code,
+            )
+            await self._file_error(chat, tid, code)
+
+    async def _handle_file_end(self, frame: Dict[str, Any]) -> None:
+        """``file_end``: verify the file, then answer ``file_ready``."""
+        now = time.monotonic()
+        self._purge_files(now)
+        chat, tid = self._file_target(frame)
+        if tid is None:
+            logger.warning(
+                "webchannel: file_end without a usable id for chat=%s ignored",
+                chat,
+            )
+            return
+        ok, code, info = self._files.end(tid, now)
+        if not ok:
+            logger.warning(
+                "webchannel: file_end for chat=%s id=%s rejected: %s",
+                chat, tid, code,
+            )
+            await self._file_error(chat, tid, code)
+            return
+        logger.info(
+            "webchannel: chat=%s staged file %r id=%s (%d bytes)",
+            chat, info["name"], tid, info["size"],
+        )
+        await self._emit(
+            chat, lambda seq: file_ready_frame(chat, tid, seq=seq),
         )
 
     async def _handle_resume(self, frame: Dict[str, Any]) -> None:

@@ -53,6 +53,8 @@ One JSON object per WebSocket **text** message, UTF-8 encoded:
 | `msg` | `chat`, `seq?`, `parts[]` | complete message, tool result or attachment reference |
 | `approval` | `chat`, `req_id`, `tool`, `severity`, `summary` | approval request |
 | `resync` | `chat`, `reason?` | ring buffer miss; client must reload history |
+| `file_ready` | `chat`, `id`, `seq?` | **v2** chunked upload verified and staged; `files[]` may now use `{"ref": id}` |
+| `file_error` | `chat`, `id`, `code`, `msg?`, `seq?` | **v2** chunked upload failed; `code` ∈ `E_CHECKSUM` / `E_TOOBIG` / `E_STATE` |
 | `pong` | — | reserved; the relay answers `ping` locally in v1 |
 
 `parts[]` is a list of content parts. v1 defines `{"type":"text","text":...}` and
@@ -74,10 +76,16 @@ segment's `end` — an `end` for `reasoning` closes that segment only. Missing `
 | `approve` / `deny` | `chat`, `req_id` | resolve an approval |
 | `resume` | `chat`, `last_seq` | replay frames with `seq > last_seq` |
 | `hist` | `chat`, `before?`, `limit?` | request history (agent answers with `msg`/`resync` frames) |
+| `file_begin` | `chat`, `id`, `name`, `mime`, `size`, `chunks`, `sha256` | **v2** start a chunked upload; `chunks` is how many `file_chunk` frames follow |
+| `file_chunk` | `chat`, `id`, `i`, `data` | **v2** one chunk; `i` is 0-based, `data` is base64 of ≤96 KB raw bytes |
+| `file_end` | `chat`, `id` | **v2** client finished sending; agent answers `file_ready` or `file_error` |
 | `ping` | — | heartbeat, every 25 s |
 
 `approve`/`deny` MUST carry `req_id`; the container validates that it belongs to the given
 `chat`/session before acting (design §8), so a replayed or cross-session `req_id` is rejected.
+
+`msg.files[]` items are `{name, mime, data}` (v1 inline, base64 `data`) or, after a `file_ready`,
+`{"ref": "<id>"}` (v2) referring to a file staged by a chunked upload. See §8.
 
 ### 2.5 relay → browser
 
@@ -132,6 +140,7 @@ container                relay                   browser
 | limit | value | behaviour |
 |---|---|---|
 | frame size | **256 KB** (UTF-8 bytes of the serialized JSON) | sender gets `error{code:"E_TOOBIG"}`; frame is dropped |
+| file size | inline `msg.files[]` data stays bound by the **256 KB frame** rule; a **chunked** (v2, §8) file may be up to **10 MB** | declared or accumulated size above 10 MB → `file_error{code:"E_TOOBIG"}`; the transfer is dropped |
 | rate | **30 frames/s per tenant**, both directions combined | hosted relay may drop/close; `relay-node` local dev does not enforce |
 | offline buffer | 500 frames / 1 MB per tenant | oldest frames dropped first |
 | ring buffer | 400 frames per chat (container) | `resync` on miss |
@@ -140,8 +149,8 @@ container                relay                   browser
 **Files (v1).** Files travel as base64 inside `msg.files[]`, so the *whole frame* must stay
 ≤ 256 KB. Base64 inflates payloads by 4/3, leaving roughly **180 KB of raw file data** after JSON
 overhead. Any file that would push the frame over 256 KB **MUST be rejected with `E_TOOBIG`** in v1
-(the browser shows the error instead of sending). There is no chunked file frame in v1: separate
-`file` frames / chunked uploads are **v2**. The relay enforces the size limit; the container
+(the browser shows the error instead of sending). Separate `file` frames / chunked uploads are
+**v2** (§8): there a file may be up to 10 MB. The relay enforces the size limit; the container
 re-validates `msg` size.
 
 ## 6. Error codes
@@ -152,15 +161,93 @@ Error frame: `{"t":"error","code":"...","id":"<offending frame id, if any>"}`.
 |---|---|---|
 | `E_AUTH` | bad/expired agent token or client credential | container stops reconnecting and logs; browser redirects to login |
 | `E_BUSY` | a run is already active for this chat | client shows a notice; do not resend |
-| `E_TOOBIG` | frame exceeds 256 KB | send smaller message / reject file (v1); chunking is v2 |
+| `E_TOOBIG` | frame exceeds 256 KB | send smaller message / reject file (v1); use a chunked v2 upload (§8) for larger files |
 | `E_BADFRAME` | not JSON, not an object, missing/non-string `t`, binary message | drop frame; sender may fix and retry |
 | `E_RESYNC` | resume buffer miss | client reloads history |
 
 `E_AUTH` is enforced at the HTTP upgrade (401 before the socket opens), so it is normally not seen
-as a frame. `E_BADFRAME` is relay-local and never forwarded.
+as a frame. `E_BADFRAME` is relay-local and never forwarded. `E_CHECKSUM` and `E_STATE` (§8) are
+file-transfer codes and appear only in `file_error`, never in a generic `error` frame.
 
 ## 7. Versioning
 
 v1 is additive: new optional fields and new `t` values may appear without a version bump. A breaking
-change (for example the v2 chunked `file` frame) will be negotiated via a `v` field in `hello` and
-announced here.
+change (for example a different envelope) will be negotiated via a `v` field in `hello` and announced
+here.
+
+**v2 (chunked file transfer, §8) is additive — there is no negotiation.** It introduces only new
+`t` values (`file_begin`, `file_chunk`, `file_end`, `file_ready`, `file_error`) and the optional
+`{"ref": id}` form of `msg.files[]`, all covered by the "unknown `t` values SHOULD be ignored"
+rule in §1. An endpoint that does not know these frames simply ignores them — which means a client
+that sent `file_begin` to a **v1 container** gets no `file_ready` and must **time out** (then fall
+back to a v1 inline `msg` if the file is small enough, or report the failure); it must not wait
+forever. The same applies in reverse: a v1 browser ignores `file_ready`/`file_error` frames.
+
+## 8. Protocol v2 — chunked file transfer
+
+Lets the browser send one file of up to **10 MB** without ever exceeding the 256 KB frame limit.
+The relay needs **no changes**: chunks are ordinary frames it forwards verbatim.
+
+### 8.1 Wire format
+
+Client → agent:
+
+```json
+{"t":"file_begin","chat":"…","id":"u1","name":"report.pdf","mime":"application/pdf",
+ "size":1834210,"chunks":20,"sha256":"<64 lowercase hex chars>"}
+{"t":"file_chunk","chat":"…","id":"u1","i":0,"data":"<base64 of ≤96 KB raw bytes>"}
+{"t":"file_chunk","chat":"…","id":"u1","i":1,"data":"…"}
+{"t":"file_end","chat":"…","id":"u1"}
+```
+
+- **96 KB of raw bytes** per `file_chunk` (base64 in `data`, ~128 KB on the wire — inside the frame
+  limit). `i` is 0-based and must be `< chunks`.
+- `size` is the exact raw byte length, `chunks` the number of `file_chunk` frames that will follow,
+  `sha256` the lowercase hex digest of the raw file bytes.
+- Max file size **10 MB**, enforced by both ends (`size` at `file_begin`, and the accumulated chunk
+  bytes during the transfer).
+- Chunks may arrive out of order; the container assembles by index. A repeated index overwrites
+  (last wins) — the sha256 check is the arbiter.
+
+Agent → client:
+
+```json
+{"t":"file_ready","chat":"…","id":"u1"}
+{"t":"file_error","chat":"…","id":"u1","code":"E_CHECKSUM","msg":"file checksum mismatch…"}
+```
+
+| `code` | meaning |
+|---|---|
+| `E_CHECKSUM` | sha256 or size mismatch — including missing chunks seen at `file_end` |
+| `E_TOOBIG` | declared `size` or the accumulated chunk bytes exceed 10 MB |
+| `E_STATE` | `file_chunk`/`file_end` without `file_begin`, expired or already-dropped transfer, malformed frame (bad index, invalid base64, missing/invalid `id`) |
+
+A successful `file_begin` / `file_chunk` produces **no reply**; only `file_end` is acknowledged
+(with exactly one `file_ready` or `file_error`). After `file_ready` the client sends the actual
+message and references the staged file:
+
+```json
+{"t":"msg","chat":"…","text":"see attached","files":[{"ref":"u1"}]}
+```
+
+`files[]` entries may mix v1 inline `{name, mime, data}` items and v2 `{ref}` items.
+
+### 8.2 Staging
+
+- Refs are **one-shot**: the container consumes the staged file when the `msg` uses it. A second
+  `msg` with the same ref is dropped (the container logs it and skips that entry).
+- Staged files and half-received transfers **expire after 10 minutes**. An expired transfer is
+  treated as absent (`E_STATE` on a late chunk/end, silent skip on a late ref).
+- A new `file_begin` with an id that already exists restarts that transfer from scratch; that is
+  what makes a whole-file retry with the same id legal.
+
+### 8.3 Pacing and retries
+
+The hosted relay enforces **30 frames/s per tenant** (§5) in both directions combined, so a client
+sending chunks must **pace** them (~40 ms between `file_chunk` frames, and leave room for other
+traffic). A 10 MB file is ~107 chunks, i.e. roughly 4–5 s of paced sends.
+
+On `file_error{code:"E_CHECKSUM"}` the client **retries the whole file once** — same `id`, a new
+`file_begin` followed by every chunk again. A second failure is reported to the user; there is no
+per-chunk retransmit protocol.
+

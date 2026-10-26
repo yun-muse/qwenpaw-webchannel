@@ -6,6 +6,7 @@ it can be unit-tested without the host application installed.
 
 import base64
 import binascii
+import hashlib
 from collections import deque
 
 # Protocol §2.4 ``hist`` frames carry at most the last 50 messages unless the
@@ -284,3 +285,234 @@ def approval_owner_ok(pending, agent_id):
         if owner:
             return str(owner) == str(agent_id)
     return True
+
+
+# ---------------------------------------------------------------------------
+# M5 / protocol v2 -- chunked file transfer
+# ---------------------------------------------------------------------------
+
+# One file may be far larger than the 256 KB frame budget when it travels in
+# ``file_chunk`` frames; both ends enforce this ceiling.
+MAX_FILE_BYTES = 10 * 1024 * 1024
+# Raw bytes per ``file_chunk`` (96 KB -> ~128 KB of base64, well inside a
+# 256 KB frame).
+CHUNK_RAW_BYTES = 96 * 1024
+# Staged files and half-received transfers expire after 10 minutes.
+TRANSFER_TTL_S = 600
+
+_DEFAULT_FILE_NAME = "file"
+_DEFAULT_FILE_MIME = "application/octet-stream"
+
+
+def _is_int(value):
+    """True for a JSON integer; booleans do not count as sizes/counters."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _file_name(meta):
+    """``meta.name`` defaulted exactly like ``decode_file_entry``."""
+    name = meta.get("name")
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    return _DEFAULT_FILE_NAME
+
+
+def _file_mime(meta):
+    """``meta.mime`` defaulted exactly like ``decode_file_entry``."""
+    mime = meta.get("mime")
+    if not (isinstance(mime, str) and mime.strip()):
+        return _DEFAULT_FILE_MIME
+    return mime
+
+
+def _decode_chunk(raw):
+    """Raw bytes of one base64 ``file_chunk.data``; None when invalid."""
+    if not isinstance(raw, str):
+        return None
+    compact = "".join(raw.split())
+    try:
+        return base64.b64decode(compact, validate=True)
+    except (binascii.Error, ValueError):
+        return None
+
+
+class FileTransfers:
+    """In-progress chunked uploads plus the staged (consumable) files.
+
+    Protocol v2 (``protocol/frames.md`` section 8): the browser splits a file
+    into ``file_chunk`` frames after a ``file_begin`` and closes with a
+    ``file_end``; the assembled bytes are verified against the declared size
+    and sha256, then staged until a ``msg.files[].ref`` consumes them.
+
+    Every method takes an explicit *now* (float seconds, ``time.monotonic()``
+    in the channel) so tests control expiry. Expiry is lazy: ``begin`` /
+    ``chunk`` / ``end`` / ``take`` treat an entry older than
+    ``TRANSFER_TTL_S`` as absent, and ``purge`` reclaims them eagerly.
+
+    Memory is bounded: the received chunks of one transfer never hold more
+    than ``MAX_FILE_BYTES`` (a ``file_chunk`` that would cross the limit is
+    rejected with ``E_TOOBIG`` and drops the transfer).
+    """
+
+    def __init__(self):
+        # id -> {name, mime, size, chunks, sha256, started, received, bytes}
+        self._active = {}
+        # id -> {name, mime, data, staged}
+        self._staged = {}
+
+    def begin(self, tid, meta, now):
+        """Start (or restart) the transfer *tid* from a ``file_begin`` frame.
+
+        Returns ``(ok, code)``: ``(True, None)`` when the declared metadata is
+        usable, else ``(False, "E_TOOBIG" | "E_STATE")``. A ``begin`` for an
+        id that already exists -- in progress or staged -- discards that state
+        and starts over, which is what makes the client's whole-file retry
+        (same id, after ``E_CHECKSUM``) work.
+        """
+        if not isinstance(meta, dict):
+            meta = {}
+
+        size = meta.get("size")
+        if _is_int(size) and size > MAX_FILE_BYTES:
+            return False, "E_TOOBIG"
+        if not (_is_int(size) and 0 < size <= MAX_FILE_BYTES):
+            return False, "E_STATE"
+
+        chunks = meta.get("chunks")
+        if not (_is_int(chunks) and chunks >= 1):
+            return False, "E_STATE"
+
+        digest = meta.get("sha256")
+        if not (
+            isinstance(digest, str)
+            and len(digest) == 64
+            and all(char in "0123456789abcdefABCDEF" for char in digest)
+        ):
+            return False, "E_STATE"
+
+        self._active.pop(tid, None)
+        self._staged.pop(tid, None)
+        self._active[tid] = {
+            "name": _file_name(meta),
+            "mime": _file_mime(meta),
+            "size": size,
+            "chunks": chunks,
+            "sha256": digest.lower(),
+            "started": now,
+            "received": {},
+            "bytes": 0,
+        }
+        return True, None
+
+    def chunk(self, tid, index, data_b64, now):
+        """Store one ``file_chunk`` payload; ``(ok, code)``.
+
+        A bad index or payload drops the whole transfer (``E_STATE``): the
+        stream can no longer be trusted. A repeated index overwrites (last
+        wins), so identical retransmits are harmless -- the final sha256 check
+        in ``end`` is the arbiter.
+        """
+        entry = self._live(tid, now)
+        if entry is None:
+            return False, "E_STATE"
+
+        if not _is_int(index) or not 0 <= index < entry["chunks"]:
+            del self._active[tid]
+            return False, "E_STATE"
+
+        data = _decode_chunk(data_b64)
+        if data is None:
+            del self._active[tid]
+            return False, "E_STATE"
+
+        received = entry["received"]
+        total = entry["bytes"] - len(received.get(index, b"")) + len(data)
+        if total > MAX_FILE_BYTES:
+            del self._active[tid]
+            return False, "E_TOOBIG"
+
+        received[index] = data
+        entry["bytes"] = total
+        return True, None
+
+    def end(self, tid, now):
+        """Assemble and verify *tid*; ``(ok, code, info)``.
+
+        Any missing chunk, an assembled length that differs from the declared
+        ``size``, or a sha256 mismatch is ``(False, "E_CHECKSUM", None)`` and
+        drops the transfer. Success moves the bytes to the staged store and
+        returns ``(True, None, {"name", "mime", "size"})``.
+        """
+        entry = self._live(tid, now)
+        if entry is None:
+            return False, "E_STATE", None
+
+        received = entry["received"]
+        parts = []
+        for index in range(entry["chunks"]):
+            part = received.get(index)
+            if part is None:
+                del self._active[tid]
+                return False, "E_CHECKSUM", None
+            parts.append(part)
+
+        data = b"".join(parts)
+        if len(data) != entry["size"]:
+            del self._active[tid]
+            return False, "E_CHECKSUM", None
+        if hashlib.sha256(data).hexdigest() != entry["sha256"]:
+            del self._active[tid]
+            return False, "E_CHECKSUM", None
+
+        del self._active[tid]
+        self._staged[tid] = {
+            "name": entry["name"],
+            "mime": entry["mime"],
+            "data": data,
+            "staged": now,
+        }
+        return True, None, {
+            "name": entry["name"],
+            "mime": entry["mime"],
+            "size": len(data),
+        }
+
+    def take(self, tid, now):
+        """Pop a staged file -- ``(name, mime, data)``, or None.
+
+        One-shot by design: a ``ref`` may be used by exactly one ``msg``.
+        Unknown, already-consumed and expired ids all return None.
+        """
+        staged = self._staged.pop(tid, None)
+        if staged is None:
+            return None
+        if now - staged["staged"] > TRANSFER_TTL_S:
+            return None
+        return staged["name"], staged["mime"], staged["data"]
+
+    def purge(self, now):
+        """Drop every entry older than the TTL; returns dropped active ids.
+
+        Staged ids are dropped silently (nothing is waiting on them); the
+        returned in-progress ids are logged by the channel so an abandoned
+        upload is visible.
+        """
+        dropped = []
+        for tid, entry in list(self._active.items()):
+            if now - entry["started"] > TRANSFER_TTL_S:
+                del self._active[tid]
+                dropped.append(tid)
+        for tid, staged in list(self._staged.items()):
+            if now - staged["staged"] > TRANSFER_TTL_S:
+                del self._staged[tid]
+        return dropped
+
+    def _live(self, tid, now):
+        """The in-progress entry for *tid* unless unknown or expired."""
+        entry = self._active.get(tid)
+        if entry is None:
+            return None
+        if now - entry["started"] > TRANSFER_TTL_S:
+            del self._active[tid]
+            return None
+        return entry
