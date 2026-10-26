@@ -1,0 +1,5 @@
+{"t":"ready","agentOnline":true}
+{"t":"start","chat":"m1","seq":1}
+{"t":"evt","chat":"m1","seq":2,"data":{"text":"Hello there"}}
+{"t":"evt","chat":"m1","seq":3,"data":{"text":"!"}}
+{"t":"end","chat":"m1","seq":4}

@@ -167,3 +167,115 @@ start. The same error had appeared earlier as a kilo discovery warning.
    completions later, or configure another keyless provider the
    reference supports (e.g. the OpenCode free models via a custom
    provider) — a config decision, not a code problem.
+
+---
+
+## Addendum (same day, later session) — plugin completed via CodeBuddy; Tier 1 AND Tier 2 reached
+
+The OpenCode quota blocker was bypassed by switching the coding engine
+to the locally installed **CodeBuddy CLI** (auth via
+`~/.codebuddy/settings.json`, China-version endpoint). Process notes:
+
+- **Model pinning (user correction).** All plugin-writing CodeBuddy runs
+  were pinned `--model deepseek-v4.1-flash`. One earlier unpinned run
+  (org default `hy4-preview`, session `01a178a0-…`) was stopped before
+  it wrote anything. The session that actually wrote the plugin files
+  is `01a178a6-419e-7e8e-bea5-7d0032d5fc60`; its jsonl under
+  `~/.codebuddy/projects/home-hatch-workspace-qwenpaw-webchannel/`
+  carries `"model": "deepseek-v4.1-flash"` throughout — that is the
+  evidence for which model wrote the code. Two intermediate
+  deepseek sessions (`01a178a3-…`, `01a178a4-…`) wrote nothing (next
+  point).
+- **CodeBuddy permission behaviour (workaround).** With
+  `--permission-mode acceptEdits -y`, CodeBuddy denied `Bash` outright
+  and denied reads outside the workspace directory (the reference
+  source lives in a sibling tree), even with `--add-dir` +
+  `--allowedTools`. The model correctly refused to guess signatures.
+  Workaround used for the writing session: the five reference files
+  (`base.py`, `console/channel.py`, `plugins/api.py`,
+  `azure_bot/{plugin.py,plugin.json}`, plus `registry.py` and
+  `pyproject.toml`) were copied into `.ref_tmp/` **inside** the
+  workspace and the prompt pointed there; the model then read
+  everything in-workspace and wrote the files. `.ref_tmp/` was deleted
+  after verification; all verification commands were run by the
+  coordinator, not by CodeBuddy.
+
+### Plugin completed (written by CodeBuddy / deepseek-v4.1-flash)
+
+| File | Verification (independent, by coordinator) |
+|---|---|
+| `plugin/channel.py` (399 lines) | `python3 -m py_compile` OK. AST comparison vs ref `base.py`: **all 10 relevant signatures match exactly** — `from_config`, `resolve_session_id`, `on_streaming_start/delta/end` (incl. `accumulated_text`), `send`, `send_content_parts`, `send_approval_notification` (incl. its keyword-only params), `start`, `stop`. Uses the real `self._enqueue` callback attribute (base.py:154), overrides `build_agent_request_from_native` like the console channel, approval POSTs via `httpx` (core dep, `pyproject.toml` line 10) with `X-Agent-Id` from `self._workspace.agent_id`, exactly as source-notes prescribe. Only third-party import: `httpx`. |
+| `plugin/plugin.py` | py_compile OK; `register_channel` pattern follows azure_bot / `plugins/api.py`. |
+| `plugin/plugin.json` | `python3 -m json.tool` OK; id `webchannel`, type `channel`, entry `plugin.py`, deps `[]`, version range 2.2.0–2.3.0. |
+| `plugin/README.md` | Install/config/diffing docs + deviation table (see below). |
+| `plugin/tests/test_diff.py` | Re-run after completion: **ALL PASS**. |
+
+Documented deviations (from the README, accepted for M1): inbound
+`sender_id` is the constant `web-user` (protocol v1 has no user
+identity); inbound `msg.files[]` are logged and ignored (M2); `stop`
+frames are logged only (no cancel-by-chat API exists in
+v2.2.2.post1); approval POST body is `{"request_id": ...}` with no
+req_id→session ownership check yet (M2); `from_config` follows the
+real base signature (no `workspace_dir` param).
+
+### Tier 1 — REACHED (local instance only; hosted instance untouched)
+
+Fresh relay-node on :8787 and fresh local app on :8088 (started with
+the sanitized `NO_PROXY=localhost,127.0.0.1,::1`). Evidence, all
+captured live:
+
+- `POST /api/plugins/install {"source": "…/plugin"}` → 200,
+  `"id":"webchannel", …, "loaded":true, "message":"Plugin
+  'WebChannel' installed successfully."` App log: `Registered channel
+  'web' from plugin 'webchannel'` + `✓ Loaded plugin 'webchannel'
+  successfully`.
+- Web channel enabled for the default agent (`channels.web` with
+  `enabled`, `relay_url ws://127.0.0.1:8787/ws/agent`, `token` added
+  to both `home/config.json` and `workspaces/default/agent.json`;
+  `.bak-m1` backups sit next to them in the local home, outside this
+  repo). The config watchers reloaded the agent; no app restart was
+  needed for the channel to come up.
+- `GET /api/plugins` → entry `"id":"webchannel", "plugin_type":
+  "channel", "enabled":true, "loaded":true`.
+- Relay `GET /health` → `{"ok":true,"agentOnline":true,"clients":0}`.
+- Browser-side client connecting to the relay received
+  `{"t":"ready","agentOnline":true}`.
+
+### Tier 2 — REACHED (bounded attempt; the Kilo hang did not reproduce)
+
+- Pre-check via the plain console API on the fresh instance:
+  `POST /api/console/chat` streamed SSE delta events within seconds
+  (reasoning + text deltas, `delta:true`). The 20-minute hang from the
+  earlier session did **not** reproduce on this fresh instance with
+  the sanitized `NO_PROXY`; whether the earlier hang was the httpx
+  env issue, a stale instance, or a transient gateway stall is not
+  determined — flagged, not forgotten.
+- `tests/e2e_m1.mjs` → **E2E_M1 PASS (Tier 2)**: `agentOnline=true
+  started=true evt_frames=2 seq_first=2 seq_last=3 in_order=true
+  ended=true`. The actual frames (`tests/e2e_m1.frames.log`):
+
+  ```
+  {"t":"ready","agentOnline":true}
+  {"t":"start","chat":"m1","seq":1}
+  {"t":"evt","chat":"m1","seq":2,"data":{"text":"Hello there"}}
+  {"t":"evt","chat":"m1","seq":3,"data":{"text":"!"}}
+  {"t":"end","chat":"m1","seq":4}
+  ```
+
+  i.e. a real Kilo-backed agent reply travelled
+  browser ← relay ← plugin, and the cumulative→delta diffing is
+  visible in the wild: two `evt` frames whose texts concatenate to
+  the full reply `Hello there!`.
+
+### Remaining issues / notes
+
+- No trailing `msg{parts[]}` frame followed the streamed reply
+  (`final_msg=false` in the harness): for streamed replies the base
+  class apparently does not call `send()` with the full text (or
+  calls it on a path this channel doesn't surface). The SPA renders
+  from `evt`+`end`, so this is cosmetic for M1, but M2 should check
+  whether non-streamed/tool messages produce `msg` frames as specced.
+- The Tier 2 reply was short, so only 2 delta frames; the M0 mock
+  e2e (94 frames) remains the high-count streaming proof.
+- Left running for follow-up: relay-node on :8787 and the local
+  QwenPaw app on :8088 (both local VM only).

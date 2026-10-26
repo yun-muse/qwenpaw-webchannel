@@ -1,0 +1,20 @@
+{
+  "id": "webchannel",
+  "name": "WebChannel",
+  "version": "0.1.0",
+  "type": "channel",
+  "description": "Self-hosted web frontend channel for QwenPaw. Connects to the WebChannel relay over WebSocket and streams replies per delta to the browser.",
+  "description_i18n": {
+    "zh-CN": "QwenPaw 自建 Web 前端通道。通过 WebSocket 连接 WebChannel relay，逐 delta 把回复推送到浏览器。",
+    "en-US": "Self-hosted web frontend channel for QwenPaw. Connects to the WebChannel relay over WebSocket and streams replies per delta to the browser."
+  },
+  "author": "QwenPaw WebChannel",
+  "entry": {
+    "backend": "plugin.py"
+  },
+  "dependencies": [],
+  "qwenpaw_version": {
+    "min": "2.2.0",
+    "max": "2.3.0"
+  }
+}
