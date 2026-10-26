@@ -1,0 +1,5 @@
+# Copy to .dev.vars for local `wrangler dev` (`.dev.vars` is gitignored).
+# These values are fake on purpose -- never reuse them anywhere real.
+AGENT_TOKEN=dev-agent-token
+LOGIN_PASSWORD=dev-login-password
+LOGIN_SECRET=dev-login-secret-change-me

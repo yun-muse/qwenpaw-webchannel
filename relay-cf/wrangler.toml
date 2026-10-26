@@ -1,0 +1,14 @@
+name = "qwenpaw-webchannel-relay"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+
+[vars]
+TENANT = "main"
+
+[[durable_objects.bindings]]
+name = "RELAY"
+class_name = "RelayDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RelayDO"]

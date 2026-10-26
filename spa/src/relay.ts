@@ -33,6 +33,14 @@ export interface Frame {
 
 export interface RelayOptions {
   url?: string;
+  /**
+   * Client token for the hosted relay, read fresh on every (re)connect — it
+   * can expire while the page is open. `null`/empty connects without one
+   * (local dev).
+   */
+  getToken?: () => string | null;
+  /** Connection-level `E_AUTH` (bad/expired token): the socket is gone for good. */
+  onAuthFailure?: () => void;
   /** Every frame the relay forwards (plus `ready` / `error`), verbatim. */
   onFrame?: (frame: Frame) => void;
   onState?: (state: ConnState, info: { agentOnline: boolean }) => void;
@@ -83,7 +91,7 @@ export class RelayClient {
     this.manualClose = false;
     this.setState(this.everOpen ? 'resuming' : 'connecting');
 
-    const ws = new WebSocket(this.url);
+    const ws = new WebSocket(this.connectUrl());
     this.ws = ws;
 
     ws.onopen = () => {
@@ -124,6 +132,17 @@ export class RelayClient {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false;
     this.ws.send(JSON.stringify(frame));
     return true;
+  }
+
+  /**
+   * The browser cannot set headers on the WS upgrade, so the client token
+   * rides as a query parameter. Fetched on every attempt: tokens expire.
+   */
+  private connectUrl(): string {
+    const token = this.opts.getToken?.();
+    if (!token) return this.url;
+    const sep = this.url.includes('?') ? '&' : '?';
+    return `${this.url}${sep}token=${encodeURIComponent(token)}`;
   }
 
   /** Resume the visible conversation only (protocol §4). */
@@ -203,6 +222,7 @@ export class RelayClient {
       this.stopHeartbeat();
       this.ws?.close();
       this.setState('idle');
+      this.opts.onAuthFailure?.();
       return false;
     }
     if (frame.code === 'E_RESYNC' && frame.chat) {

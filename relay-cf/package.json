@@ -1,0 +1,15 @@
+{
+  "name": "qwenpaw-webchannel-relay-cf",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cloudflare Worker + Durable Object relay for QwenPaw WebChannel",
+  "scripts": {
+    "dev": "wrangler dev --local --port 8788",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.0.0",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.0.0"
+  }
+}

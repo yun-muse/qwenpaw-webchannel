@@ -1,13 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ChangeEvent, KeyboardEvent } from 'react';
+import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { RelayClient } from './relay';
 import type { ConnState, ContentPart, Frame } from './relay';
+import { LOGIN_REQUIRED, RELAY_HTTP_URL, RELAY_WS_URL } from './config';
 import './App.css';
 
 /** protocol/frames.md §5 — UTF-8 bytes of the serialized JSON. */
 const MAX_FRAME_BYTES = 256 * 1024;
+
+/** Client token for the hosted relay, kept for the tab's lifetime. */
+const TOKEN_KEY = 'webchannel.token';
+
+function readToken(): string | null {
+  return sessionStorage.getItem(TOKEN_KEY);
+}
 
 type Role = 'user' | 'assistant';
 
@@ -256,6 +264,73 @@ function MessageView({
   );
 }
 
+/** Hosted-relay login gate — rendered instead of the chat UI until a token exists. */
+function LoginGate({ onSuccess }: { onSuccess: (token: string) => void }) {
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (busy) return;
+    if (!password) {
+      setError('Enter the relay password.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`${RELAY_HTTP_URL}/api/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      const body = (await res.json().catch(() => null)) as {
+        token?: unknown;
+        error?: unknown;
+      } | null;
+      if (!res.ok) {
+        const serverError = body && typeof body.error === 'string' ? body.error : '';
+        setError(serverError || `Login failed (${res.status}).`);
+        setBusy(false);
+        return;
+      }
+      const token = body && typeof body.token === 'string' ? body.token : '';
+      if (!token) {
+        setError('Login failed — the relay returned no token.');
+        setBusy(false);
+        return;
+      }
+      onSuccess(token);
+    } catch {
+      setError('Could not reach the relay. Try again.');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="login">
+      <form className="login-card" onSubmit={submit}>
+        <div className="login-brand">QwenPaw</div>
+        <p className="login-sub">Enter the relay password to connect.</p>
+        <input
+          type="password"
+          value={password}
+          autoFocus
+          autoComplete="current-password"
+          placeholder="Password"
+          onChange={(e) => setPassword(e.target.value)}
+          disabled={busy}
+        />
+        <button className="login-submit" type="submit" disabled={busy}>
+          {busy ? 'Signing in…' : 'Sign in'}
+        </button>
+        {error ? <div className="login-error">{error}</div> : null}
+      </form>
+    </div>
+  );
+}
+
 export default function App() {
   const [chatIds, setChatIds] = useState<string[]>(() => [newChatId()]);
   const [activeChat, setActiveChat] = useState<string>(() => chatIds[0]);
@@ -268,6 +343,7 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [state, setState] = useState<ConnState>('idle');
   const [agentOnline, setAgentOnline] = useState(false);
+  const [needsLogin, setNeedsLogin] = useState<boolean>(() => LOGIN_REQUIRED && !readToken());
 
   const clientRef = useRef<RelayClient | null>(null);
   const activeRef = useRef<string>(chatIds[0]);
@@ -348,6 +424,7 @@ export default function App() {
   }, [activeChat]);
 
   useEffect(() => {
+    if (needsLogin) return;
     let raf = 0;
     /** `<chat>|<field>` -> text not yet rendered (rAF coalescing) */
     const pending = new Map<
@@ -609,6 +686,14 @@ export default function App() {
     };
 
     const client = new RelayClient({
+      url: RELAY_WS_URL,
+      // Re-read on every attempt: the token can expire while the page is open.
+      getToken: () => (LOGIN_REQUIRED ? readToken() : null),
+      onAuthFailure: () => {
+        if (!LOGIN_REQUIRED) return;
+        sessionStorage.removeItem(TOKEN_KEY);
+        setNeedsLogin(true);
+      },
       onState: (next, info) => {
         setState(next);
         setAgentOnline(info.agentOnline);
@@ -634,7 +719,7 @@ export default function App() {
       clientRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- helpers only touch refs
-  }, []);
+  }, [needsLogin]);
 
   const messages = messagesByChat[activeChat] ?? [];
   const streaming = messages.some((m) => m.streaming);
@@ -777,6 +862,17 @@ export default function App() {
   };
 
   const canSend = state === 'live' && (input.trim().length > 0 || attachment != null);
+
+  if (needsLogin) {
+    return (
+      <LoginGate
+        onSuccess={(token) => {
+          sessionStorage.setItem(TOKEN_KEY, token);
+          setNeedsLogin(false);
+        }}
+      />
+    );
+  }
 
   return (
     <div className="app">
