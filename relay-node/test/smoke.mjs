@@ -1,0 +1,165 @@
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import net from 'node:net';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import WebSocket from 'ws';
+
+const PORT = 18787;
+const HOST = '127.0.0.1';
+const AGENT_URL = `ws://${HOST}:${PORT}/ws/agent`;
+const CLIENT_URL = `ws://${HOST}:${PORT}/ws/client`;
+const SERVER = join(dirname(fileURLToPath(import.meta.url)), '..', 'server.js');
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Use a raw TCP socket: Node's http/fetch honour HTTP_PROXY, which must not hijack localhost.
+function getHealth() {
+  return new Promise((resolve, reject) => {
+    const socket = net.connect({ host: HOST, port: PORT });
+    let data = '';
+    socket.setEncoding('utf8');
+    socket.setTimeout(500);
+    socket.on('connect', () => {
+      socket.write(`GET /health HTTP/1.1\r\nHost: ${HOST}:${PORT}\r\nConnection: close\r\n\r\n`);
+    });
+    socket.on('data', (chunk) => { data += chunk; });
+    socket.on('end', () => {
+      const body = data.slice(data.indexOf('\r\n\r\n') + 4);
+      try {
+        resolve(JSON.parse(body));
+      } catch (error) {
+        reject(error);
+      }
+    });
+    socket.on('timeout', () => socket.destroy(new Error('health request timeout')));
+    socket.on('error', reject);
+  });
+}
+
+function check(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+async function waitUntil(predicate, label, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await predicate()) return;
+    await sleep(10);
+  }
+  throw new Error(`timeout waiting for ${label}`);
+}
+
+async function waitHealth(predicate, label, timeoutMs = 5000) {
+  let last;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      last = await getHealth();
+      if (predicate(last)) return last;
+    } catch {
+      // server not up yet
+    }
+    await sleep(50);
+  }
+  throw new Error(`timeout waiting for ${label} (last health: ${JSON.stringify(last)})`);
+}
+
+async function connect(url, options) {
+  const ws = new WebSocket(url, options);
+  ws.inbox = [];
+  ws.on('message', (raw) => ws.inbox.push(JSON.parse(raw.toString())));
+  await once(ws, 'open');
+  return ws;
+}
+
+async function waitFor(ws, predicate, label, timeoutMs = 3000) {
+  let found;
+  await waitUntil(() => {
+    const index = ws.inbox.findIndex(predicate);
+    if (index === -1) return false;
+    [found] = ws.inbox.splice(index, 1);
+    return true;
+  }, label, timeoutMs);
+  return found;
+}
+
+async function main() {
+  const server = spawn(process.execPath, [SERVER], {
+    env: { ...process.env, PORT: String(PORT), AGENT_TOKEN: 'dev-agent-token' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const logs = [];
+  server.stdout.on('data', (d) => logs.push(d.toString()));
+  server.stderr.on('data', (d) => logs.push(d.toString()));
+
+  let agent;
+  let client;
+  try {
+    const health = await waitHealth((h) => h.ok === true, 'server start');
+    check(health.agentOnline === false, 'health should report agentOnline=false initially');
+    check(health.clients === 0, 'health should report 0 clients initially');
+
+    // 1. agent connects (Bearer token) -> peer frame with client count
+    agent = await connect(AGENT_URL, { headers: { Authorization: 'Bearer dev-agent-token' } });
+    const firstPeer = await waitFor(agent, (f) => f.t === 'peer', 'agent peer frame');
+    check(firstPeer.clients === 0, `expected 0 clients, got ${firstPeer.clients}`);
+
+    // 2. client connects -> ready{agentOnline:true}; agent sees peer{clients:1}
+    client = await connect(CLIENT_URL);
+    const ready = await waitFor(client, (f) => f.t === 'ready', 'client ready frame');
+    check(ready.agentOnline === true, 'client ready should say agentOnline=true');
+    const peer = await waitFor(agent, (f) => f.t === 'peer', 'peer after client join');
+    check(peer.clients === 1, `expected 1 client, got ${peer.clients}`);
+
+    // 3. client -> agent
+    client.send(JSON.stringify({ t: 'msg', chat: 'c1', text: 'hi' }));
+    const delivered = await waitFor(
+      agent,
+      (f) => f.t === 'msg' && f.chat === 'c1' && f.text === 'hi',
+      'agent to receive client msg',
+    );
+    check(delivered.text === 'hi', 'agent got wrong msg payload');
+
+    // 4. agent -> client, 20 evt frames in order
+    const evts = [];
+    client.on('message', (raw) => {
+      const frame = JSON.parse(raw.toString());
+      if (frame.t === 'evt') evts.push(frame);
+    });
+    for (let i = 0; i < 20; i += 1) {
+      agent.send(JSON.stringify({ t: 'evt', chat: 'c1', seq: i, data: 'x' }));
+    }
+    await waitUntil(() => evts.length >= 20, '20 evt frames on client');
+    check(evts.length === 20, `expected 20 evt frames, got ${evts.length}`);
+    evts.forEach((frame, i) => {
+      check(frame.seq === i, `evt out of order at index ${i}: seq=${frame.seq}`);
+      check(frame.chat === 'c1' && frame.data === 'x', `evt ${i} corrupted`);
+    });
+
+    // 5. offline buffering: client frame waits for the agent and is flushed in order
+    agent.close();
+    await waitHealth((h) => h.agentOnline === false, 'agent disconnect');
+    client.send(JSON.stringify({ t: 'msg', chat: 'c1', text: 'buffered' }));
+
+    agent = await connect(AGENT_URL, { headers: { Authorization: 'Bearer dev-agent-token' } });
+    const replayed = await waitFor(
+      agent,
+      (f) => f.t === 'msg' && f.text === 'buffered',
+      'buffered msg replay after agent reconnect',
+    );
+    check(replayed.chat === 'c1', 'buffered msg lost chat field');
+
+    console.log('PASS');
+  } catch (error) {
+    console.error(`FAIL: ${error.message}`);
+    if (logs.length > 0) console.error(`--- server output ---\n${logs.join('')}`);
+    process.exitCode = 1;
+  } finally {
+    if (client) client.close();
+    if (agent) agent.close();
+    server.kill('SIGTERM');
+  }
+}
+
+await main();

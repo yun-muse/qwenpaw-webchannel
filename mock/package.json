@@ -1,0 +1,16 @@
+{
+  "name": "qwenpaw-webchannel-mock-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mock container-side WebChannel agent for M0",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node mock_agent.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

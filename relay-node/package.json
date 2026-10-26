@@ -1,0 +1,17 @@
+{
+  "name": "qwenpaw-webchannel-relay-node",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-dev WebSocket relay for QwenPaw WebChannel (M0)",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/smoke.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
