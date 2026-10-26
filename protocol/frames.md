@@ -47,9 +47,9 @@ One JSON object per WebSocket **text** message, UTF-8 encoded:
 
 | `t` | fields | notes |
 |---|---|---|
-| `start` | `chat`, `seq?` | streaming reply starts; client creates a bubble (optional) |
-| `evt` | `chat`, `seq`, `data` | raw event JSON, same shape as the console SSE stream (per-delta) |
-| `end` | `chat`, `seq?` | streaming reply finished; render markdown, commit to history (optional) |
+| `start` | `chat`, `seq?`, `stream_type?` | streaming segment starts; client creates a bubble (optional) |
+| `evt` | `chat`, `seq`, `data` | `{"text": <delta>, "stream_type": <segment>}`; per-delta |
+| `end` | `chat`, `seq?`, `stream_type?` | streaming segment finished; render markdown, commit to history (optional) |
 | `msg` | `chat`, `seq?`, `parts[]` | complete message, tool result or attachment reference |
 | `approval` | `chat`, `req_id`, `tool`, `severity`, `summary` | approval request |
 | `resync` | `chat`, `reason?` | ring buffer miss; client must reload history |
@@ -57,6 +57,13 @@ One JSON object per WebSocket **text** message, UTF-8 encoded:
 
 `parts[]` is a list of content parts. v1 defines `{"type":"text","text":...}` and
 `{"type":"file","name","mime","data"}` where `data` is base64. Other part types are forwarded as-is.
+
+A streaming reply has up to two segments, labelled by `stream_type` ∈ `{"reasoning","message"}`:
+`evt.data.stream_type` says which segment a delta belongs to, and `start`/`end` carry the segment's
+`stream_type` at the top level. Only `message` deltas form the answer; `reasoning` deltas are the
+model's thinking and MUST NOT be concatenated into it. A reply is streaming until the `message`
+segment's `end` — an `end` for `reasoning` closes that segment only. Missing `stream_type` means
+`message` (older containers).
 
 ### 2.4 browser → container
 

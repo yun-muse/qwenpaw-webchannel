@@ -12,11 +12,12 @@ Files:
 |---|---|
 | `plugin.json` | plugin manifest (`id: webchannel`, `type: channel`) |
 | `plugin.py` | `register_channel(...)` — label + `relay_url` / `token` fields |
-| `channel.py` | `WebChannel(BaseChannel)`: relay I/O, streaming, approvals |
+| `channel.py` | `WebChannel(BaseChannel)`: relay I/O, streaming, approvals, local-API calls |
 | `frames.py` | frame builders/parser (`protocol/frames.md`), size check |
-| `util.py` | pure helpers: `StreamDiffer`, `SeqCounter`, `RingBuffer` |
+| `util.py` | pure helpers: `StreamDiffer`, `SeqCounter`, `RingBuffer` + the M2 decisions |
 | `relay_client.py` | `websockets` client: hello/auth, heartbeat, backoff, queue |
 | `tests/test_diff.py` | plain-python tests for the helpers (no pytest needed) |
+| `tests/test_m2.py` | plain-python tests for the A1/A3/A4/A5 decisions |
 
 ## Install
 
@@ -95,7 +96,8 @@ plugin diffs:
 
 1. `StreamDiffer.diff((chat, stream_type), accumulated)` returns
    `accumulated[len(prev):]` and stores the new value.
-2. Only a non-empty suffix becomes `{"t":"evt","chat":…,"seq":…,"data":{"text":chunk}}`;
+2. Only a non-empty suffix becomes
+   `{"t":"evt","chat":…,"seq":…,"data":{"text":chunk,"stream_type":…}}`;
    empty suffixes send nothing.
 3. A suffix that is not an extension of the stored value (segment replaced) is
    re-sent in full, so no text can be lost.
@@ -114,14 +116,81 @@ Each chat has its own `SeqCounter` (starting at 1) and a 400-frame
 with `seq > last_seq` (same seqs, no renumbering); a miss (too old, or buffer
 empty after a restart) produces `{"t":"resync","chat","reason":"gap"}`.
 
-## HTTP library for approvals
+## M2 changes (A1–A5)
 
-`approve` / `deny` frames are forwarded to the local API with **httpx**:
+**A1 — trailing full-text `msg`.** `base.py`'s streaming path consumes the
+completed message event itself (`_on_stream_msg_end` returns `True`), so
+`on_event_message_completed` — and therefore `send()` — never runs for a
+streamed reply; only the `evt` deltas ever reached the browser. `on_streaming_end`
+now closes the segment in the order **`evt` tail → `end` → `msg`**, where the
+`msg` carries the whole answer:
+
+```json
+{"t":"msg","chat":"…","seq":7,"parts":[{"type":"text","text":"<full answer>"}]}
+```
+
+The decision is `util.trailing_msg_text(stream_type, streamed_text, text_sent)`:
+emit only for the `message` stream (never `reasoning`, which is streamed but is
+not the answer) and only when no text `msg` was already delivered for that
+segment. `send()`/`send_content_parts()` mark "text already delivered" only
+while **no** stream is open for that chat, because text sent mid-stream is tool
+output (`base.py::on_event_content`), not the answer. `StreamDiffer.last(key)`
+supplies the full text. Nothing extra is emitted for non-streamed replies.
+
+**A2 — `stop`.** `{t:"stop", chat}` → resolve `ChatSpec.id` (see below) →
+`POST /api/console/chat/stop?chat_id=<id>` with `X-Agent-Id`. A chat that does
+not exist yet, or a failed lookup/POST, is logged; no frame is sent and the
+socket stays up.
+
+**A3 — `hist`.** `{t:"hist", chat, limit?}` → resolve `ChatSpec.id` →
+`GET /api/chats/{id}` → `util.history_messages()` (concatenate a message's text
+parts, skip textless messages, keep the last `limit`, default 50) →
+`util.pack_history()` splits the list so **every frame stays ≤ 256 KB**
+(packed against the `more:true` variant) with `"more": true` on all but the
+last. No chat yet (or a failed read) → one `{t:"hist", chat, messages: []}`.
+Frames go through `_emit`, so **history replies consume `seq`** and are
+replayable on `resume`.
+
+**Chat-id resolution (shared by A2/A3).** `GET /api/chats?channel=web` and pick
+the `ChatSpec` whose `session_id` equals this channel's
+`resolve_session_id("web-user", {chat_id})` (`web:web-user:<chat>`); the result
+is cached per chat. The manager creates that `ChatSpec` on the first message.
+This is why the stop endpoint gets the resolved id rather than a session id —
+its own fallback lookup is hardcoded to `channel="console"`.
+
+**A4 — inbound files.** Each `files[]` `{name, mime, data}` item is
+base64-decoded (`util.decode_file_entry`) and POSTed as multipart `file` to
+`/api/console/upload`; the returned absolute `url` becomes
+`FileContent(filename=<name>, file_url=<url>)`, appended **after** the
+`TextContent` in `content_parts`. A bad or failed item is logged and skipped.
+Attachment-only turns are supported: the `TextContent` is omitted when the text
+is blank, and the channel passes `no_text_debounce=False` to `BaseChannel`
+(otherwise a text-less payload is parked until some later text arrives — the
+same reason `console_channel.py` disables the debounce).
+
+**A5 — approval ownership.** Before `POST /api/approval/{approve,deny}` the
+plugin calls `GET /api/approval/list` and requires the `req_id` to be pending
+for this agent (`owner_agent_id`, else `agent_id`, must equal
+`self._agent_id()`; neither field present → accepted on presence alone).
+Not found, mismatched, or a failed list call → `{t:"error", code:"E_AUTH",
+chat, req_id}` via `_emit` and **no POST**.
+
+Remaining deviations are in the table below; everything else (frame names,
+per-chat `seq` from 1, ring buffer, `resume`/`resync`) is unchanged. New tests
+live in `tests/test_m2.py` and cover every decision above.
+
+## HTTP library for approvals / history / stop / upload
+
+All local QwenPaw API calls use **httpx** with `X-Agent-Id: <bound workspace
+agent_id>`:
 
 ```
-POST http://127.0.0.1:8088/api/approval/approve   (or /deny)
-X-Agent-Id: <bound workspace agent_id>
-{"request_id": "<req_id>"}
+GET  /api/approval/list                      -> pending approvals for the check
+POST /api/approval/approve | /deny           {"request_id", "session_id"}
+GET  /api/chats?channel=web                  -> ChatSpec[] (chat id lookup)
+GET  /api/chats/{ChatSpec.id}                -> ChatHistory (history)
+POST /api/console/chat/stop?chat_id=<id>     -> {"stopped": bool}
+POST /api/console/upload                     multipart "file" -> {url, file_name, size}
 ```
 
 `httpx>=0.27.0` is a declared core dependency in QwenPaw's `pyproject.toml`
@@ -129,8 +198,9 @@ X-Agent-Id: <bound workspace agent_id>
 asyncio-based channel and gives explicit timeouts. `aiohttp` was rejected as a
 direct dependency (even though some channels use it) because the brief requires
 core-only libraries, and `urllib`-in-an-executor would need extra thread
-plumbing for no benefit. A client is created per approval call (they are rare)
-with a 10 s timeout; failures are logged and never disconnect the relay socket.
+plumbing for no benefit. A client is created per call (they are rare) with a
+10 s timeout (60 s for uploads); failures are logged and never disconnect the
+relay socket.
 
 The `agent_id` comes from `getattr(self._workspace, "agent_id", "default")`
 (with no workspace → `"default"`), exactly as `base.py` does it. `agent_id` is
@@ -146,16 +216,16 @@ Followed the real v2.2.2.post1 source where it contradicts the docs.
 | `from_config` signature | Uses `(process, config, on_reply_sent=None, display_config=None, no_text_debounce=True)`. The design sketch's `workspace_dir` is gone. | `BaseChannel.from_config` (`base.py:1261`) has no `workspace_dir`; `ConsoleChannel.from_config` adds `workspace_dir` only for media resolution, which this channel does not need. |
 | `enabled` / `bot_prefix` | Not stored or checked by the channel. | Neither is a `BaseChannel.__init__` parameter; the manager only starts enabled channels and this channel never prefixes text. |
 | Inbound `sender_id` | Constant `"web-user"`, so sessions are `web:web-user:<chat>`. Design used `user_id`. | Protocol v1 (`frames.md` §2.4) carries `chat` only — there is no user identity to use. |
-| Inbound `msg.files[]` | Logged and ignored (text still delivered). | Base64 decode → `media_dir` → `FileContent` is M2 work; v1 goal is text streaming. |
-| `stop` frame | Logged at warning, no cancellation. | `BaseChannel` / the workspace expose no documented cancel-by-chat API in the reference (`task_tracker` only shows `attach_or_start` / `stream_from_queue`). Native `/stop` command or M2. |
-| `approve` / `deny` body | `{"request_id": ...}` plus `X-Agent-Id`. | The approve/deny endpoint's request schema is not in the reference copies; `request_id` is the field the approval service keys on. |
-| `req_id` ownership check | Not implemented (no cross-session validation). | Design §8 asks for it, but the reference copies expose no approval registry to check against; the local API still enforces request-id validity. M2. |
+| Inbound `msg.files[]` | Uploaded through `POST /api/console/upload` and attached as `FileContent(file_url=<absolute path>)` after the `TextContent` (M2 A4). An undecodable entry, or a failed upload, is logged and skipped; the rest of the turn still runs. | The console channel's own attachments are `FileContent(file_url=…)` pointing into the console media dir, and the upload endpoint is what creates exactly that — reusing it avoids a second media location the agent could not read. |
+| `stop` frame | `POST /api/console/chat/stop?chat_id=<ChatSpec.id>` (M2 A2). No chat id yet (or a failed lookup/POST) → logged, nothing sent. | The endpoint's session fallback is hard-coded to `channel="console"`, so the resolved `ChatSpec.id` must be passed; the plugin finds it via `GET /api/chats?channel=web` and caches it per chat. |
+| `approve` / `deny` body | `{"request_id", "session_id"}` where `session_id` is the pending entry's `root_session_id`, plus `X-Agent-Id` (M2 A5). | `ApprovalActionRequest.session_id` is required and the router rejects anything whose `root_session_id` differs (`router_approval.py`); the M1 body (`request_id` only) could never have been accepted. |
+| `req_id` ownership check | `GET /api/approval/list` before the POST; the entry must exist and its `owner_agent_id` (else `agent_id`) must equal this channel's agent. Otherwise, or when the list call fails, `error{code:"E_AUTH", chat, req_id}` is emitted and nothing is POSTed (M2 A5). | Design §8. Only the agent-id check is enforced; the session check is skipped because the pending entry's ids are the agent's own runtime session ids, not the web chat id. |
 | `resync` frame | Carries an extra `seq` and is buffered. | `frames.resync_frame` has no `seq` (protocol has none); adding it as an unknown field (allowed by §1) keeps the "every outbound frame has a seq" invariant and replay ordering intact. |
-| `evt.data` shape | `{"text": <chunk>}` only, from `frames.evt_frame`; both `reasoning` and `message` deltas produce `evt` frames, with no `stream_type` discriminator (so reasoning text, when the agent emits it, shares the bubble). | `frames.py` (M0) fixed the data shape; adding a field would change the shared M0 protocol. |
-| `hist` frame | Not implemented; unknown inbound frames are ignored. | History is M2; protocol §1 says unknown types should be ignored. |
+| `evt.data` shape | `{"text": <chunk>, "stream_type": <"reasoning" / "message">}` from `frames.evt_frame`; `start`/`end` also carry a top-level `stream_type`. | The console SSE stream runs two segments, and a browser concatenating both would put the model's thinking into the answer. The discriminator is additive (§7) and documented in `protocol/frames.md` §2.3; a missing `stream_type` still means `message` for older containers. |
+| `hist` frame | Implemented (M2 A3) as a new reply type: `{t:"hist", chat, messages:[{role, text}...], more?, seq}`. Unknown chats answer `messages: []`; `limit` (default 50, last N) is honoured, `before` is ignored. | `protocol/frames.md` §2.4 lists `hist` browser→container and leaves the reply to `msg`/`resync`; `msg` cannot carry a typed list and `resync` carries no content, so the agent answers with a `hist` frame instead (additive per §7). It goes through `_emit`, so **`hist` frames consume `seq`** like every other outbound frame. |
 | Outgoing media parts | Serialised as `{type, image_url/file_url/file_id/…}` plain dicts inside `msg.parts`; no base64 `file` parts are produced. | v1 file transport (`msg.files[]`) is browser→container; attachments coming back from the agent are M2. |
 | `plugin.py` registration | Only `channel_class`, `label`, `description`, `config_fields` — no `icon` / `doc_url`, and exactly two config fields. | `register_channel` (`plugins_api.py:689`) makes `icon`/`doc_url` optional; the brief specifies `relay_url` + `token` only. `config_fields` uses the same `name/label/type/required/placeholder/default` keys as the Azure Bot plugin. |
-| `channel.py` size | Under 400 lines. | none |
+| Single oversized history message | A message whose own text exceeds the 256 KB frame limit is still sent alone in a `hist` frame (the relay drops it) instead of being truncated. | Truncating would silently rewrite conversation history; file/segment transport for one huge message is v2 work. |
 
 Everything else — frame names/shapes, per-chat `seq` from 1, ring buffer of
 400, `resume`/`resync` semantics, approval endpoint paths, and both config
@@ -173,5 +243,6 @@ defaults — follows `protocol/frames.md`, `docs/design.md` and
   manager queue path raises `NotImplementedError`.
 - Inbound frames go through `self._enqueue(native)` (set by `ChannelManager`
   via `set_enqueue`); the plugin never runs its own consumer loop.
-- Tests: `cd plugin && python3 tests/test_diff.py` → `ALL PASS` (pytest is not
+- Tests: `cd plugin && python3 tests/test_diff.py` and
+  `cd plugin && python3 tests/test_m2.py` → `ALL PASS` (pytest is not
   required; it collects the same `test_*` functions if installed).

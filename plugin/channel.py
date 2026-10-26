@@ -3,7 +3,9 @@
 
 Dials the relay as an agent, turns inbound ``msg`` frames into the native queue
 payload QwenPaw's manager expects, and turns streaming hooks / send calls into
-``start`` / ``evt`` / ``end`` / ``msg`` / ``approval`` frames.
+``start`` / ``evt`` / ``end`` / ``msg`` / ``approval`` frames. Inbound ``stop``,
+``hist``, ``approve`` and ``deny`` are served through the local QwenPaw HTTP API
+(``chat/stop``, ``chats``, ``console/upload``, ``approval/*``).
 """
 
 from __future__ import annotations
@@ -15,8 +17,14 @@ import httpx
 
 # Real import lines from the v2.2.2.post1 sources: BaseChannel lives in
 # qwenpaw.app.channels.base, which (like console/channel.py's ``..base``
-# import) re-exports ContentType / TextContent from qwenpaw.schemas.
-from qwenpaw.app.channels.base import BaseChannel, ContentType, TextContent
+# import) re-exports ContentType / TextContent / FileContent from
+# qwenpaw.schemas.
+from qwenpaw.app.channels.base import (
+    BaseChannel,
+    ContentType,
+    FileContent,
+    TextContent,
+)
 
 try:  # package-relative (tests, ``python -m plugin...``)
     from .frames import (
@@ -24,26 +32,50 @@ try:  # package-relative (tests, ``python -m plugin...``)
         SeqCounter,
         StreamDiffer,
         approval_frame,
+        check_size,
         end_frame,
+        error_frame,
         evt_frame,
+        hist_frame,
         msg_frame,
         resync_frame,
         start_frame,
     )
     from .relay_client import RelayClient
+    from .util import (
+        ANSWER_STREAM_TYPE,
+        approval_owner_ok,
+        decode_file_entry,
+        hist_limit,
+        history_messages,
+        pack_history,
+        trailing_msg_text,
+    )
 except ImportError:  # loaded as a top-level module by the plugin loader
     from frames import (
         RingBuffer,
         SeqCounter,
         StreamDiffer,
         approval_frame,
+        check_size,
         end_frame,
+        error_frame,
         evt_frame,
+        hist_frame,
         msg_frame,
         resync_frame,
         start_frame,
     )
     from relay_client import RelayClient
+    from util import (
+        ANSWER_STREAM_TYPE,
+        approval_owner_ok,
+        decode_file_entry,
+        hist_limit,
+        history_messages,
+        pack_history,
+        trailing_msg_text,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +86,9 @@ DEFAULT_TOKEN = "dev-agent-token"
 API_BASE = "http://127.0.0.1:8088"
 # Protocol v1 has no user identity; a session is one chat.
 SENDER_ID = "web-user"
+# Uploads (A4) can be up to the relay's 256 KB frame budget; give the local
+# API room to write them to the console media dir.
+_UPLOAD_TIMEOUT_S = 60.0
 
 # Content-part fields copied into ``parts[]`` dicts (getattr-based, defensive).
 _PART_FIELDS = (
@@ -102,11 +137,17 @@ class WebChannel(BaseChannel):
         token: str = DEFAULT_TOKEN, on_reply_sent=None, display_config=None,
         no_text_debounce: bool = True,
     ):
+        # ``no_text_debounce`` is accepted for BaseChannel signature parity but
+        # deliberately not forwarded: every inbound ``msg`` frame is one
+        # complete user turn, and an attachment-only turn carries no text at
+        # all -- the debounce would park it until a later text message
+        # (console_channel.py disables it for the same reason).
+        del no_text_debounce
         super().__init__(
             process,
             on_reply_sent=on_reply_sent,
             display_config=display_config,
-            no_text_debounce=no_text_debounce,
+            no_text_debounce=False,
             # BaseChannel.__init__ overwrites the class attribute, so this
             # must be passed explicitly for the streaming hooks to fire.
             streaming_enabled=True,
@@ -117,6 +158,15 @@ class WebChannel(BaseChannel):
         self._seq = SeqCounter()
         self._ring = RingBuffer(400)
         self._differ = StreamDiffer()
+        # Chats whose current stream segment already delivered a text ``msg``
+        # via send()/send_content_parts (A1). Cleared on on_streaming_start.
+        self._text_msg_sent: set = set()
+        # (chat, stream_type) pairs with a segment in flight; text sent while
+        # one is open is tool output, not the answer, so it must not count as
+        # "the reply was already delivered".
+        self._active_streams: set = set()
+        # Web chat id -> ChatSpec.id, resolved once per chat (A2/A3).
+        self._chat_ids: Dict[str, str] = {}
 
     # -- construction / session mapping ---------------------------------
 
@@ -193,6 +243,88 @@ class WebChannel(BaseChannel):
             return "default"
         return getattr(workspace, "agent_id", "default")
 
+    # -- local API helpers (A2/A3/A4/A5) --------------------------------
+
+    def _headers(self) -> Dict[str, str]:
+        """Headers for the local QwenPaw API (selects the bound agent)."""
+        return {"X-Agent-Id": self._agent_id()}
+
+    async def _resolve_chat_id(self, chat: str) -> Optional[str]:
+        """``ChatSpec.id`` backing this web chat, or None when it has none yet.
+
+        ``GET /api/chats`` answers every ``ChatSpec`` of the agent; the one for
+        this chat is the entry with ``channel == "web"`` whose ``session_id``
+        equals our own ``resolve_session_id(SENDER_ID, {chat_id: chat})``.
+        A chat is created by the manager on its first message, so a client that
+        asks for history before saying anything gets no id (empty history, not
+        an error). The id is cached per chat once found.
+        """
+        cached = self._chat_ids.get(chat)
+        if cached:
+            return cached
+
+        session_id = self.resolve_session_id(SENDER_ID, {"chat_id": chat})
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(
+                    f"{API_BASE}/api/chats",
+                    params={"channel": self.channel},
+                    headers=self._headers(),
+                )
+            if response.status_code >= 400:
+                logger.warning(
+                    "webchannel: GET /api/chats failed for chat=%s: HTTP %s",
+                    chat, response.status_code,
+                )
+                return None
+            specs = response.json()
+        except Exception:  # noqa: BLE001 - a failed lookup sends nothing
+            logger.warning(
+                "webchannel: chat lookup failed for chat=%s", chat, exc_info=True,
+            )
+            return None
+
+        if not isinstance(specs, list):
+            specs = []
+        for spec in specs:
+            if not isinstance(spec, dict):
+                continue
+            if spec.get("channel") != self.channel:
+                continue
+            if spec.get("session_id") != session_id:
+                continue
+            chat_id = spec.get("id")
+            if chat_id:
+                self._chat_ids[chat] = str(chat_id)
+                logger.debug(
+                    "webchannel: chat=%s -> ChatSpec.id=%s", chat, chat_id,
+                )
+                return str(chat_id)
+        logger.debug("webchannel: no ChatSpec yet for chat=%s", chat)
+        return None
+
+    async def _get_history(self, chat_id: str) -> Optional[Dict[str, Any]]:
+        """``ChatHistory`` for *chat_id* (``{messages: [...], status}``)."""
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(
+                    f"{API_BASE}/api/chats/{chat_id}", headers=self._headers(),
+                )
+            if response.status_code >= 400:
+                logger.warning(
+                    "webchannel: GET /api/chats/%s failed: HTTP %s",
+                    chat_id, response.status_code,
+                )
+                return None
+            payload = response.json()
+        except Exception:  # noqa: BLE001 - a failed read sends no history
+            logger.warning(
+                "webchannel: history read failed for chat_id=%s",
+                chat_id, exc_info=True,
+            )
+            return None
+        return payload if isinstance(payload, dict) else None
+
     # -- outbound plumbing: seq + ring buffer + relay --------------------
 
     def _chat_for(self, to_handle: str, meta: Any, request: Any = None) -> str:
@@ -211,6 +343,10 @@ class WebChannel(BaseChannel):
             if tail:
                 return tail
         return str(to_handle or "default")
+
+    def _stream_is_active(self, chat: str) -> bool:
+        """True while any streaming segment for *chat* is open."""
+        return any(key[0] == chat for key in self._active_streams)
 
     async def _emit(self, chat: str, build) -> None:
         """Assign the next per-chat seq, buffer, then send the built frame."""
@@ -233,10 +369,12 @@ class WebChannel(BaseChannel):
             await self._handle_msg(frame)
         elif kind == "resume":
             await self._handle_resume(frame)
+        elif kind == "hist":
+            await self._handle_hist(frame)
         elif kind in ("approve", "deny"):
             await self._handle_approval(kind, frame)
         elif kind == "stop":
-            self._handle_stop(frame)
+            await self._handle_stop(frame)
         else:
             logger.debug("webchannel: ignoring inbound frame t=%s", kind)
 
@@ -244,20 +382,23 @@ class WebChannel(BaseChannel):
         chat = str(frame.get("chat") or "default")
         text = frame.get("text")
         text = text if isinstance(text, str) else ""
-        files = frame.get("files") or []
-        if files:
-            logger.warning(
-                "webchannel: msg chat=%s carries %d file(s); uploads are not "
-                "decoded by this plugin version, ignoring them",
-                chat,
-                len(files),
-            )
-        if not text.strip():
+
+        content_parts: List[Any] = []
+        if text.strip():
+            content_parts.append(TextContent(type=ContentType.TEXT, text=text))
+        files = frame.get("files")
+        if isinstance(files, list):
+            for entry in files:
+                part = await self._upload_file(chat, entry)
+                if part is not None:
+                    content_parts.append(part)
+        if not content_parts:
             return
+
         native = {
             "channel_id": self.channel,
             "sender_id": SENDER_ID,
-            "content_parts": [TextContent(type=ContentType.TEXT, text=text)],
+            "content_parts": content_parts,
             "meta": {
                 "chat_id": chat,
                 "session_id": self.resolve_session_id(SENDER_ID, {"chat_id": chat}),
@@ -272,6 +413,58 @@ class WebChannel(BaseChannel):
             )
             return
         enqueue(native)
+
+    async def _upload_file(self, chat: str, entry: Any) -> Optional[FileContent]:
+        """Store one inbound ``files[]`` item via the console upload API (A4).
+
+        The console channel receives attachments as ``FileContent(file_url=…)``
+        pointing at an absolute path inside its media dir, and
+        ``POST /api/console/upload`` is what produces exactly that, so the
+        plugin reuses it instead of inventing a second storage location.
+        Returns None (after logging) for an undecodable or failed item; the
+        rest of the message still goes through.
+        """
+        decoded = decode_file_entry(entry)
+        if decoded is None:
+            logger.warning(
+                "webchannel: chat=%s sent an undecodable file entry; dropped",
+                chat,
+            )
+            return None
+        name, mime, data = decoded
+        try:
+            async with httpx.AsyncClient(timeout=_UPLOAD_TIMEOUT_S) as client:
+                response = await client.post(
+                    f"{API_BASE}/api/console/upload",
+                    files={"file": (name, data, mime)},
+                    headers=self._headers(),
+                )
+            if response.status_code >= 400:
+                logger.warning(
+                    "webchannel: upload of %r for chat=%s failed: HTTP %s",
+                    name, chat, response.status_code,
+                )
+                return None
+            payload = response.json()
+        except Exception:  # noqa: BLE001 - one bad upload must not drop the turn
+            logger.warning(
+                "webchannel: upload of %r for chat=%s failed", name, chat,
+                exc_info=True,
+            )
+            return None
+
+        url = payload.get("url") if isinstance(payload, dict) else None
+        if not url:
+            logger.warning(
+                "webchannel: upload of %r for chat=%s returned no url", name, chat,
+            )
+            return None
+        logger.info(
+            "webchannel: chat=%s attached %r (%d bytes)", chat, name, len(data),
+        )
+        return FileContent(
+            type=ContentType.FILE, filename=name, file_url=str(url),
+        )
 
     async def _handle_resume(self, frame: Dict[str, Any]) -> None:
         chat = str(frame.get("chat") or "default")
@@ -292,12 +485,107 @@ class WebChannel(BaseChannel):
         for stored in buffered:  # redelivery keeps the original seq
             await relay.send(stored)
 
-    def _handle_stop(self, frame: Dict[str, Any]) -> None:
-        logger.warning(
-            "webchannel: stop for chat=%s ignored: BaseChannel / workspace in "
-            "v2.2.2.post1 expose no documented cancel-by-chat API",
-            frame.get("chat"),
+    async def _handle_hist(self, frame: Dict[str, Any]) -> None:
+        """Reply to ``{t:"hist", chat, limit?}`` with ``hist`` frame(s) (A3)."""
+        chat = str(frame.get("chat") or "default")
+        limit = hist_limit(frame.get("limit"))
+
+        messages: List[Dict[str, str]] = []
+        chat_id = await self._resolve_chat_id(chat)
+        if chat_id:
+            history = await self._get_history(chat_id)
+            if history is not None:
+                messages = history_messages(history, limit)
+
+        if not messages:
+            await self._emit(
+                chat, lambda seq: hist_frame(chat, [], seq=seq),
+            )
+            return
+
+        # Pack against the widest variant (non-final frames carry "more":true)
+        # so every frame the client sees is inside the 256 KB wire limit.
+        chunks = pack_history(
+            messages,
+            lambda chunk: check_size(hist_frame(chat, chunk, more=True)),
         )
+        if len(chunks) > 1:
+            logger.info(
+                "webchannel: chat=%s history split into %d frames (%d messages)",
+                chat, len(chunks), len(messages),
+            )
+        for index, chunk in enumerate(chunks):
+            more = index < len(chunks) - 1
+            await self._emit(
+                chat,
+                lambda seq, chunk=chunk, more=more: hist_frame(
+                    chat, chunk, more=more, seq=seq,
+                ),
+            )
+
+    async def _handle_stop(self, frame: Dict[str, Any]) -> None:
+        """Cancel the running turn via ``POST /api/console/chat/stop`` (A2)."""
+        chat = str(frame.get("chat") or "default")
+        chat_id = await self._resolve_chat_id(chat)
+        if not chat_id:
+            logger.warning(
+                "webchannel: stop for chat=%s ignored: no QwenPaw chat exists "
+                "for this session yet, so there is nothing to cancel",
+                chat,
+            )
+            return
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    f"{API_BASE}/api/console/chat/stop",
+                    params={"chat_id": chat_id},
+                    headers=self._headers(),
+                )
+            if response.status_code >= 400:
+                logger.warning(
+                    "webchannel: stop for chat=%s (chat_id=%s) failed: HTTP %s",
+                    chat, chat_id, response.status_code,
+                )
+                return
+            logger.info(
+                "webchannel: stop for chat=%s (chat_id=%s): %s",
+                chat, chat_id, response.text,
+            )
+        except Exception:  # noqa: BLE001 - a failed stop must not kill the socket
+            logger.warning(
+                "webchannel: stop POST failed for chat=%s (chat_id=%s)",
+                chat, chat_id, exc_info=True,
+            )
+
+    async def _find_pending_approval(self, req_id: str) -> Optional[Dict[str, Any]]:
+        """The ``/api/approval/list`` entry for *req_id*, or None (A5)."""
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(
+                    f"{API_BASE}/api/approval/list", headers=self._headers(),
+                )
+            if response.status_code >= 400:
+                logger.warning(
+                    "webchannel: GET /api/approval/list failed: HTTP %s",
+                    response.status_code,
+                )
+                return None
+            payload = response.json()
+        except Exception:  # noqa: BLE001 - refuse rather than approve blind
+            logger.warning(
+                "webchannel: approval list lookup failed", exc_info=True,
+            )
+            return None
+
+        pending = payload.get("pending_approvals") if isinstance(
+            payload, dict,
+        ) else None
+        if not isinstance(pending, list):
+            pending = []
+        for entry in pending:
+            if isinstance(entry, dict) and str(entry.get("request_id")) == req_id:
+                return entry
+        return None
 
     async def _handle_approval(self, action: str, frame: Dict[str, Any]) -> None:
         chat = str(frame.get("chat") or "default")
@@ -308,12 +596,39 @@ class WebChannel(BaseChannel):
                 action, chat,
             )
             return
-        url = f"{API_BASE}/api/approval/{action}"
-        headers = {"X-Agent-Id": self._agent_id()}
+        req_id = str(req_id)
+
+        pending = await self._find_pending_approval(req_id)
+        if not approval_owner_ok(pending, self._agent_id()):
+            logger.warning(
+                "webchannel: refusing %s for chat=%s req_id=%s: not pending for "
+                "agent=%s",
+                action, chat, req_id, self._agent_id(),
+            )
+            await self._emit(
+                chat,
+                lambda seq: {
+                    **error_frame("E_AUTH", "approval not pending for this agent"),
+                    "chat": chat,
+                    "req_id": req_id,
+                    "seq": seq,
+                },
+            )
+            return
+
+        # /api/approval/{approve,deny} matches the pending's root_session_id
+        # against the body's required session_id, so pass it through.
+        body: Dict[str, Any] = {"request_id": req_id}
+        session_id = pending.get("root_session_id") or pending.get("session_id")
+        if session_id:
+            body["session_id"] = str(session_id)
+
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.post(
-                    url, json={"request_id": str(req_id)}, headers=headers,
+                    f"{API_BASE}/api/approval/{action}",
+                    json=body,
+                    headers=self._headers(),
                 )
             if response.status_code >= 400:
                 logger.warning(
@@ -334,7 +649,11 @@ class WebChannel(BaseChannel):
     ) -> None:
         chat = self._chat_for(to_handle, send_meta, request)
         self._differ.reset((chat, stream_type))
-        await self._emit(chat, lambda seq: start_frame(chat, seq))
+        self._text_msg_sent.discard(chat)
+        self._active_streams.add((chat, stream_type))
+        await self._emit(
+            chat, lambda seq: start_frame(chat, seq, stream_type=stream_type),
+        )
 
     async def on_streaming_delta(
         self, request, to_handle: str, event, send_meta: Dict[str, Any],
@@ -344,7 +663,9 @@ class WebChannel(BaseChannel):
         chunk = self._differ.diff((chat, stream_type), accumulated_text or "")
         if not chunk:
             return
-        await self._emit(chat, lambda seq: evt_frame(chat, seq, chunk))
+        await self._emit(
+            chat, lambda seq: evt_frame(chat, seq, chunk, stream_type),
+        )
 
     async def on_streaming_end(
         self, request, to_handle: str, event, send_meta: Dict[str, Any],
@@ -356,17 +677,42 @@ class WebChannel(BaseChannel):
         # coalesces flushes), so emit the tail before ``end``.
         chunk = self._differ.diff(key, accumulated_text or "")
         if chunk:
-            await self._emit(chat, lambda seq: evt_frame(chat, seq, chunk))
-        await self._emit(chat, lambda seq: end_frame(chat, seq))
+            await self._emit(
+                chat, lambda seq: evt_frame(chat, seq, chunk, stream_type),
+            )
+        await self._emit(
+            chat, lambda seq: end_frame(chat, seq, stream_type=stream_type),
+        )
+
+        # A1: a streamed reply never reaches send() -- base.py's
+        # ``_on_stream_msg_end`` consumes the completed message event itself --
+        # so close the segment with the full text as a ``msg`` frame, after
+        # ``end``. Only the ANSWER segment gets that trailing msg: a
+        # ``reasoning`` segment is start/evt/end and nothing more. Nothing
+        # extra either when send()/send_content_parts already delivered text
+        # for this segment (non-streamed replies).
+        if stream_type == ANSWER_STREAM_TYPE:
+            trailing = trailing_msg_text(
+                stream_type, self._differ.last(key), chat in self._text_msg_sent,
+            )
+            if trailing:
+                await self._emit(
+                    chat,
+                    lambda seq: msg_frame(
+                        chat, seq, [{"type": "text", "text": trailing}],
+                    ),
+                )
+        self._active_streams.discard(key)
         self._differ.reset(key)
 
     async def send(
         self, to_handle: str, text: str, meta: Optional[Dict[str, Any]] = None,
     ) -> None:
         chat = self._chat_for(to_handle, meta)
-        parts: List[Dict[str, Any]] = [
-            {"type": "text", "text": text if isinstance(text, str) else str(text)},
-        ]
+        body = text if isinstance(text, str) else str(text)
+        if body.strip() and not self._stream_is_active(chat):
+            self._text_msg_sent.add(chat)
+        parts: List[Dict[str, Any]] = [{"type": "text", "text": body}]
         await self._emit(chat, lambda seq: msg_frame(chat, seq, parts))
 
     async def send_content_parts(
@@ -377,6 +723,11 @@ class WebChannel(BaseChannel):
             return
         chat = self._chat_for(to_handle, meta)
         serialized = [_part_to_dict(part) for part in parts]
+        if not self._stream_is_active(chat) and any(
+            part.get("type") == "text" and (part.get("text") or "").strip()
+            for part in serialized
+        ):
+            self._text_msg_sent.add(chat)
         await self._emit(chat, lambda seq: msg_frame(chat, seq, serialized))
 
     async def send_approval_notification(

@@ -1,0 +1,21 @@
+You are coding in /home/hatch/workspace/qwenpaw-webchannel. This is M2 Part B: polish the SPA in spa/ into a real chat app. Use your file-writing tools; files on disk are the deliverable.
+
+READ FIRST: AGENTS.md, tasks/m2-brief.md Part B (the spec), protocol/frames.md (frame types incl. hist/approval/resume/stop/files rules), spa/src/App.tsx, spa/src/relay.ts, spa/package.json, plugin/README.md (for the exact frames the plugin emits: hist frames {t:"hist", chat, messages:[{role,text}], more?}, error frames {t:"error", code}, approval {t:"approval", chat, req_id, tool, severity, summary}, trailing msg after end for streamed replies).
+
+IMPLEMENT (spa/ only):
+1. Deps: add `marked` and `dompurify` to spa/package.json dependencies (run npm install in spa/ if your shell works; if Bash is denied, still update package.json + package-lock is NOT required from you — say so in your final message).
+2. Layout: left sidebar (chat list: at least the current chat; "New chat" button rotates to a fresh chat id like chat-<timestamp36>; clicking a chat switches the view — keep per-chat message state in memory), main pane (message list + streaming bubble), bottom composer. CSS in src/App.css (import it), light ChatGPT-like theme, sidebar collapses under 720px (media query: sidebar becomes a top bar).
+3. src/relay.ts: keep the existing state machine (idle/connecting/live/resuming/resync) and seq dedupe; extend the frame dispatch to expose ALL frame types to the app via a single onFrame callback: evt, msg, start, end, approval, hist, resync, error, ready. Keep 25s ping. On reconnect send {t:"resume", chat, last_seq} for the ACTIVE chat.
+4. src/App.tsx behaviour:
+   - Assistant text accumulated from evt deltas into the in-flight bubble; on end, bubble finalizes; the trailing msg frame after a streamed reply must NOT duplicate the bubble (if a msg frame arrives for a stream that just ended with identical text, replace/merge instead of appending a second bubble; a msg frame with non-text parts renders those parts as cards).
+   - Markdown: render finalized assistant messages with marked → DOMPurify.sanitize → dangerouslySetInnerHTML; while streaming render plain text (pre-wrap) for speed; code blocks get basic <pre> styling via CSS.
+   - Non-text parts in msg frames: collapsible <details> cards, title = part.type (+ filename/name if present), body = pretty-printed JSON of the part.
+   - Approval cards: on approval frame, insert a card message (tool, severity, summary) with Approve/Deny buttons; click sends {t:"approve"|"deny", chat, req_id} once and locks the card (disabled, "sent…" state); display any later error frame with code E_AUTH on that card if req_id matches.
+   - Composer: textarea, Enter sends / Shift+Enter newline; Send button; while a reply is streaming show Stop button → {t:"stop", chat}. Attach button (file input): read file as base64 (FileReader → data URL → strip prefix), build the msg frame {t:"msg", chat, text, files:[{name, mime, data}]}, compute the frame's JSON size; if > 256KB total, show a clear inline error and DO NOT send (protocol v1 rule); else attach a chip showing the file name and send with the next message (or immediately with empty text — choose: attach chip, sent together with the next Send; if text empty and chip present, Send is enabled).
+   - History: after the ws reaches live for a chat with no messages, send {t:"hist", chat}; render hist frames' messages (role user/assistant) replacing the empty state; handle multiple hist frames with `more` (accumulate until a frame without more). On {t:"resync"}: clear messages, re-send hist, rebuild.
+   - Status pill in header: connection state (offline/connecting/live/resuming) + agentOnline dot from ready/peer frames.
+   - Error frames (any) → small toast/inline banner text, auto-dismiss is optional.
+5. Keep TypeScript strict-clean: `npm run build` must pass (tsc + vite). If you cannot run Bash, write code carefully to compile (no unused imports — tsconfig may have noUnusedLocals; check spa/tsconfig.json and comply).
+
+Do NOT touch: plugin/, relay-node/, mock/, protocol/, docs/, tests/, .ref_tmp/, tools/.
+Report at the end: files changed, whether npm install/build ran, and any protocol assumption you had to make.

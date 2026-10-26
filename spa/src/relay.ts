@@ -2,8 +2,12 @@
  * Relay WebSocket client — design §5.3 state machine:
  *   idle -> connecting -> live -> resuming -> resync
  *
- * Reconnects with exponential backoff, resumes known chats with
+ * Reconnects with exponential backoff, resumes the ACTIVE chat with
  * `{t:"resume", chat, last_seq}`, and drops already-seen seq values.
+ *
+ * Every inbound business frame (`ready`, `evt`, `msg`, `start`, `end`,
+ * `approval`, `hist`, `resync`, `error`, ...) is handed to `onFrame`; the
+ * client only interprets the ones the state machine needs.
  */
 
 export type ConnState = 'idle' | 'connecting' | 'live' | 'resuming' | 'resync';
@@ -18,6 +22,8 @@ export interface Frame {
   t: string;
   chat?: string;
   seq?: number;
+  /** `start`/`end`: the stream segment ("reasoning" | "message"). */
+  stream_type?: string;
   data?: unknown;
   parts?: ContentPart[];
   agentOnline?: boolean;
@@ -27,6 +33,7 @@ export interface Frame {
 
 export interface RelayOptions {
   url?: string;
+  /** Every frame the relay forwards (plus `ready` / `error`), verbatim. */
   onFrame?: (frame: Frame) => void;
   onState?: (state: ConnState, info: { agentOnline: boolean }) => void;
   /** Called on `resync`; reload history here. Returns to `live` when it settles. */
@@ -46,8 +53,8 @@ export class RelayClient {
   private everOpen = false;
   private manualClose = false;
   private attempts = 0;
+  private activeChat: string | null = null;
   private readonly lastSeq = new Map<string, number>();
-  private readonly chats = new Set<string>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private pongTimer: ReturnType<typeof setTimeout> | null = null;
@@ -64,6 +71,11 @@ export class RelayClient {
     return this.lastSeq.get(chat) ?? 0;
   }
 
+  /** The chat a reconnect resumes (the SPA's visible conversation). */
+  setActiveChat(chat: string): void {
+    if (chat) this.activeChat = chat;
+  }
+
   connect(): void {
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
       return;
@@ -77,7 +89,7 @@ export class RelayClient {
     ws.onopen = () => {
       if (this.ws !== ws) return;
       this.attempts = 0;
-      if (this.everOpen) this.resumeAll();
+      if (this.everOpen) this.resumeActive();
       this.everOpen = true;
       this.startHeartbeat();
       this.setState('live');
@@ -91,7 +103,6 @@ export class RelayClient {
 
   /** Send a frame; returns false when the socket is not open. */
   send(frame: Frame): boolean {
-    if (frame.chat) this.chats.add(frame.chat);
     return this.raw(frame);
   }
 
@@ -115,11 +126,12 @@ export class RelayClient {
     return true;
   }
 
-  private resumeAll(): void {
-    for (const chat of this.chats) {
-      const last = this.lastSeq.get(chat) ?? 0;
-      if (last > 0) this.raw({ t: 'resume', chat, last_seq: last });
-    }
+  /** Resume the visible conversation only (protocol §4). */
+  private resumeActive(): void {
+    const chat = this.activeChat;
+    if (!chat) return;
+    const last = this.lastSeq.get(chat) ?? 0;
+    if (last > 0) this.raw({ t: 'resume', chat, last_seq: last });
   }
 
   private receive(raw: unknown): void {
@@ -139,14 +151,24 @@ export class RelayClient {
     if (frame.t === 'ready') {
       this.agentOnline = frame.agentOnline === true;
       this.emitState();
+      this.opts.onFrame?.(frame);
+      return;
+    }
+    // `peer` is relay -> container in v1, but honour it if a hosted relay
+    // forwards agent presence to browsers as well.
+    if (frame.t === 'peer') {
+      if (typeof frame.agentOnline === 'boolean' && frame.agentOnline !== this.agentOnline) {
+        this.agentOnline = frame.agentOnline;
+        this.emitState();
+      }
+      this.opts.onFrame?.(frame);
       return;
     }
     if (frame.t === 'error') {
-      this.handleError(frame);
+      const handledAsResync = this.handleError(frame);
+      if (!handledAsResync) this.opts.onFrame?.(frame);
       return;
     }
-
-    if (frame.chat) this.chats.add(frame.chat);
 
     // Dedupe per chat: redelivered frames after resume are harmless.
     if (frame.chat && typeof frame.seq === 'number') {
@@ -156,6 +178,10 @@ export class RelayClient {
     }
 
     if (frame.t === 'resync' && frame.chat) {
+      // A resync can follow a container restart, where the per-chat counter
+      // starts over at 1. Forget the old high-water mark so the rebuilt
+      // history is not swallowed by the dedupe.
+      this.lastSeq.set(frame.chat, 0);
       this.setState('resync');
       Promise.resolve(this.opts.onResync?.(frame.chat))
         .catch(() => undefined)
@@ -167,20 +193,23 @@ export class RelayClient {
     this.opts.onFrame?.(frame);
   }
 
-  private handleError(frame: Frame): void {
-    if (frame.code === 'E_AUTH') {
-      // Bad credential: stop reconnecting (protocol §6).
+  /** Returns true when the error was converted into a `resync` dispatch. */
+  private handleError(frame: Frame): boolean {
+    // A connection-level auth failure is fatal. An E_AUTH tied to a chat /
+    // approval request is the plugin refusing an approve/deny (M2 A5) and
+    // must NOT take the socket down.
+    if (frame.code === 'E_AUTH' && !frame.chat && !frame.req_id) {
       this.manualClose = true;
       this.stopHeartbeat();
       this.ws?.close();
       this.setState('idle');
-      return;
+      return false;
     }
     if (frame.code === 'E_RESYNC' && frame.chat) {
       this.receive(JSON.stringify({ t: 'resync', chat: frame.chat }));
-      return;
+      return true;
     }
-    console.warn('[relay] error frame', frame);
+    return false;
   }
 
   private handleClose(ws: WebSocket): void {

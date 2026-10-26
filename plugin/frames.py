@@ -25,6 +25,7 @@ __all__ = [
     "end_frame",
     "error_frame",
     "evt_frame",
+    "hist_frame",
     "msg_frame",
     "parse_inbound",
     "resync_frame",
@@ -54,33 +55,44 @@ def check_size(frame):
         return False
 
 
-def evt_frame(chat, seq, text):
-    """Per-delta streaming event: ``{t:"evt", chat, seq, data:{text}}``.
+def evt_frame(chat, seq, text, stream_type=None):
+    """Per-delta streaming event: ``{t:"evt", chat, seq, data:{text, stream_type?}}``.
 
     *text* must be only the NEW suffix of the cumulative stream text (see
     ``util.StreamDiffer``); callers send nothing at all when it is empty.
+    *stream_type* (``"reasoning"`` or ``"message"``) says which segment the
+    delta belongs to; clients concatenate only ``"message"`` deltas into the
+    answer. It is omitted (instead of defaulted) so legacy callers keep the
+    original ``data`` shape.
     """
+    data = {"text": text}
+    if stream_type is not None:
+        data["stream_type"] = stream_type
     return {
         "t": "evt",
         "chat": chat,
         "seq": seq,
-        "data": {"text": text},
+        "data": data,
     }
 
 
-def start_frame(chat, seq=None):
-    """Streaming reply starts: ``{t:"start", chat, seq?}``."""
+def start_frame(chat, seq=None, stream_type=None):
+    """Streaming segment starts: ``{t:"start", chat, seq?, stream_type?}``."""
     frame = {"t": "start", "chat": chat}
     if seq is not None:
         frame["seq"] = seq
+    if stream_type is not None:
+        frame["stream_type"] = stream_type
     return frame
 
 
-def end_frame(chat, seq=None):
-    """Streaming reply finished: ``{t:"end", chat, seq?}``."""
+def end_frame(chat, seq=None, stream_type=None):
+    """Streaming segment finished: ``{t:"end", chat, seq?, stream_type?}``."""
     frame = {"t": "end", "chat": chat}
     if seq is not None:
         frame["seq"] = seq
+    if stream_type is not None:
+        frame["stream_type"] = stream_type
     return frame
 
 
@@ -118,6 +130,22 @@ def resync_frame(chat, reason=None):
     frame = {"t": "resync", "chat": chat}
     if reason:
         frame["reason"] = reason
+    return frame
+
+
+def hist_frame(chat, messages, more=False, seq=None):
+    """History reply: ``{t:"hist", chat, messages:[{role, text}...], more?}``.
+
+    One frame carries as many messages as fit in the 256 KB limit; the caller
+    adds ``more=True`` to every frame but the last (see ``util.pack_history``).
+    ``seq`` is optional because history is a reply to a client request rather
+    than part of the streaming sequence, yet the plugin still numbers it.
+    """
+    frame = {"t": "hist", "chat": chat, "messages": messages}
+    if more:
+        frame["more"] = True
+    if seq is not None:
+        frame["seq"] = seq
     return frame
 
 
