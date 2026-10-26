@@ -13,8 +13,56 @@ const MAX_FRAME_BYTES = 256 * 1024;
 /** Client token for the hosted relay, kept for the tab's lifetime. */
 const TOKEN_KEY = 'webchannel.token';
 
+/** Chat list + visible chat from the previous visit (survives a reload). */
+const CHATS_KEY = 'webchannel.chats';
+const ACTIVE_KEY = 'webchannel.activeChat';
+
 function readToken(): string | null {
   return sessionStorage.getItem(TOKEN_KEY);
+}
+
+/** localStorage is best-effort: private mode / blocked storage throws. */
+function storageGet(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function storageSet(key: string, value: string): void {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    /* not persisted — the session still works, it just won't be restored */
+  }
+}
+
+function persistedChats(): string[] {
+  const raw = storageGet(CHATS_KEY);
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((id): id is string => typeof id === 'string' && id.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Chat list + active chat to start from: the persisted ones when usable,
+ * otherwise exactly one fresh chat (true first visit). Never a second chat.
+ */
+function restoreSession(): { chats: string[]; active: string } {
+  const chats = persistedChats();
+  if (chats.length > 0) {
+    const saved = storageGet(ACTIVE_KEY);
+    const active = saved && chats.includes(saved) ? saved : chats[0];
+    return { chats, active };
+  }
+  const id = newChatId();
+  return { chats: [id], active: id };
 }
 
 type Role = 'user' | 'assistant';
@@ -78,6 +126,11 @@ function byteSize(value: unknown): number {
 
 function fmtKb(bytes: number): string {
   return `${Math.round(bytes / 1024)} KB`;
+}
+
+/** The one oversize-attachment message, shared by pick-time and send-time. */
+function oversizeError(sizeBytes: number): string {
+  return `附件太大：v1 单条消息上限 256KB（含正文与附件编码），当前约 ${fmtKb(sizeBytes)}`;
 }
 
 /** `evt.data` is a raw stream event; the plugin sends {text:<delta>}. */
@@ -332,11 +385,16 @@ function LoginGate({ onSuccess }: { onSuccess: (token: string) => void }) {
 }
 
 export default function App() {
-  const [chatIds, setChatIds] = useState<string[]>(() => [newChatId()]);
-  const [activeChat, setActiveChat] = useState<string>(() => chatIds[0]);
-  const [messagesByChat, setMessagesByChat] = useState<Record<string, ChatMessage[]>>(() => ({
-    [chatIds[0]]: [],
-  }));
+  // Restore once: chatIds, activeChat and messagesByChat must agree on the
+  // same start, otherwise the first render points at a chat that isn't there.
+  const [session] = useState(restoreSession);
+  const [chatIds, setChatIds] = useState<string[]>(() => [...session.chats]);
+  const [activeChat, setActiveChat] = useState<string>(session.active);
+  const [messagesByChat, setMessagesByChat] = useState<Record<string, ChatMessage[]>>(() => {
+    const out: Record<string, ChatMessage[]> = {};
+    for (const id of session.chats) out[id] = [];
+    return out;
+  });
   const [input, setInput] = useState('');
   const [attachment, setAttachment] = useState<Attachment | null>(null);
   const [composerError, setComposerError] = useState<string | null>(null);
@@ -346,7 +404,7 @@ export default function App() {
   const [needsLogin, setNeedsLogin] = useState<boolean>(() => LOGIN_REQUIRED && !readToken());
 
   const clientRef = useRef<RelayClient | null>(null);
-  const activeRef = useRef<string>(chatIds[0]);
+  const activeRef = useRef<string>(session.active);
   const runtimes = useRef<Map<string, ChatRuntime>>(new Map());
   const listRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -422,6 +480,12 @@ export default function App() {
   useEffect(() => {
     activeRef.current = activeChat;
   }, [activeChat]);
+
+  // Persist so a reload restores this list and this conversation.
+  useEffect(() => {
+    storageSet(CHATS_KEY, JSON.stringify(chatIds));
+    storageSet(ACTIVE_KEY, activeChat);
+  }, [chatIds, activeChat]);
 
   useEffect(() => {
     if (needsLogin) return;
@@ -771,10 +835,7 @@ export default function App() {
 
     const size = byteSize(frame);
     if (size > MAX_FRAME_BYTES) {
-      setComposerError(
-        `This message would be ${fmtKb(size)} — protocol v1 allows at most 256 KB per frame ` +
-          `(roughly 180 KB of file data). Remove the file or shorten the text.`,
-      );
+      setComposerError(oversizeError(size));
       return;
     }
     if (!client.send(frame)) {
@@ -849,10 +910,7 @@ export default function App() {
       };
       const size = byteSize(frame);
       if (size > MAX_FRAME_BYTES) {
-        setComposerError(
-          `${file.name} is too large: the frame would be ${fmtKb(size)} and protocol v1 caps a ` +
-            `whole message at 256 KB (about 180 KB of file data before base64 overhead).`,
-        );
+        setComposerError(oversizeError(size));
         return;
       }
       setComposerError(null);
@@ -947,7 +1005,7 @@ export default function App() {
             <button
               className="attach"
               onClick={() => fileRef.current?.click()}
-              title="Attach a file (v1: about 180 KB max)"
+              title="Attach a file (v1: whole message ≤ 256 KB)"
             >
               Attach
             </button>
