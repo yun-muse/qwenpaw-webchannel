@@ -723,6 +723,169 @@ def extract_web_chats(specs, channel="web", sender_id="web-user"):
     return items
 
 
+# ---------------------------------------------------------------------------
+# M9 -- session reasoning effort (SPA vocabulary over QwenPaw thinking)
+# ---------------------------------------------------------------------------
+
+# The SPA only ever shows these five. ``default`` means "no session override"
+# (QwenPaw's ``inherit``); the other four are effort levels. ``minimal`` and
+# ``xhigh`` exist server-side but are deliberately not offered here.
+EFFORT_LEVELS = ("default", "low", "medium", "high", "max")
+EFFORT_RATIOS = {"low": 0.15, "medium": 0.4, "high": 0.75, "max": 1.0}
+
+# QwenPaw's budget ladder is minimal(0) / low(.15) / medium(.4) / high(.75) /
+# xhigh|max(1). ``minimal`` is not in the SPA vocabulary, so position 0 reads
+# as ``low``; 1.0 is shared by xhigh/max, both of which mean "maximum".
+_BUDGET_LADDER = (
+    (0.0, "low"),
+    (0.15, "low"),
+    (0.4, "medium"),
+    (0.75, "high"),
+    (1.0, "max"),
+)
+
+
+def is_effort_level(value):
+    """True for one of the five wire levels the SPA may send."""
+    return isinstance(value, str) and value in EFFORT_LEVELS
+
+
+def effort_budget(level, budget_min, budget_max):
+    """``budget_tokens`` for one SPA level, or None when unusable.
+
+    QwenPaw resolves a budget-mode preference by placing the level on the
+    ``[budget_min, budget_max]`` ladder at 15/40/75/100 %, so the plugin sends
+    the already-converted number: ``{level:"budget", budget_tokens:N}`` is the
+    only budget-mode request the server accepts without adapting it (and a
+    non-inherit preference whose resolved ``reason`` is non-empty is a 422).
+    """
+    ratio = EFFORT_RATIOS.get(level) if isinstance(level, str) else None
+    if ratio is None:
+        return None
+    if not (
+        _is_int(budget_min)
+        and _is_int(budget_max)
+        and 1 <= budget_min <= budget_max
+    ):
+        return None
+    return int(round(budget_min + (budget_max - budget_min) * ratio))
+
+
+def effort_level_for_budget(tokens, budget_min, budget_max):
+    """Nearest SPA level for an effective budget, or None when unusable.
+
+    The server stores a budget-mode preference as ``budget_tokens``; the SPA
+    selector still needs a level, so the token count is placed back on the
+    same ladder and the closest rung wins (ties go to the lower rung).
+    """
+    if not (
+        _is_int(tokens)
+        and _is_int(budget_min)
+        and _is_int(budget_max)
+        and 1 <= budget_min <= budget_max
+    ):
+        return None
+    if budget_max == budget_min:
+        return "low" if tokens <= budget_min else "max"
+    ratio = (tokens - budget_min) / float(budget_max - budget_min)
+    return min(_BUDGET_LADDER, key=lambda item: abs(item[0] - ratio))[1]
+
+
+def effort_supported(control):
+    """SPA levels selectable for a ``ThinkingControl``-shaped dict.
+
+    ``default`` is always selectable (it clears the override) and therefore
+    never listed. A budget-mode model with a usable range can express all four
+    levels; effort-mode models only the ones they declare; unknown/unsupported
+    models (and a budget card without a range) none.
+    """
+    if not isinstance(control, dict):
+        return []
+    kind = control.get("kind")
+    if kind == "budget":
+        low = control.get("budget_min")
+        high = control.get("budget_max")
+        if not (_is_int(low) and _is_int(high) and 1 <= low <= high):
+            return []
+        return ["low", "medium", "high", "max"]
+    if kind == "effort":
+        efforts = control.get("efforts")
+        if not isinstance(efforts, list):
+            return []
+        return [level for level in EFFORT_LEVELS[1:] if level in efforts]
+    return []
+
+
+def effort_level_of_view(view):
+    """SPA level for a ``/thinking`` view's requested value.
+
+    ``inherit`` (no session override) is ``default``; effort levels pass
+    through when they are in the SPA vocabulary; a budget-mode value is
+    reverse-mapped from the effective token count; anything else degrades to
+    ``default`` rather than inventing a level the server never stored.
+    """
+    if not isinstance(view, dict):
+        return "default"
+    value = view.get("value")
+    value = value if isinstance(value, dict) else {}
+    level = value.get("level")
+    if level is None or level == "inherit":
+        return "default"
+    if level in EFFORT_LEVELS[1:]:
+        return level
+    if level == "minimal":
+        return "low"
+    if level == "xhigh":
+        return "max"
+    if level == "budget":
+        effective = view.get("effective")
+        effective = effective if isinstance(effective, dict) else {}
+        tokens = effective.get("budget_tokens")
+        if not _is_int(tokens):
+            tokens = value.get("budget_tokens")
+        control = view.get("control")
+        control = control if isinstance(control, dict) else {}
+        nearest = effort_level_for_budget(
+            tokens, control.get("budget_min"), control.get("budget_max"),
+        )
+        return nearest or "default"
+    return "default"
+
+
+def effort_view_fields(view):
+    """Keyword arguments for ``frames.effort_frame`` from a thinking view."""
+    if not isinstance(view, dict):
+        view = {}
+    control = view.get("control")
+    control = control if isinstance(control, dict) else {}
+    effective = view.get("effective")
+    effective = effective if isinstance(effective, dict) else {}
+
+    effective_level = effective.get("level")
+    if not (isinstance(effective_level, str) and effective_level):
+        effective_level = None
+    budget_tokens = None
+    tokens = effective.get("budget_tokens")
+    if effective_level == "budget" and _is_int(tokens) and tokens >= 1:
+        budget_tokens = tokens
+
+    kind = control.get("kind")
+    if not (isinstance(kind, str) and kind):
+        kind = None
+    model_key = view.get("model_key")
+    if not (isinstance(model_key, str) and model_key):
+        model_key = None
+
+    return {
+        "level": effort_level_of_view(view),
+        "effective_level": effective_level,
+        "budget_tokens": budget_tokens,
+        "supported": effort_supported(control),
+        "kind": kind,
+        "model_key": model_key,
+    }
+
+
 def extract_skill_items(payload):
     """Extract ``[{"id", "name", "description"}]`` from ``/api/skills`` payload."""
     raw = None

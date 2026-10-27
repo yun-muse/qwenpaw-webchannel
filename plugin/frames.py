@@ -52,6 +52,7 @@ __all__ = [
     "chat_renamed_frame",
     "chats_frame",
     "check_size",
+    "effort_frame",
     "end_frame",
     "error_frame",
     "evt_frame",
@@ -266,6 +267,39 @@ def status_frame(agent_name, provider=None, model=None):
         frame["provider"] = provider
     if isinstance(model, str) and model:
         frame["model"] = model
+    return frame
+
+
+def effort_frame(
+    chat, level, effective_level=None, budget_tokens=None,
+    supported=None, kind=None, model_key=None,
+):
+    """Session thinking effort: ``{t:"effort", chat, level, effective?, ...}``.
+
+    ``level`` is the SPA vocabulary (``default|low|medium|high|max``), where
+    ``default`` means "no session override" (QwenPaw's ``inherit``).
+    ``effective`` is the server's resolved ``effective.level`` -- it may be a
+    value the SPA does not offer (``budget``, ``off``, ...). ``budget_tokens``
+    is added for budget-mode preferences, ``supported`` lists the selectable
+    SPA levels (``default`` is never listed because it is always legal), and
+    ``kind`` / ``model_key`` are the server's control kind and
+    ``provider:model`` key. Like the M7 control frames this one carries no
+    ``seq``.
+    """
+    frame = {
+        "t": "effort",
+        "chat": chat,
+        "level": level,
+        "effective": level if effective_level is None else effective_level,
+    }
+    if budget_tokens is not None:
+        frame["budget_tokens"] = budget_tokens
+    if supported is not None:
+        frame["supported"] = list(supported)
+    if kind:
+        frame["kind"] = kind
+    if model_key:
+        frame["model_key"] = model_key
     return frame
 
 

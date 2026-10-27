@@ -22,12 +22,16 @@ export interface Frame {
   t: string;
   chat?: string;
   seq?: number;
+  /** Optional correlation id, echoed on errors (protocol §1). */
+  id?: string;
   /** `start`/`end`: the stream segment ("reasoning" | "message"). */
   stream_type?: string;
   data?: unknown;
   parts?: ContentPart[];
   agentOnline?: boolean;
   code?: string;
+  /** HTTP status carried by some errors (M9 `E_EFFORT`). */
+  status?: number;
   [key: string]: unknown;
 }
 

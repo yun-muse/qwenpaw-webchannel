@@ -69,6 +69,7 @@ superseded generation) is not acked.
 | `models` | `items:[{provider, model, active}]` | **v3** reply to a `models` request; exactly one item has `active:true` when the agent's current (effective) model is known |
 | `model_changed` | `provider`, `model` | **v3** a `set_model` succeeded; this pair is now the agent's active model |
 | `status` | `agent_name`, `provider?`, `model?` | **v3** identity push, sent when the agent attaches and whenever a client joins/leaves; the header displays it |
+| `effort` | `chat`, `level`, `effective`, `budget_tokens?`, `supported?`, `kind?`, `model_key?` | **v4** session thinking state: reply to `get_effort` / `set_effort`; control frame |
 | `file_ready` | `chat`, `id`, `seq?` | **v2** chunked upload verified and staged; `files[]` may now use `{"ref": id}` |
 | `file_error` | `chat`, `id`, `code`, `msg?`, `seq?` | **v2** chunked upload failed; `code` ∈ `E_CHECKSUM` / `E_TOOBIG` / `E_STATE` |
 | `pong` | — | reserved; the relay answers `ping` locally in v1 |
@@ -83,8 +84,8 @@ model's thinking and MUST NOT be concatenated into it. A reply is streaming unti
 segment's `end` — an `end` for `reasoning` closes that segment only. Missing `stream_type` means
 `message` (older containers).
 
-`models`, `model_changed` and `status` are **control frames**: they carry no `seq`, belong to no
-chat's stream, and are never ring-buffered or replayed on `resume` (§9.4).
+`models`, `model_changed`, `status` and `effort` are **control frames**: they carry no `seq`,
+belong to no chat's stream, and are never ring-buffered or replayed on `resume` (§9.4, §10.3).
 
 ### 2.4 browser → container
 
@@ -97,6 +98,8 @@ chat's stream, and are never ring-buffered or replayed on `resume` (§9.4).
 | `hist` | `chat`, `before?`, `limit?` | request history (agent answers with `msg`/`resync` frames) |
 | `models` | — | **v3** request the agent's switchable model list |
 | `set_model` | `provider`, `model` | **v3** switch the agent's active model |
+| `get_effort` | `chat` | **v4** request that chat's session thinking setting |
+| `set_effort` | `chat`, `level` | **v4** set that chat's thinking level (`default` clears the override) |
 | `file_begin` | `chat`, `id`, `name`, `mime`, `size`, `chunks`, `sha256` | **v2** start a chunked upload; `chunks` is how many `file_chunk` frames follow |
 | `file_chunk` | `chat`, `id`, `i`, `data` | **v2** one chunk; `i` is 0-based, `data` is base64 of ≤96 KB raw bytes |
 | `file_end` | `chat`, `id` | **v2** client finished sending; agent answers `file_ready` or `file_error` |
@@ -194,6 +197,7 @@ Error frame: `{"t":"error","code":"...","id":"<offending frame id, if any>"}`.
 | `E_BADFRAME` | not JSON, not an object, missing/non-string `t`, binary message | drop frame; sender may fix and retry |
 | `E_RESYNC` | resume buffer miss | client reloads history |
 | `E_MODEL` | model list unavailable, unknown provider/model, or the app rejected the switch | client shows the error; the connection is unaffected |
+| `E_EFFORT` | thinking setting unavailable, unknown level, unsupported by the current model, or the app rejected the write | client restores the last confirmed level (except a 404: the chat has no server record yet); the connection is unaffected |
 
 `E_AUTH` is enforced at the HTTP upgrade (401 before the socket opens), so it is normally not seen
 as a frame. `E_BADFRAME` is relay-local and never forwarded. `E_CHECKSUM` and `E_STATE` (§8) are
@@ -338,4 +342,70 @@ clients need no special case.
 not part of any chat's stream, and are not ring-buffered or replayed on `resume`. A client that
 reconnects must request `models` again (or wait for the `status` push) rather than expect these frames
 in the replay.
+
+## 10. Protocol v4 — session thinking effort
+
+Lets the browser display and change the per-session reasoning effort QwenPaw already supports. The
+relay needs **no changes**: these are ordinary frames it forwards verbatim. The plugin stores nothing
+of its own — QwenPaw's `chat.meta.runtime_context.thinking` is the single source of truth.
+
+### 10.1 Wire format
+
+Client → agent:
+
+```json
+{"t":"get_effort","chat":"…"}
+{"t":"set_effort","chat":"…","level":"medium"}
+```
+
+Agent → client:
+
+```json
+{"t":"effort","chat":"…","level":"medium","effective":"medium","supported":["low","medium","high"],
+ "kind":"effort","model_key":"openai:gpt-4o"}
+{"t":"effort","chat":"…","level":"high","effective":"budget","budget_tokens":24832,
+ "supported":["low","medium","high","max"],"kind":"budget","model_key":"anthropic:claude-…"}
+{"t":"error","code":"E_EFFORT","chat":"…","status":422,"detail":"…","id":"effort-set"}
+```
+
+- `level` is the **only** vocabulary the SPA sends: `default | low | medium | high | max`.
+  `default` means "no session override" and maps to QwenPaw's `inherit`.
+- `effective` is the server's resolved `effective.level`. It may be a value outside the SPA
+  vocabulary (`budget`, `off`, …); it is informational, not a selectable option.
+- `budget_tokens` is present when the effective preference is budget mode (the actual token count
+  the server resolved).
+- `supported` lists the selectable SPA levels (the plugin always sends it). `default` is always
+  legal and therefore never listed. Budget-mode models list all four levels; effort-mode models list
+  only the levels they declare; unknown/unsupported models send an empty list, leaving only
+  `default` selectable. Clients MUST disable options absent from the list, but never `default`.
+- `kind` is QwenPaw's control kind (`effort | budget | unknown | unsupported`) and `model_key` is
+  the `provider:model` the preference is stored under.
+
+### 10.2 Server semantics
+
+- `GET`/`PUT` use the chat's `ChatSpec.id`; the plugin resolves the web chat to that id first. A chat
+  that has never received a message has no `ChatSpec` yet, so both requests answer
+  `E_EFFORT` with `status: 404`.
+- `default` is always accepted: the plugin sends `{"level":"inherit"}`, which clears this session's
+  override.
+- For any other level the plugin inspects `control` **before** writing:
+  - `effort`: the level must be exactly one of `control.efforts`. If it is not, the request is
+    `E_EFFORT` — the server would adapt it and then reject the non-inherit preference with 422
+    because its resolved `reason` is `adapted`.
+  - `budget`: the plugin converts the level to
+    `N = round(budget_min + (budget_max - budget_min) * ratio)` with ratio 0.15 / 0.4 / 0.75 / 1.0
+    for low / medium / high / max, and sends `{"level":"budget","budget_tokens":N}`. Sending a bare
+    level here would also be adapted and rejected with 422.
+  - `unknown` / `unsupported`: `E_EFFORT`.
+- A preference is keyed by `model_key`. Switching the model switches to that model's own
+  preference/default, so clients MUST re-request `get_effort` after `model_changed`.
+- `E_EFFORT` carries `chat` and, when the local app produced an HTTP status, `status`; it echoes the
+  request's optional envelope `id` (`effort-get` / `effort-set` in the SPA). A 404 is not a validation
+  failure: the client should keep its local selection and retry after the chat's first message.
+
+### 10.3 Control frames
+
+`effort` is sent **without `seq`**, like `models` / `model_changed` / `status`; it is not
+ring-buffered and not replayed on `resume`. A reconnecting client re-requests `get_effort` for the
+visible chat.
 

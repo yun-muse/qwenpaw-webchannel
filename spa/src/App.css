@@ -1867,6 +1867,61 @@ button:disabled {
   text-align: center;
 }
 
+/* Thinking effort (M9): a compact segmented control beside the model button */
+
+.effort-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 5px 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.effort-label {
+  white-space: nowrap;
+}
+
+.effort-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px;
+  border-radius: 6px;
+  background: var(--panel-2);
+}
+
+.effort-opt {
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 5px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.effort-opt:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--panel);
+}
+
+.effort-opt.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+.effort-opt:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
 .send {
   height: 32px;
   padding: 0 14px;

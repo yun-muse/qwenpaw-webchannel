@@ -64,6 +64,7 @@ try:  # package-relative (tests, ``python -m plugin...``)
         chat_renamed_frame,
         chats_frame,
         check_size,
+        effort_frame,
         end_frame,
         error_frame,
         evt_frame,
@@ -90,10 +91,13 @@ try:  # package-relative (tests, ``python -m plugin...``)
         active_llm_of,
         approval_owner_ok,
         decode_file_entry,
+        effort_budget,
+        effort_view_fields,
         extract_skill_items,
         extract_web_chats,
         hist_limit,
         history_messages,
+        is_effort_level,
         model_items,
         pack_history,
         plan_model_switch,
@@ -109,6 +113,7 @@ except ImportError:  # loaded as a top-level module by the plugin loader
         chat_renamed_frame,
         chats_frame,
         check_size,
+        effort_frame,
         end_frame,
         error_frame,
         evt_frame,
@@ -135,10 +140,13 @@ except ImportError:  # loaded as a top-level module by the plugin loader
         active_llm_of,
         approval_owner_ok,
         decode_file_entry,
+        effort_budget,
+        effort_view_fields,
         extract_skill_items,
         extract_web_chats,
         hist_limit,
         history_messages,
+        is_effort_level,
         model_items,
         pack_history,
         plan_model_switch,
@@ -496,6 +504,10 @@ class WebChannel(BaseChannel):
             await self._handle_models(frame)
         elif kind == "set_model":
             await self._handle_set_model(frame)
+        elif kind == "get_effort":
+            await self._handle_get_effort(frame)
+        elif kind == "set_effort":
+            await self._handle_set_effort(frame)
         elif kind == "chats":
             await self._handle_chats(frame)
         elif kind == "del_chat":
@@ -1115,6 +1127,199 @@ class WebChannel(BaseChannel):
         )
         await self._send_control(model_changed_frame(new_provider, new_model))
         await self._send_status()
+
+    # -- M9: per-session thinking effort --------------------------------
+
+    @staticmethod
+    def _thinking_detail(payload, status, fallback):
+        """Human-readable reason for a failed thinking call."""
+        detail = payload.get("detail") if isinstance(payload, dict) else None
+        if isinstance(detail, str) and detail:
+            return detail[:200]
+        if status == 0:
+            return "%s: app unreachable" % fallback
+        return "%s (HTTP %s)" % (fallback, status)
+
+    async def _effort_error(self, chat, detail, status=None, req_id=None):
+        """Send an ``E_EFFORT`` control frame; never raises.
+
+        ``chat`` is always included so the SPA can roll back the right
+        selector. ``status`` carries the local API's HTTP status when there
+        was one (404 = the chat has no server record yet); ``id`` echoes the
+        request's envelope id as protocol section 1 promises.
+        """
+        frame = error_frame("E_EFFORT", detail)
+        frame["chat"] = chat
+        if isinstance(status, int) and status:
+            frame["status"] = status
+        if isinstance(req_id, str) and req_id:
+            frame["id"] = req_id
+        await self._send_control(frame)
+
+    async def _handle_get_effort(self, frame: Dict[str, Any]) -> None:
+        """Reply to ``{t:"get_effort", chat}`` with the session's thinking view.
+
+        Reads ``GET /api/chats/{ChatSpec.id}/thinking`` and projects the view
+        onto the SPA vocabulary. The plugin keeps no copy: ``chat.meta`` on
+        the server is the only store.
+        """
+        chat = str(frame.get("chat") or "default")
+        req_id = frame.get("id") if isinstance(frame.get("id"), str) else None
+        try:
+            chat_id = await self._resolve_chat_id(chat)
+            if not chat_id:
+                await self._effort_error(
+                    chat,
+                    "no QwenPaw chat exists for this session yet",
+                    status=404,
+                    req_id=req_id,
+                )
+                return
+
+            status, payload = await self._api_json(
+                "GET", "/api/chats/%s/thinking" % chat_id,
+            )
+            if not (200 <= status < 300) or not isinstance(payload, dict):
+                await self._effort_error(
+                    chat,
+                    self._thinking_detail(
+                        payload, status, "thinking settings unavailable",
+                    ),
+                    status=status,
+                    req_id=req_id,
+                )
+                return
+
+            await self._send_control(
+                effort_frame(chat, **effort_view_fields(payload)),
+            )
+        except Exception:  # noqa: BLE001 - a control frame never fails a chat
+            logger.warning(
+                "webchannel: get_effort failed for chat=%s",
+                chat, exc_info=True,
+            )
+            await self._effort_error(
+                chat, "thinking settings unavailable", req_id=req_id,
+            )
+
+    async def _handle_set_effort(self, frame: Dict[str, Any]) -> None:
+        """Persist one session thinking level (``set_effort``).
+
+        ``default`` clears the override with ``{"level":"inherit"}``, which
+        is always legal. Any other level is checked against the model's
+        ``control`` first: effort models must declare the exact level, and
+        budget models get the level converted to ``budget_tokens`` on their
+        ``[budget_min, budget_max]`` ladder. Both checks mirror what the
+        server's ``PUT`` would otherwise reject with a 422 after adapting.
+        """
+        chat = str(frame.get("chat") or "default")
+        req_id = frame.get("id") if isinstance(frame.get("id"), str) else None
+        level = frame.get("level")
+        if not is_effort_level(level):
+            await self._effort_error(
+                chat,
+                "unknown effort level: %s" % str(level)[:80],
+                req_id=req_id,
+            )
+            return
+
+        try:
+            chat_id = await self._resolve_chat_id(chat)
+            if not chat_id:
+                await self._effort_error(
+                    chat,
+                    "no QwenPaw chat exists for this session yet",
+                    status=404,
+                    req_id=req_id,
+                )
+                return
+
+            path = "/api/chats/%s/thinking" % chat_id
+            if level == "default":
+                body = {"level": "inherit"}
+            else:
+                status, view = await self._api_json("GET", path)
+                if not (200 <= status < 300) or not isinstance(view, dict):
+                    await self._effort_error(
+                        chat,
+                        self._thinking_detail(
+                            view, status, "thinking settings unavailable",
+                        ),
+                        status=status,
+                        req_id=req_id,
+                    )
+                    return
+
+                control = view.get("control")
+                control = control if isinstance(control, dict) else {}
+                kind = control.get("kind")
+                if kind == "effort":
+                    efforts = control.get("efforts")
+                    if not (isinstance(efforts, list) and level in efforts):
+                        await self._effort_error(
+                            chat,
+                            "current model does not support effort level '%s'"
+                            % level,
+                            req_id=req_id,
+                        )
+                        return
+                    body = {"level": level}
+                elif kind == "budget":
+                    tokens = effort_budget(
+                        level,
+                        control.get("budget_min"),
+                        control.get("budget_max"),
+                    )
+                    if tokens is None:
+                        await self._effort_error(
+                            chat,
+                            "current model has no usable thinking budget range",
+                            req_id=req_id,
+                        )
+                        return
+                    body = {"level": "budget", "budget_tokens": tokens}
+                elif kind == "unsupported":
+                    await self._effort_error(
+                        chat,
+                        "current model does not support thinking effort",
+                        req_id=req_id,
+                    )
+                    return
+                else:
+                    await self._effort_error(
+                        chat,
+                        "current model has no known thinking control",
+                        req_id=req_id,
+                    )
+                    return
+
+            status, view = await self._api_json("PUT", path, json_body=body)
+            if not (200 <= status < 300) or not isinstance(view, dict):
+                await self._effort_error(
+                    chat,
+                    self._thinking_detail(
+                        view, status, "thinking setting rejected",
+                    ),
+                    status=status,
+                    req_id=req_id,
+                )
+                return
+
+            logger.info(
+                "webchannel: chat=%s effort=%s -> %s",
+                chat, level, body.get("level"),
+            )
+            await self._send_control(
+                effort_frame(chat, **effort_view_fields(view)),
+            )
+        except Exception:  # noqa: BLE001 - a control frame never fails a chat
+            logger.warning(
+                "webchannel: set_effort failed for chat=%s level=%s",
+                chat, level, exc_info=True,
+            )
+            await self._effort_error(
+                chat, "thinking setting failed", req_id=req_id,
+            )
 
     # -- M8: server-side chat list / delete / rename & workspace prompts --
 

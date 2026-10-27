@@ -82,6 +82,11 @@ const ACTIVE_KEY = 'webchannel.activeChat';
 
 /** User-given chat titles, keyed by chat id (M7). */
 const NAMES_KEY = 'webchannel.chatNames';
+/** Per-chat thinking level, keyed by chat id (M9). */
+const EFFORT_KEY = 'webchannel.effort';
+/** A chat gets its server record on the first message; retry the pending
+ *  level once that message has had time to be processed (M9). */
+const EFFORT_REAPPLY_MS = 1200;
 /** 'light' | 'dark' (M7). */
 const THEME_KEY = 'webchannel.theme';
 /** Optional endpoint override ('local' | 'cloud') for dev preview convenience. */
@@ -130,6 +135,24 @@ function persistedChats(): string[] {
   }
 }
 
+/** Per-chat thinking levels from the last visit; malformed entries are dropped. */
+function persistedEfforts(): Record<string, EffortLevel> {
+  const raw = storageGet(EFFORT_KEY);
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out: Record<string, EffortLevel> = {};
+    for (const [id, value] of Object.entries(parsed as Record<string, unknown>)) {
+      const level = asEffortLevel(value);
+      if (level) out[id] = level;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 /** Custom chat titles from the last visit; anything malformed is dropped. */
 function persistedNames(): Record<string, string> {
   const raw = storageGet(NAMES_KEY);
@@ -148,6 +171,26 @@ function persistedNames(): Record<string, string> {
 }
 
 type Theme = 'light' | 'dark';
+
+/** The five levels the SPA sends; `default` maps to QwenPaw's `inherit`. */
+type EffortLevel = 'default' | 'low' | 'medium' | 'high' | 'max';
+
+const EFFORT_LEVELS: readonly EffortLevel[] = ['default', 'low', 'medium', 'high', 'max'];
+const EFFORT_LABELS: Record<EffortLevel, string> = {
+  default: '默认',
+  low: '低',
+  medium: '中',
+  high: '高',
+  max: '最大',
+};
+const EFFORT_TITLE = '已设置；个别模型可能不支持或忽略';
+
+function asEffortLevel(value: unknown): EffortLevel | null {
+  if (typeof value !== 'string') return null;
+  return (EFFORT_LEVELS as readonly string[]).includes(value)
+    ? (value as EffortLevel)
+    : null;
+}
 
 /** Stored choice first, then the OS preference. */
 function initialTheme(): Theme {
@@ -205,6 +248,26 @@ interface ModelItem {
 interface ModelRef {
   provider: string;
   model: string;
+}
+
+/** Last server-confirmed effort state for one chat (M9). */
+interface EffortMeta {
+  confirmed: EffortLevel | null;
+  /** Selectable levels from the last `effort` frame; null = unknown. */
+  supported: string[] | null;
+  kind: string;
+  modelKey: string;
+  pending: boolean;
+}
+
+function effortSupportedOf(raw: unknown): string[] | null {
+  if (!Array.isArray(raw)) return null;
+  const out: string[] = [];
+  for (const entry of raw) {
+    const level = asEffortLevel(entry);
+    if (level) out.push(level);
+  }
+  return out;
 }
 
 interface CommandSpec {
@@ -987,6 +1050,9 @@ export default function App() {
   const [paletteIndex, setPaletteIndex] = useState(0);
   const [paletteMuted, setPaletteMuted] = useState<string | null>(null);
   const [chatNames, setChatNames] = useState<Record<string, string>>(persistedNames);
+  // M9: local choice per chat (restored first), plus what the server confirmed.
+  const [effortLevels, setEffortLevels] = useState<Record<string, EffortLevel>>(persistedEfforts);
+  const [effortMeta, setEffortMeta] = useState<Record<string, EffortMeta>>({});
   const [search, setSearch] = useState('');
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
@@ -1019,6 +1085,13 @@ export default function App() {
   const modelWrapRef = useRef<HTMLDivElement | null>(null);
   const nearBottomRef = useRef(true);
   const lastChatRef = useRef<string>(session.active);
+  // M9: onFrame runs outside React's render closure, so the effort state it
+  // reads (and rolls back) lives in refs mirrored from the React state.
+  const effortLevelsRef = useRef<Record<string, EffortLevel>>(effortLevels);
+  const effortMetaRef = useRef<Record<string, EffortMeta>>({});
+  const effortRollbackRef = useRef<Record<string, EffortLevel>>({});
+  const effortRetryTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const runtimeOf = (chat: string): ChatRuntime => {
     let rt = runtimes.current.get(chat);
@@ -1036,6 +1109,63 @@ export default function App() {
   const ensureChat = (chat: string) => {
     setChatIds((prev) => (prev.includes(chat) ? prev : [...prev, chat]));
     setMessagesByChat((prev) => (chat in prev ? prev : { ...prev, [chat]: [] }));
+  };
+
+  // ---- M9: thinking effort (per chat, server is authoritative) ----
+  const showToastBriefly = (message: string) => {
+    setToast(message);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => {
+      toastTimer.current = null;
+      // Only dismiss our own notice, never a newer one.
+      setToast((current) => (current === message ? null : current));
+    }, 4000);
+  };
+
+  const applyEffortLevel = (chat: string, level: EffortLevel) => {
+    const next = { ...effortLevelsRef.current, [chat]: level };
+    effortLevelsRef.current = next;
+    setEffortLevels(next);
+  };
+
+  const mergeEffortMeta = (chat: string, patch: Partial<EffortMeta>) => {
+    const prev = effortMetaRef.current[chat];
+    const next: EffortMeta = {
+      confirmed: prev?.confirmed ?? null,
+      supported: prev?.supported ?? null,
+      kind: prev?.kind ?? '',
+      modelKey: prev?.modelKey ?? '',
+      pending: prev?.pending ?? false,
+      ...patch,
+    };
+    const all = { ...effortMetaRef.current, [chat]: next };
+    effortMetaRef.current = all;
+    setEffortMeta(all);
+  };
+
+  const forgetEffort = (chat: string) => {
+    const timer = effortRetryTimers.current.get(chat);
+    if (timer) {
+      clearTimeout(timer);
+      effortRetryTimers.current.delete(chat);
+    }
+    delete effortRollbackRef.current[chat];
+    if (chat in effortLevelsRef.current) {
+      const next = { ...effortLevelsRef.current };
+      delete next[chat];
+      effortLevelsRef.current = next;
+      setEffortLevels(next);
+    }
+    if (chat in effortMetaRef.current) {
+      const next = { ...effortMetaRef.current };
+      delete next[chat];
+      effortMetaRef.current = next;
+      setEffortMeta(next);
+    }
+  };
+
+  const requestEffort = (chat: string) => {
+    clientRef.current?.send({ t: 'get_effort', chat, id: 'effort-get' });
   };
 
   const requestHist = (chat: string) => {
@@ -1214,6 +1344,30 @@ export default function App() {
   useEffect(() => {
     storageSet(NAMES_KEY, JSON.stringify(chatNames));
   }, [chatNames]);
+
+  useEffect(() => {
+    // The ref is the write-through source for event handlers; every setter
+    // (applyEffortLevel / forgetEffort) updates it together with the state.
+    storageSet(EFFORT_KEY, JSON.stringify(effortLevels));
+  }, [effortLevels]);
+
+  useEffect(
+    () => () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      for (const timer of effortRetryTimers.current.values()) clearTimeout(timer);
+      effortRetryTimers.current.clear();
+    },
+    [],
+  );
+
+  useEffect(() => {
+    // The local value is already rendered from localStorage; align it with
+    // the server's stored choice (a chat with no record yet answers 404 and
+    // keeps the local value).
+    if (effortMetaRef.current[activeChat]?.pending) return;
+    requestEffort(activeChat);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only chat switches
+  }, [activeChat]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -1564,6 +1718,24 @@ export default function App() {
           setModelBusy(false);
           setPickerOpen(false);
           setInlineSubMode(null);
+          // A preference is keyed by provider:model, so the new model has its
+          // own value/default. Re-align the visible chat (control frame: never
+          // replayed on reconnect, always requested explicitly).
+          requestEffort(activeRef.current);
+          break;
+        }
+
+        case 'effort': {
+          const level = asEffortLevel(frame.level);
+          if (!level) break;
+          applyEffortLevel(chat, level);
+          mergeEffortMeta(chat, {
+            confirmed: level,
+            supported: effortSupportedOf(frame.supported),
+            kind: asString(frame.kind),
+            modelKey: asString(frame.model_key),
+            pending: false,
+          });
           break;
         }
 
@@ -1646,6 +1818,29 @@ export default function App() {
           }
           if (code === 'E_MODEL') setModelBusy(false);
           if (code === 'E_PROMPT') setPromptStatus(`❌ 保存失败: ${detail}`);
+          if (code === 'E_EFFORT') {
+            const effortReq = asString(frame.id);
+            const effortChat = asString(frame.chat) || activeRef.current;
+            const status = typeof frame.status === 'number' ? frame.status : 0;
+            if (effortReq === 'effort-set') {
+              // 404 means "the chat has no server record yet" (it is created
+              // by its first message). Keep the local choice; send() retries
+              // it after that message. Everything else is a real rejection.
+              if (status !== 404) {
+                const meta = effortMetaRef.current[effortChat];
+                const rollback =
+                  meta?.confirmed ?? effortRollbackRef.current[effortChat] ?? 'default';
+                applyEffortLevel(effortChat, rollback);
+              }
+              mergeEffortMeta(effortChat, { pending: false });
+              showToastBriefly(detail ? `思考等级未生效 — ${detail}` : '思考等级未生效');
+            } else if (effortReq !== 'effort-get') {
+              showToastBriefly(detail ? `思考等级未生效 — ${detail}` : '思考等级未生效');
+            }
+            // get_effort failures are silent: a new chat has no record yet,
+            // and the local selection is still the best thing to show.
+            break;
+          }
           setToast(detail ? `${code} — ${detail}` : code);
           break;
         }
@@ -1672,6 +1867,13 @@ export default function App() {
         setAgentOnline(info.agentOnline);
         if (next === 'live') {
           maybeRequestHist(activeRef.current);
+          // Control frames are not replayed, so re-align the visible chat's
+          // thinking level on every (re)connect.
+          clientRef.current?.send({
+            t: 'get_effort',
+            chat: activeRef.current,
+            id: 'effort-get',
+          });
           if (!modelsRequested.current) {
             modelsRequested.current = true;
             clientRef.current?.send({ t: 'models' });
@@ -1702,6 +1904,8 @@ export default function App() {
 
   const messages = messagesByChat[activeChat] ?? [];
   const streaming = messages.some((m) => m.streaming);
+  const activeEffort = effortLevels[activeChat] ?? 'default';
+  const activeEffortSupported = effortMeta[activeChat]?.supported ?? null;
 
   useEffect(() => {
     const el = listRef.current;
@@ -1753,6 +1957,55 @@ export default function App() {
 
   const requestModels = () => {
     clientRef.current?.send({ t: 'models' });
+  };
+
+  const chooseEffort = (level: EffortLevel) => {
+    const chat = activeRef.current;
+    const current = effortLevelsRef.current[chat] ?? 'default';
+    if (level === current) return;
+    const supported = effortMetaRef.current[chat]?.supported;
+    if (level !== 'default' && supported != null && !supported.includes(level)) {
+      return;
+    }
+    const client = clientRef.current;
+    if (!client) {
+      showToastBriefly('未连接 — 思考等级未设置');
+      return;
+    }
+    effortRollbackRef.current[chat] = current;
+    applyEffortLevel(chat, level);
+    mergeEffortMeta(chat, { pending: true });
+    if (!client.send({ t: 'set_effort', chat, level, id: 'effort-set' })) {
+      applyEffortLevel(chat, current);
+      mergeEffortMeta(chat, { pending: false });
+      showToastBriefly('未连接 — 思考等级未设置');
+    }
+  };
+
+  /**
+   * A chat only gets its server record on its first message. If the user has
+   * an unconfirmed local level, retry it once that turn had time to create
+   * the chat; the 404 reply itself deliberately keeps the local choice.
+   */
+  const scheduleEffortReapply = (chat: string) => {
+    const level = effortLevelsRef.current[chat] ?? 'default';
+    const meta = effortMetaRef.current[chat];
+    if (level === 'default' || meta?.confirmed === level) return;
+    if (effortRetryTimers.current.has(chat)) return;
+    const timer = setTimeout(() => {
+      effortRetryTimers.current.delete(chat);
+      const current = effortLevelsRef.current[chat] ?? 'default';
+      const now = effortMetaRef.current[chat];
+      if (current === 'default' || now?.confirmed === current) return;
+      const client = clientRef.current;
+      if (!client) return;
+      effortRollbackRef.current[chat] = now?.confirmed ?? 'default';
+      mergeEffortMeta(chat, { pending: true });
+      if (!client.send({ t: 'set_effort', chat, level: current, id: 'effort-set' })) {
+        mergeEffortMeta(chat, { pending: false });
+      }
+    }, EFFORT_REAPPLY_MS);
+    effortRetryTimers.current.set(chat, timer);
   };
 
   const openModelPicker = () => {
@@ -1909,6 +2162,7 @@ export default function App() {
       return next;
     });
     runtimes.current.delete(id);
+    forgetEffort(id);
     if (renamingId === id) cancelRename();
     if (id !== activeChat) return;
     if (remaining.length > 0) selectChat(remaining[0]);
@@ -1993,6 +2247,7 @@ export default function App() {
       setComposerError('未连接 — 正在重连，请稍后重试。');
       return;
     }
+    scheduleEffortReapply(chat);
     nearBottomRef.current = true;
     setNearBottom(true);
     updateChat(chat, (prev) => [
@@ -2039,6 +2294,7 @@ export default function App() {
       setComposerError('未连接 — 正在重连，请稍后重试。');
       return;
     }
+    scheduleEffortReapply(chat);
     nearBottomRef.current = true;
     setNearBottom(true);
     updateChat(chat, (prev) => [
@@ -2823,6 +3079,35 @@ export default function App() {
                       {modelBusy ? <div className="model-busy">正在热切换模型…</div> : null}
                     </div>
                   ) : null}
+                </div>
+
+                <div className="effort-wrap" title={EFFORT_TITLE}>
+                  <span className="effort-label">思考等级</span>
+                  <div className="effort-group" role="group" aria-label="思考等级">
+                    {EFFORT_LEVELS.map((level) => {
+                      const disabled =
+                        level !== 'default' &&
+                        activeEffortSupported != null &&
+                        !activeEffortSupported.includes(level);
+                      return (
+                        <button
+                          key={level}
+                          type="button"
+                          className={`effort-opt${activeEffort === level ? ' active' : ''}`}
+                          aria-pressed={activeEffort === level}
+                          disabled={disabled}
+                          title={
+                            disabled
+                              ? `${EFFORT_LABELS[level]} — ${EFFORT_TITLE} · 当前模型未声明支持该档位`
+                              : `${EFFORT_LABELS[level]} — ${EFFORT_TITLE}`
+                          }
+                          onClick={() => chooseEffort(level)}
+                        >
+                          {EFFORT_LABELS[level]}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
 
