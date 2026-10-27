@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import logging
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -52,6 +53,7 @@ try:  # package-relative (tests, ``python -m plugin...``)
         status_frame,
     )
     from .relay_client import RelayClient
+    from .filelog import FileLog
     from .turso_archive import TursoArchiver
     from .util import (
         ANSWER_STREAM_TYPE,
@@ -87,6 +89,7 @@ except ImportError:  # loaded as a top-level module by the plugin loader
         status_frame,
     )
     from relay_client import RelayClient
+    from filelog import FileLog
     from turso_archive import TursoArchiver
     from util import (
         ANSWER_STREAM_TYPE,
@@ -205,6 +208,8 @@ class WebChannel(BaseChannel):
         self._agent_name: Optional[str] = None
         # Protocol v2 chunked uploads: in-progress assemblies + staged files.
         self._files = FileTransfers()
+        # Rotating local log of the relay lifecycle (M7.2); owned by start().
+        self._flog: Optional[FileLog] = None
 
     # -- construction / session mapping ---------------------------------
 
@@ -257,13 +262,19 @@ class WebChannel(BaseChannel):
     async def start(self) -> None:
         if self._relay is not None:
             return
+        ws_dir = getattr(self._workspace, "workspace_dir", None)
+        base = Path(ws_dir) if ws_dir else Path(__file__).resolve().parent
+        flog = FileLog(base / "webchannel.log")
+        self._flog = flog
         self._relay = RelayClient(
             self.relay_url,
             self.token,
             agent_id=self._agent_id(),
             on_frame=self._on_relay_frame,
+            file_log=flog,
         )
         await self._relay.start()
+        flog.write("channel_start", agent=self._agent_id())
         self._archiver.agent_id = self._agent_id()
         await self._archiver.start()
         logger.info(
@@ -273,6 +284,9 @@ class WebChannel(BaseChannel):
         )
 
     async def stop(self) -> None:
+        flog, self._flog = self._flog, None
+        if flog is not None:
+            flog.write("channel_stop", agent=self._agent_id())
         await self._archiver.stop()
         relay, self._relay = self._relay, None
         if relay is not None:

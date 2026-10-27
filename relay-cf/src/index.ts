@@ -196,6 +196,16 @@ export class RelayDO extends DurableObject {
   private agent: WebSocket | null = null;
   /** Generation of the current agent, mirroring its attachment. */
   private agentMeta: { started: number; session: string } | null = null;
+  /**
+   * Epoch ms of the last business frame from the current agent socket (0 when
+   * no agent has spoken since this object was built). Deliberately in-memory:
+   * it is a liveness hint, not state worth persisting, and a hibernation
+   * rebuild starts it at 0 again. The app-level `{"t":"ping"}` heartbeat is
+   * answered by setWebSocketAutoResponse and never reaches webSocketMessage,
+   * so it does NOT stamp — this field means "last agent business frame",
+   * which is exactly the tell for a silent-but-"online" agent.
+   */
+  private agentLastSeenAt = 0;
   /** Every connected browser socket. */
   private clients = new Set<WebSocket>();
 
@@ -250,7 +260,12 @@ export class RelayDO extends DurableObject {
     const route = `${request.method} ${url.pathname}`;
 
     if (route === 'GET /health') {
-      return json({ ok: true, agentOnline: this.agent !== null, clients: this.clients.size });
+      return json({
+        ok: true,
+        agentOnline: this.agent !== null,
+        clients: this.clients.size,
+        agentLastSeen: this.agentLastSeenAt > 0 ? this.agentLastSeenAt : null,
+      });
     }
     // Deferred: WebSocket is the only transport in v1 (relay-node has no
     // /poll either). See README.
@@ -348,7 +363,10 @@ export class RelayDO extends DurableObject {
       }
       // Only the agent that owns the slot may reach clients; frames from
       // parked or superseded sockets are dropped.
-      if (ws === this.agent) this.broadcast(message);
+      if (ws === this.agent) {
+        this.agentLastSeenAt = Date.now();
+        this.broadcast(message);
+      }
       return;
     }
 
@@ -378,6 +396,11 @@ export class RelayDO extends DurableObject {
       }
       return;
     }
+
+    // Hello is this agent's first business frame: stamp it once, covering both
+    // the re-hello refresh and the win below (a superseded hello returned
+    // above, so it never stamps).
+    this.agentLastSeenAt = Date.now();
 
     if (ws === this.agent) {
       // Re-hello from the agent that already owns the slot: refresh in place.
@@ -469,6 +492,7 @@ export class RelayDO extends DurableObject {
     if (ws === this.agent) {
       this.agent = null;
       this.agentMeta = null;
+      this.agentLastSeenAt = 0;
       return;
     }
     if (this.clients.delete(ws)) this.notifyPeer();

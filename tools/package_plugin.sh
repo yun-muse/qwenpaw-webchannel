@@ -32,6 +32,7 @@ FILES=(
   frames.py
   util.py
   relay_client.py
+  filelog.py
   turso_archive.py
   README.md
 )

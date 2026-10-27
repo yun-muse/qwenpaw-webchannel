@@ -253,8 +253,21 @@ async function main() {
   // -- 8. /poll deferral + /health ----------------------------------------------
   const poll = await fetch(`${BASE}/poll?cursor=0`);
   const health = await (await fetch(`${BASE}/health`)).json();
-  verdict('POLL-AND-HEALTH', poll.status === 501 && health.ok === true && health.agentOnline === true,
+  verdict('POLL-AND-HEALTH', poll.status === 501 && health.ok === true && health.agentOnline === true &&
+    typeof health.agentLastSeen === 'number' && health.agentLastSeen > 0,
     `poll=${poll.status} health=${JSON.stringify(health)}`);
+
+  // -- 8b. agent last-seen ------------------------------------------------------
+  // /health.agentLastSeen is stamped by the agent's own business frames (hello
+  // counts; the app-level ping is auto-answered and never reaches the handler),
+  // so a later value must not go backwards.
+  const seenFirst = health.agentLastSeen;
+  agent2.send({ t: 'msg', chat: 'c10', text: 'last-seen-probe' });
+  await sleep(60);
+  const healthLater = await (await fetch(`${BASE}/health`)).json();
+  verdict('AGENT-LAST-SEEN',
+    typeof healthLater.agentLastSeen === 'number' && healthLater.agentLastSeen >= seenFirst,
+    `first=${seenFirst} later=${healthLater.agentLastSeen}`);
 
   // -- 9. generation gating -----------------------------------------------------
   // A stale agent (older `started`) is closed with 4000 and must not disturb
