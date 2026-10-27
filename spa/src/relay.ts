@@ -43,7 +43,10 @@ export interface RelayOptions {
    * (local dev).
    */
   getToken?: () => string | null;
-  /** Connection-level `E_AUTH` (bad/expired token): the socket is gone for good. */
+  /**
+   * Connection-level `E_AUTH` (bad/expired token) or three consecutive
+   * handshakes that never opened: the socket is gone for good.
+   */
   onAuthFailure?: () => void;
   /** Every frame the relay forwards (plus `ready` / `error`), verbatim. */
   onFrame?: (frame: Frame) => void;
@@ -56,6 +59,16 @@ const DEFAULT_URL = 'ws://127.0.0.1:8787/ws/client';
 const PING_MS = 25_000;
 const PONG_TIMEOUT_MS = 10_000;
 const MAX_BACKOFF_MS = 8_000;
+/**
+ * The hosted relay rejects a bad/expired client token at the WebSocket
+ * upgrade (HTTP 401), which reaches the browser as a plain `close` with no
+ * reason. Three consecutive handshakes that never opened are therefore
+ * treated as an auth failure instead of retrying forever. The counter resets
+ * on every successful open, so a later expiry is still caught; but the rule
+ * only applies when the app supplied `onAuthFailure` (the login-required
+ * build) — local dev keeps retrying a relay that is simply not up yet.
+ */
+const MAX_OPEN_FAILURES = 3;
 
 export class RelayClient {
   private readonly url: string;
@@ -65,6 +78,10 @@ export class RelayClient {
   private everOpen = false;
   private manualClose = false;
   private attempts = 0;
+  /** Consecutive connects whose socket never reached `open`. */
+  private openFailures = 0;
+  /** Sockets that did reach `open` at least once. */
+  private readonly opened = new WeakSet<WebSocket>();
   private activeChat: string | null = null;
   private readonly lastSeq = new Map<string, number>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -101,6 +118,8 @@ export class RelayClient {
     ws.onopen = () => {
       if (this.ws !== ws) return;
       this.attempts = 0;
+      this.openFailures = 0;
+      this.opened.add(ws);
       if (this.everOpen) this.resumeActive();
       this.everOpen = true;
       this.startHeartbeat();
@@ -244,6 +263,20 @@ export class RelayClient {
     if (this.manualClose) {
       this.setState('idle');
       return;
+    }
+    // The upgrade was refused (hosted relay: 401 for a bad/expired token).
+    // There is no close reason to distinguish it from a network outage, so
+    // after MAX_OPEN_FAILURES unopened connects in a row we stop here and
+    // let the app clear its credential and show the login gate.
+    if (this.opts.onAuthFailure && !this.opened.has(ws)) {
+      this.openFailures += 1;
+      if (this.openFailures >= MAX_OPEN_FAILURES) {
+        this.manualClose = true;
+        this.agentOnline = false;
+        this.setState('idle');
+        this.opts.onAuthFailure();
+        return;
+      }
     }
     this.setState(this.everOpen ? 'resuming' : 'connecting');
     const delay = Math.min(500 * 2 ** this.attempts++, MAX_BACKOFF_MS);

@@ -71,6 +71,7 @@ __all__ = [
     "skills_frame",
     "start_frame",
     "status_frame",
+    "usage_frame",
 ]
 
 # 256 KB of serialized JSON, UTF-8. See protocol/frames.md section 5.
@@ -331,6 +332,33 @@ def prompt_saved_frame(filename):
 def skills_frame(items):
     """Available skills reply: ``{t:"skills", items:[{id, name, description}]}``."""
     return {"t": "skills", "items": items}
+
+
+def usage_frame(
+    chat, req_id=None, input_total=None, output_total=None,
+    context_tokens=None, context_limit=None,
+):
+    """Session usage: ``{t:"usage", chat, id?, input_total?, ...}`` (M11).
+
+    Every numeric field is optional and only appears when the data source
+    actually provided it -- a missing field means "unknown", never 0. The
+    handler always answers, so an empty frame (``{"t":"usage","chat":...}``)
+    is the documented "no data" reply. ``id`` echoes the requesting frame's
+    envelope id when it had one. Like the other control frames this one is
+    sent without ``seq`` (see protocol/frames.md §11).
+    """
+    frame = {"t": "usage", "chat": chat}
+    if isinstance(req_id, str) and req_id:
+        frame["id"] = req_id
+    for key, value in (
+        ("input_total", input_total),
+        ("output_total", output_total),
+        ("context_tokens", context_tokens),
+        ("context_limit", context_limit),
+    ):
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            frame[key] = value
+    return frame
 
 
 def parse_inbound(raw):

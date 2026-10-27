@@ -7,6 +7,10 @@ it can be unit-tested without the host application installed.
 import base64
 import binascii
 import hashlib
+import json
+import math
+import os
+import threading
 from collections import deque
 
 # Protocol §2.4 ``hist`` frames carry at most the last 50 messages unless the
@@ -655,6 +659,24 @@ def active_llm_of(payload):
     )
 
 
+def active_llm_detail(payload):
+    """``(provider, model, effective_max_input_length)`` from an active-model view.
+
+    Same payload as ``active_llm_of`` plus the model's context window
+    (``effective_max_input_length``), which the usage line needs as its
+    denominator. The length is ``0`` when the app omits it or it is not a
+    positive integer -- callers must treat that as "limit unknown" and never
+    invent a window size.
+    """
+    provider, model = active_llm_of(payload)
+    limit = 0
+    if isinstance(payload, dict):
+        value = payload.get("effective_max_input_length")
+        if _is_int(value) and value > 0:
+            limit = value
+    return provider, model, limit
+
+
 def plan_model_switch(
     items, active_provider, active_model, provider, model,
 ):
@@ -925,5 +947,332 @@ def extract_skill_items(payload):
             "description": desc,
         })
     return items
+
+
+# ---------------------------------------------------------------------------
+# M11 -- per-session token usage from the persisted agent session
+# ---------------------------------------------------------------------------
+
+# QwenPaw records each turn's provider usage on the closing assistant message
+# as ``metadata[TURN_USAGE_META_KEY]["usage"]`` (see
+# token_usage/turn_usage.py). The plugin only ever reads it; nothing here
+# writes or mutates host state.
+TURN_USAGE_META_KEY = "qwenpaw_turn_usage"
+
+# Sessions of this channel live in ``<workspace>/sessions/web/*.json``.
+_SESSION_CHANNEL = "web"
+
+
+def _token_count(value):
+    """Non-negative int from one usage field, else ``None``.
+
+    ``None`` means "the source did not give a number", so callers omit the
+    field instead of showing a made-up 0. Numeric strings are accepted (older
+    files may store them that way); booleans, negatives, NaN/inf and anything
+    else are rejected.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, float):
+        if not math.isfinite(value) or value < 0:
+            return None
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            number = int(text)
+        except ValueError:
+            try:
+                return _token_count(float(text))
+            except (TypeError, ValueError):
+                return None
+        return number if number >= 0 else None
+    return None
+
+
+def _message_dict(item):
+    """One message dict from a persisted context entry (dict or ``[dict]``)."""
+    if isinstance(item, dict):
+        return item
+    if isinstance(item, (list, tuple)) and item and isinstance(item[0], dict):
+        return item[0]
+    return None
+
+
+def message_usage(message):
+    """The per-turn ``usage`` dict recorded on one message, or ``None``."""
+    if not isinstance(message, dict):
+        return None
+    metadata = message.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+    turn = metadata.get(TURN_USAGE_META_KEY)
+    if not isinstance(turn, dict):
+        return None
+    usage = turn.get("usage")
+    return usage if isinstance(usage, dict) else None
+
+
+def session_messages(session_data):
+    """Message dicts of a persisted session state (2.0 context, 1.x memory).
+
+    Mirrors ``agent_stats.service._extract_session_messages``: QwenPaw 2.x
+    keeps them under ``agent.state.context`` (a list of dicts or ``[dict]``),
+    1.x under ``agent.memory.memories``/``content``. Anything off-shape yields
+    ``[]`` -- callers degrade to "no data" rather than raising.
+    """
+    if not isinstance(session_data, dict):
+        return []
+    agent = session_data.get("agent")
+    agent = agent if isinstance(agent, dict) else {}
+
+    state = agent.get("state")
+    if isinstance(state, dict):
+        context = state.get("context")
+        if isinstance(context, list) and context:
+            return [
+                message
+                for message in (_message_dict(item) for item in context)
+                if message is not None
+            ]
+
+    memory = agent.get("memory")
+    if isinstance(memory, dict):
+        raw = memory.get("memories") or memory.get("content") or []
+        if isinstance(raw, list):
+            return [
+                message
+                for message in (_message_dict(item) for item in raw)
+                if message is not None
+            ]
+    return []
+
+
+def session_identity(session_data):
+    """Session id recorded inside a persisted session file, or ``""``.
+
+    The on-disk shape is not part of any public API, so every plausible
+    location is checked; when none carries an id the caller falls back to the
+    file name (see ``_stem_matches``). Only containers that name the *session*
+    are inspected -- an id nested inside the agent state could belong to
+    something else and would wrongly veto a file-name match.
+    """
+    if not isinstance(session_data, dict):
+        return ""
+    holders = [session_data]
+    for key in ("session", "agent"):
+        nested = session_data.get(key)
+        if isinstance(nested, dict):
+            holders.append(nested)
+    for holder in holders:
+        for key in ("session_id", "sessionId"):
+            value = holder.get(key)
+            if isinstance(value, str) and value:
+                return value
+    return ""
+
+
+def session_usage(messages):
+    """Cumulative token usage of one session's messages.
+
+    Returns only the keys the data actually supports:
+
+    - ``input_total`` / ``output_total``: sums of every assistant turn's
+      ``prompt_tokens`` / ``completion_tokens``. A field is present when at
+      least one recorded turn carried it (a real 0 is therefore distinct from
+      "unknown").
+    - ``context_tokens``: the ``prompt_tokens`` of the latest recorded turn,
+      used as the approximation of the live context (``basis=last_turn_prompt``
+      in protocol/frames.md).
+
+    ``{}`` means "no usage data", never "zero".
+    """
+    if not isinstance(messages, (list, tuple)):
+        return {}
+
+    prompt_total = 0
+    completion_total = 0
+    saw_prompt = False
+    saw_completion = False
+    context_tokens = None
+
+    for item in messages:
+        message = _message_dict(item)
+        if message is None:
+            continue
+        role = message.get("role")
+        role = getattr(role, "value", role)
+        if role != "assistant":
+            continue
+        usage = message_usage(message)
+        if usage is None:
+            continue
+
+        prompt = _token_count(usage.get("prompt_tokens"))
+        completion = _token_count(usage.get("completion_tokens"))
+        if prompt is None and completion is None:
+            continue
+        if prompt is not None:
+            saw_prompt = True
+            prompt_total += prompt
+            if prompt > 0:
+                context_tokens = prompt
+        if completion is not None:
+            saw_completion = True
+            completion_total += completion
+
+    result = {}
+    if saw_prompt:
+        result["input_total"] = prompt_total
+    if saw_completion:
+        result["output_total"] = completion_total
+    if context_tokens is not None:
+        result["context_tokens"] = context_tokens
+    return result
+
+
+def _stem_matches(path, session_id, chat, chat_id):
+    """True when a session file name identifies *session_id* / *chat*.
+
+    Used only for files that do not record their own session id. The exact
+    session id is preferred; the plain chat id, the ``ChatSpec.id`` and the
+    usual ``:``/``_``/``-`` separators are also accepted so a renamed or
+    sanitised store keeps working.
+    """
+    name = os.path.basename(path)
+    stem = name[:-5] if name.endswith(".json") else os.path.splitext(name)[0]
+    if not stem:
+        return False
+
+    if isinstance(session_id, str) and session_id:
+        compact = session_id.replace(":", "_")
+        for candidate in (session_id, compact, compact.replace("_", "-")):
+            if stem == candidate:
+                return True
+
+    for value in (chat, chat_id):
+        if not (isinstance(value, str) and value):
+            continue
+        if stem == value:
+            return True
+        for separator in (":", "_", "-"):
+            if stem.endswith(separator + value):
+                return True
+    return False
+
+
+class SessionUsageStore:
+    """Read-only per-session usage, cached by file ``mtime`` + size.
+
+    ``usage_for`` scans ``<sessions_root>/web`` (plus legacy ``*.json`` files
+    directly under the root), picks the file that belongs to *session_id* and
+    returns ``session_usage`` of it. Every failure (missing directory, bad
+    JSON, unreadable file, unexpected shape) degrades to ``{}``; the caller's
+    chat path must never see an exception.
+
+    Parsing is cached per path and invalidated by ``(mtime_ns, size)``, so the
+    per-turn refresh only re-reads the file that actually changed.
+    """
+
+    # Bounded so a long-lived process cannot accumulate stale paths forever.
+    _MAX_ENTRIES = 512
+
+    def __init__(self):
+        self._cache = {}
+        self._lock = threading.Lock()
+
+    def usage_for(self, sessions_root, session_id, chat="", chat_id=""):
+        """Usage dict for one session; ``{}`` when there is nothing usable."""
+        session_id = session_id if isinstance(session_id, str) else ""
+        chat = chat if isinstance(chat, str) else ""
+        chat_id = chat_id if isinstance(chat_id, str) else ""
+        try:
+            root = os.fspath(sessions_root)
+        except TypeError:
+            return {}
+        try:
+            with self._lock:
+                return self._usage_locked(root, session_id, chat, chat_id)
+        except Exception:  # noqa: BLE001 - usage is best-effort, never fatal
+            return {}
+
+    def _usage_locked(self, root, session_id, chat, chat_id):
+        wrapped = {
+            value for value in (session_id, chat, chat_id)
+            if isinstance(value, str) and value
+        }
+        stem_match = None
+        for path in self._paths(root):
+            entry = self._entry(path)
+            if entry is None:
+                continue
+            identity, usage = entry
+            if identity:
+                # A file that names a session only ever answers for that one.
+                # Depending on the store version that name is the session id,
+                # the chat id or the ChatSpec id; all three identify this chat.
+                if identity in wrapped:
+                    return dict(usage)
+                continue
+            if stem_match is None and _stem_matches(
+                path, session_id, chat, chat_id,
+            ):
+                stem_match = usage
+        return dict(stem_match) if stem_match is not None else {}
+
+    @staticmethod
+    def _paths(root):
+        """Candidate ``*.json`` files, channel directory first."""
+        paths = []
+        for directory in (os.path.join(root, _SESSION_CHANNEL), root):
+            try:
+                names = sorted(os.listdir(directory))
+            except OSError:
+                continue
+            for name in names:
+                if name.endswith(".json"):
+                    paths.append(os.path.join(directory, name))
+        return paths
+
+    def _entry(self, path):
+        """``(identity, usage)`` for one file, cached by stat stamp."""
+        try:
+            stat = os.stat(path)
+        except OSError:
+            self._cache.pop(path, None)
+            return None
+
+        stamp = (stat.st_mtime_ns, stat.st_size)
+        cached = self._cache.get(path)
+        if cached is not None and cached[0] == stamp:
+            return cached[1], cached[2]
+
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as handle:
+                data = json.load(handle)
+        except (OSError, ValueError):
+            # Mid-write or corrupt: remember the stamp so we do not retry it
+            # until the file changes again.
+            self._cache[path] = (stamp, "", {})
+            return "", {}
+
+        identity = session_identity(data)
+        usage = session_usage(session_messages(data))
+        self._cache[path] = (stamp, identity, usage)
+        if len(self._cache) > self._MAX_ENTRIES:
+            self._prune()
+        return identity, usage
+
+    def _prune(self):
+        """Keep the cache bounded: drop missing files, then the oldest entries."""
+        for path in list(self._cache):
+            if not os.path.exists(path):
+                self._cache.pop(path, None)
+        while len(self._cache) > self._MAX_ENTRIES:
+            self._cache.pop(next(iter(self._cache)))
 
 

@@ -35,7 +35,7 @@ from `.dev.vars`.
 |---|---|
 | `AGENT_TOKEN` | bearer token the agent (plugin) presents on `/ws/agent`. Must match the token configured in the plugin. If unset, **all** agent connections are rejected. |
 | `LOGIN_PASSWORD` | the password a user types in the SPA login form. If unset, `/api/login` returns `500 {error:"login_not_configured"}`. |
-| `LOGIN_SECRET` | HMAC-SHA256 key used to sign client tokens (`v1.<expires>.<sig>`, 12 h TTL). Rotating it invalidates every outstanding token. |
+| `LOGIN_SECRET` | HMAC-SHA256 key used to sign client tokens (`v1.<expires>.<sig>`, 30 day TTL). Rotating it invalidates every outstanding token. |
 
 `TENANT` is a plain var (`wrangler.toml`), not a secret; it names the DO instance.
 

@@ -70,6 +70,7 @@ superseded generation) is not acked.
 | `model_changed` | `provider`, `model` | **v3** a `set_model` succeeded; this pair is now the agent's active model |
 | `status` | `agent_name`, `provider?`, `model?` | **v3** identity push, sent when the agent attaches and whenever a client joins/leaves; the header displays it |
 | `effort` | `chat`, `level`, `effective`, `budget_tokens?`, `supported?`, `kind?`, `model_key?` | **v4** session thinking state: reply to `get_effort` / `set_effort`; control frame |
+| `usage` | `chat`, `id?`, `input_total?`, `output_total?`, `context_tokens?`, `context_limit?` | **v5** session token usage: reply to `get_usage`; every numeric field is optional (absent = unknown); control frame |
 | `file_ready` | `chat`, `id`, `seq?` | **v2** chunked upload verified and staged; `files[]` may now use `{"ref": id}` |
 | `file_error` | `chat`, `id`, `code`, `msg?`, `seq?` | **v2** chunked upload failed; `code` ∈ `E_CHECKSUM` / `E_TOOBIG` / `E_STATE` |
 | `pong` | — | reserved; the relay answers `ping` locally in v1 |
@@ -100,6 +101,7 @@ belong to no chat's stream, and are never ring-buffered or replayed on `resume` 
 | `set_model` | `provider`, `model` | **v3** switch the agent's active model |
 | `get_effort` | `chat` | **v4** request that chat's session thinking setting |
 | `set_effort` | `chat`, `level` | **v4** set that chat's thinking level (`default` clears the override) |
+| `get_usage` | `chat`, `id?` | **v5** request that chat's cumulative token usage and current context approximation |
 | `file_begin` | `chat`, `id`, `name`, `mime`, `size`, `chunks`, `sha256` | **v2** start a chunked upload; `chunks` is how many `file_chunk` frames follow |
 | `file_chunk` | `chat`, `id`, `i`, `data` | **v2** one chunk; `i` is 0-based, `data` is base64 of ≤96 KB raw bytes |
 | `file_end` | `chat`, `id` | **v2** client finished sending; agent answers `file_ready` or `file_error` |
@@ -200,8 +202,11 @@ Error frame: `{"t":"error","code":"...","id":"<offending frame id, if any>"}`.
 | `E_EFFORT` | thinking setting unavailable, unknown level, unsupported by the current model, or the app rejected the write | client restores the last confirmed level (except a 404: the chat has no server record yet); the connection is unaffected |
 
 `E_AUTH` is enforced at the HTTP upgrade (401 before the socket opens), so it is normally not seen
-as a frame. `E_BADFRAME` is relay-local and never forwarded. `E_CHECKSUM` and `E_STATE` (§8) are
-file-transfer codes and appear only in `file_error`, never in a generic `error` frame.
+as a frame — a browser only observes a bare `close`. Because there is no close reason to read, a
+client that stores a login token may treat a few consecutive handshakes that never opened as an auth
+failure and return to its login gate (the SPA uses three). `E_BADFRAME` is relay-local and never
+forwarded. `E_CHECKSUM` and `E_STATE` (§8) are file-transfer codes and appear only in `file_error`,
+never in a generic `error` frame.
 
 ## 7. Versioning
 
@@ -408,4 +413,65 @@ Agent → client:
 `effort` is sent **without `seq`**, like `models` / `model_changed` / `status`; it is not
 ring-buffered and not replayed on `resume`. A reconnecting client re-requests `get_effort` for the
 visible chat.
+
+## 11. Protocol v5 — per-session token usage
+
+Lets the browser show one compact usage line for the visible conversation. The relay needs **no
+changes**: these are ordinary frames it forwards verbatim. The plugin keeps no counter of its own —
+it reads the per-turn usage QwenPaw already persists on the session's messages.
+
+### 11.1 Wire format
+
+Client → agent:
+
+```json
+{"t":"get_usage","chat":"…","id":"usage-get"}
+```
+
+Agent → client:
+
+```json
+{"t":"usage","chat":"…","id":"usage-get","input_total":12345,"output_total":6789,
+ "context_tokens":68000,"context_limit":200000}
+{"t":"usage","chat":"…"}
+```
+
+- Every numeric field is optional and independent. **A missing field means "unknown", never 0**;
+  endpoints must not substitute a placeholder. `0` is sent only when the recorded data really is 0
+  (which is how a real empty total differs from "no record at all").
+- `id` echoes the request's envelope `id` when it had one.
+- `chat` is always present. The agent **always answers** — the second frame above is the documented
+  "no usage data" result (new chat, no persisted turn yet, unreadable/absent session file). There is
+  no `E_*` error for usage; a client must treat an empty frame as "hide the line" rather than keep
+  another chat's numbers.
+- `context_limit` is the active model's `effective_max_input_length` and may appear without any token
+  fields.
+
+### 11.2 Data basis
+
+- `input_total` / `output_total` — sums of `prompt_tokens` / `completion_tokens` over every assistant
+  message of the chat's session. Source: `metadata["qwenpaw_turn_usage"].usage` on the messages
+  persisted in `workspace/sessions/web/*.json` (the same data `agent_stats` aggregates). The plugin
+  matches the file to the chat's `session_id` (`web:web-user:<chat>`) and caches parses by file
+  mtime/size. Missing, malformed or non-numeric fields are skipped; they are never zero-filled.
+- `context_tokens` — **approximation**, `basis=last_turn_prompt`: the `prompt_tokens` of the latest
+  assistant message that recorded a positive prompt size. It describes how large the model input was
+  on the last turn, not a live tokenizer count, so a turn with several tool calls may read slightly
+  low. A turn recorded with a 0/missing prompt is skipped in favour of the previous usable one.
+- `context_limit` — `GET /api/models/active?scope=effective&agent_id=<id>` →
+  `effective_max_input_length`. The window belongs to the model, so clients refresh after
+  `model_changed`.
+
+The SPA renders `本会话 ↑<input> ↓<output> · 上下文 ≈<pct>%（<context>/<limit>）`, with `≈` marking
+the approximation. Without `context_limit` it shows `上下文 ≈<context>` (no percentage); without
+`context_tokens` the whole context part is omitted; without either input or output the session part
+is omitted. Numbers use a compact `k`/`M` format.
+
+### 11.3 Control frames
+
+`usage` is sent **without `seq`**, like `models` / `model_changed` / `status` / `effort`; it is not
+ring-buffered and not replayed on `resume`. A reconnecting client re-requests `get_usage` for the
+visible chat. The SPA asks for it when a chat is opened/switched, after each assistant turn completes
+(debounced until the app has had time to persist that turn's metadata), after `model_changed`, and on
+every transition to `live`.
 

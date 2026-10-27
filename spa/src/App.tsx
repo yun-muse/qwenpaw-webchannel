@@ -25,6 +25,7 @@ import {
   GitCompare,
   HelpCircle,
   Layers,
+  LogOut,
   Menu,
   MessageSquare,
   Moon,
@@ -74,8 +75,10 @@ const UPLOAD_TIMEOUT_MS = 60_000;
 /** Raw size above which an inline v1 frame cannot fit: skip the base64 probe. */
 const INLINE_PROBE_BYTES = 180 * 1024;
 
-/** Client token for the hosted relay, kept for the tab's lifetime. */
+/** Client token for the hosted relay, kept across tabs and restarts (M11). */
 const TOKEN_KEY = 'webchannel.token';
+/** Expiry of TOKEN_KEY (Unix seconds, as answered by `POST /api/login`). */
+const TOKEN_EXPIRES_KEY = 'webchannel.tokenExpires';
 
 /** Chat list + visible chat from the previous visit (survives a reload). */
 const CHATS_KEY = 'webchannel.chats';
@@ -103,8 +106,51 @@ const NEAR_BOTTOM_PX = 80;
 const PROMPT_FILE_TABS = ['SOUL.md', 'AGENTS.md', 'PROFILE.md', 'MEMORY.md'] as const;
 type PromptFileName = (typeof PROMPT_FILE_TABS)[number];
 
+/** How long after a reply ends the usage refresh waits for the session file. */
+const USAGE_REFRESH_MS = 1200;
+
+/**
+ * The stored token, or null when it is missing or locally expired.
+ *
+ * `expires` is Unix seconds from the relay. It is only a local pre-check:
+ * clocks may disagree, so the connection itself stays authoritative and a
+ * server-side rejection still lands on `onAuthFailure`.
+ */
 function readToken(): string | null {
-  return sessionStorage.getItem(TOKEN_KEY);
+  const token = storageGet(TOKEN_KEY);
+  if (!token) return null;
+  const raw = storageGet(TOKEN_EXPIRES_KEY);
+  if (raw) {
+    const expires = Number(raw);
+    if (Number.isFinite(expires) && expires > 0 && expires * 1000 <= Date.now()) {
+      clearStoredAuth();
+      return null;
+    }
+  }
+  return token;
+}
+
+function clearStoredAuth(): void {
+  try {
+    window.localStorage.removeItem(TOKEN_KEY);
+    window.localStorage.removeItem(TOKEN_EXPIRES_KEY);
+  } catch {
+    /* storage blocked — nothing to clear */
+  }
+}
+
+/** Persist the login credential; the password itself is never stored. */
+function rememberAuth(token: string, expires: number | null): void {
+  storageSet(TOKEN_KEY, token);
+  if (expires != null && Number.isFinite(expires) && expires > 0) {
+    storageSet(TOKEN_EXPIRES_KEY, String(Math.floor(expires)));
+  } else {
+    try {
+      window.localStorage.removeItem(TOKEN_EXPIRES_KEY);
+    } catch {
+      /* not persisted */
+    }
+  }
 }
 
 /** localStorage is best-effort: private mode / blocked storage throws. */
@@ -351,6 +397,72 @@ function byteSize(value: unknown): number {
 
 function fmtKb(bytes: number): string {
   return `${Math.round(bytes / 1024)} KB`;
+}
+
+/** Compact token count for the usage line: 950, 12.3k, 1.2M. */
+function formatTokens(count: number): string {
+  if (count < 1000) return String(Math.round(count));
+  if (count < 1_000_000) {
+    return `${(count / 1000).toFixed(1).replace(/\.0$/, '')}k`;
+  }
+  return `${(count / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
+}
+
+/** Per-chat usage as reported by the plugin's `usage` control frame (M11). */
+interface ChatUsage {
+  inputTotal?: number;
+  outputTotal?: number;
+  contextTokens?: number;
+  contextLimit?: number;
+}
+
+const USAGE_TITLE =
+  '本会话累计输入/输出取自 QwenPaw 每轮 usage 元数据；上下文占用为最近一轮输入近似（≈），多轮工具调用时可能略低';
+
+function usageCount(raw: unknown): number | undefined {
+  return typeof raw === 'number' && Number.isFinite(raw) && raw >= 0
+    ? Math.round(raw)
+    : undefined;
+}
+
+/** Parse one `usage` frame; absent/invalid fields stay absent. */
+function usageOf(frame: Frame): ChatUsage {
+  const usage: ChatUsage = {};
+  const input = usageCount(frame.input_total);
+  const output = usageCount(frame.output_total);
+  const context = usageCount(frame.context_tokens);
+  const limit = usageCount(frame.context_limit);
+  if (input != null) usage.inputTotal = input;
+  if (output != null) usage.outputTotal = output;
+  if (context != null) usage.contextTokens = context;
+  if (limit != null && limit > 0) usage.contextLimit = limit;
+  return usage;
+}
+
+/** One compact line, e.g. `本会话 ↑12.3k ↓4.5k · 上下文 ≈34%（68k/200k）`. */
+function usageLine(usage: ChatUsage | undefined): string {
+  if (!usage) return '';
+  const parts: string[] = [];
+
+  if (usage.inputTotal != null || usage.outputTotal != null) {
+    const totals: string[] = [];
+    if (usage.inputTotal != null) totals.push(`↑${formatTokens(usage.inputTotal)}`);
+    if (usage.outputTotal != null) totals.push(`↓${formatTokens(usage.outputTotal)}`);
+    parts.push(`本会话 ${totals.join(' ')}`);
+  }
+
+  if (usage.contextTokens != null) {
+    if (usage.contextLimit != null) {
+      const percent = Math.round((usage.contextTokens / usage.contextLimit) * 100);
+      parts.push(
+        `上下文 ≈${percent}%（${formatTokens(usage.contextTokens)}/${formatTokens(usage.contextLimit)}）`,
+      );
+    } else {
+      parts.push(`上下文 ≈${formatTokens(usage.contextTokens)}`);
+    }
+  }
+
+  return parts.join(' · ');
 }
 
 function hexOf(buffer: ArrayBuffer): string {
@@ -923,7 +1035,7 @@ function LoginGate({
   onSwitchLocal,
 }: {
   httpUrl: string;
-  onSuccess: (token: string) => void;
+  onSuccess: (token: string, expires: number | null) => void;
   onSwitchLocal?: () => void;
 }) {
   const [password, setPassword] = useState('');
@@ -947,6 +1059,7 @@ function LoginGate({
       });
       const body = (await res.json().catch(() => null)) as {
         token?: unknown;
+        expires?: unknown;
         error?: unknown;
       } | null;
       if (!res.ok) {
@@ -961,7 +1074,11 @@ function LoginGate({
         setBusy(false);
         return;
       }
-      onSuccess(token);
+      const expires =
+        body && typeof body.expires === 'number' && Number.isFinite(body.expires)
+          ? body.expires
+          : null;
+      onSuccess(token, expires);
     } catch {
       setError('无法连接到 Relay 服务，请稍后重试');
       setBusy(false);
@@ -1054,6 +1171,8 @@ export default function App() {
   // M9: local choice per chat (restored first), plus what the server confirmed.
   const [effortLevels, setEffortLevels] = useState<Record<string, EffortLevel>>(persistedEfforts);
   const [effortMeta, setEffortMeta] = useState<Record<string, EffortMeta>>({});
+  // M11: last `usage` frame per chat (control frame; re-requested on demand).
+  const [usageByChat, setUsageByChat] = useState<Record<string, ChatUsage>>({});
   const [search, setSearch] = useState('');
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
@@ -1092,6 +1211,8 @@ export default function App() {
   const effortMetaRef = useRef<Record<string, EffortMeta>>({});
   const effortRollbackRef = useRef<Record<string, EffortLevel>>({});
   const effortRetryTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  // M11: debounced usage refresh per chat (set after a reply finishes).
+  const usageTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const runtimeOf = (chat: string): ChatRuntime => {
@@ -1167,6 +1288,25 @@ export default function App() {
 
   const requestEffort = (chat: string) => {
     clientRef.current?.send({ t: 'get_effort', chat, id: 'effort-get' });
+  };
+
+  const requestUsage = (chat: string) => {
+    clientRef.current?.send({ t: 'get_usage', chat, id: 'usage-get' });
+  };
+
+  /**
+   * The closing `end` and the trailing `msg` of one turn both land here; the
+   * timer collapses them and gives the app time to persist the turn's usage
+   * meta into the session file before the plugin reads it (M11).
+   */
+  const scheduleUsageRefresh = (chat: string) => {
+    const pending = usageTimers.current.get(chat);
+    if (pending) clearTimeout(pending);
+    const timer = setTimeout(() => {
+      usageTimers.current.delete(chat);
+      requestUsage(chat);
+    }, USAGE_REFRESH_MS);
+    usageTimers.current.set(chat, timer);
   };
 
   const requestHist = (chat: string) => {
@@ -1357,11 +1497,16 @@ export default function App() {
       if (toastTimer.current) clearTimeout(toastTimer.current);
       for (const timer of effortRetryTimers.current.values()) clearTimeout(timer);
       effortRetryTimers.current.clear();
+      for (const timer of usageTimers.current.values()) clearTimeout(timer);
+      usageTimers.current.clear();
     },
     [],
   );
 
   useEffect(() => {
+    // M11: open/switch refreshes the usage line too (control frames are never
+    // replayed, so every chat switch asks explicitly).
+    requestUsage(activeChat);
     // The local value is already rendered from localStorage; align it with
     // the server's stored choice (a chat with no record yet answers 404 and
     // keeps the local value).
@@ -1521,6 +1666,7 @@ export default function App() {
               prev.map((m) => (m.id === id ? { ...m, streaming: false } : m)),
             );
           }
+          if (chat === activeRef.current) scheduleUsageRefresh(chat);
           break;
         }
 
@@ -1548,6 +1694,9 @@ export default function App() {
                   : m,
               ),
             );
+            // The turn is complete; refresh this chat's usage after the app
+            // has had a moment to persist the turn's usage metadata (M11).
+            if (chat === activeRef.current) scheduleUsageRefresh(chat);
             break;
           }
 
@@ -1593,6 +1742,8 @@ export default function App() {
               },
             ];
           });
+          // Non-streamed replies close the turn here; refresh like `end` does.
+          if (chat === activeRef.current) scheduleUsageRefresh(chat);
           break;
         }
 
@@ -1723,6 +1874,14 @@ export default function App() {
           // own value/default. Re-align the visible chat (control frame: never
           // replayed on reconnect, always requested explicitly).
           requestEffort(activeRef.current);
+          // The context window belongs to the model, so the usage line's
+          // denominator may just have changed (M11).
+          requestUsage(activeRef.current);
+          break;
+        }
+
+        case 'usage': {
+          setUsageByChat((prev) => ({ ...prev, [chat]: usageOf(frame) }));
           break;
         }
 
@@ -1858,11 +2017,14 @@ export default function App() {
     const client = new RelayClient({
       url: activeWsUrl,
       getToken: () => (requiresAuth ? readToken() : null),
-      onAuthFailure: () => {
-        if (!requiresAuth) return;
-        sessionStorage.removeItem(TOKEN_KEY);
-        setNeedsLogin(true);
-      },
+      onAuthFailure: requiresAuth
+        ? () => {
+            // Only the credential goes away; chats, titles, effort and theme
+            // are local data and survive a re-login.
+            clearStoredAuth();
+            setNeedsLogin(true);
+          }
+        : undefined,
       onState: (next, info) => {
         setState(next);
         setAgentOnline(info.agentOnline);
@@ -1875,6 +2037,8 @@ export default function App() {
             chat: activeRef.current,
             id: 'effort-get',
           });
+          // Same for the usage line (M11): control frames are not replayed.
+          requestUsage(activeRef.current);
           if (!modelsRequested.current) {
             modelsRequested.current = true;
             clientRef.current?.send({ t: 'models' });
@@ -1907,6 +2071,7 @@ export default function App() {
   const streaming = messages.some((m) => m.streaming);
   const activeEffort = effortLevels[activeChat] ?? 'default';
   const activeEffortSupported = effortMeta[activeChat]?.supported ?? null;
+  const usageText = usageLine(usageByChat[activeChat]);
 
   useEffect(() => {
     const el = listRef.current;
@@ -2055,6 +2220,12 @@ export default function App() {
     }
   };
 
+  /** Drop the stored credential and go back to the login gate (M11). */
+  const logout = () => {
+    clearStoredAuth();
+    setNeedsLogin(true);
+  };
+
   const openPromptDrawer = () => {
     setPromptDrawerOpen(true);
     setPromptStatus('正在从容器读取提示词文件…');
@@ -2164,6 +2335,17 @@ export default function App() {
     });
     runtimes.current.delete(id);
     forgetEffort(id);
+    setUsageByChat((prev) => {
+      if (!(id in prev)) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    const usageTimer = usageTimers.current.get(id);
+    if (usageTimer) {
+      clearTimeout(usageTimer);
+      usageTimers.current.delete(id);
+    }
     if (renamingId === id) cancelRename();
     if (id !== activeChat) return;
     if (remaining.length > 0) selectChat(remaining[0]);
@@ -2551,8 +2733,8 @@ export default function App() {
     return (
       <LoginGate
         httpUrl={activeHttpUrl}
-        onSuccess={(token) => {
-          sessionStorage.setItem(TOKEN_KEY, token);
+        onSuccess={(token, expires) => {
+          rememberAuth(token, expires);
           setNeedsLogin(false);
         }}
         onSwitchLocal={
@@ -2706,6 +2888,16 @@ export default function App() {
             </span>
           )}
           <div className="sidebar-foot-actions">
+            {requiresAuth ? (
+              <button
+                className="help-btn"
+                onClick={logout}
+                title="退出登录（清除本机保存的访问凭证）"
+                aria-label="退出登录"
+              >
+                <LogOut size={13} />
+              </button>
+            ) : null}
             <button
               className="help-btn"
               onClick={openPromptDrawer}
@@ -2737,7 +2929,14 @@ export default function App() {
             >
               <Menu size={18} />
             </button>
-            <div className="top-title">{titleOf(activeChat)}</div>
+            <div className="top-titles">
+              <div className="top-title">{titleOf(activeChat)}</div>
+              {usageText ? (
+                <div className="usage-line" title={USAGE_TITLE}>
+                  {usageText}
+                </div>
+              ) : null}
+            </div>
           </div>
 
           <div className="top-right">
@@ -3235,7 +3434,8 @@ export default function App() {
             <h4>技能调用 (`@`)</h4>
             <p className="help-keys">
               • 在输入框敲 <strong><code>@</code></strong>（或点击左下角「技能」按钮）即可呼出技能列表（包含容器内已启用的技能与内置工作流技能）。<br />
-              • 敲 <strong><code>/model</code></strong> 回车即可直接在输入框正上方用键盘方向键切换模型。
+              • 敲 <strong><code>/model</code></strong> 回车即可直接在输入框正上方用键盘方向键切换模型。<br />
+              • 会话标题下方的用量行：<strong>↑输入 / ↓输出</strong> 为本会话累计值；<strong>上下文 ≈</strong> 为最近一轮输入近似（多轮工具调用时可能略低），百分比只在已知模型上下文上限时显示。
             </p>
             <p className="help-build">{formatBuildLabel()}</p>
           </div>

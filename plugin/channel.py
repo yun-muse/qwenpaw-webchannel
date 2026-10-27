@@ -13,6 +13,7 @@ then referenced as ``msg.files[].ref``.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import time
@@ -80,6 +81,7 @@ try:  # package-relative (tests, ``python -m plugin...``)
         skills_frame,
         start_frame,
         status_frame,
+        usage_frame,
     )
     from .relay_client import RelayClient
     from .filelog import FileLog
@@ -88,6 +90,8 @@ try:  # package-relative (tests, ``python -m plugin...``)
         ANSWER_STREAM_TYPE,
         PROMPT_FILES,
         FileTransfers,
+        SessionUsageStore,
+        active_llm_detail,
         active_llm_of,
         approval_owner_ok,
         decode_file_entry,
@@ -129,6 +133,7 @@ except ImportError:  # loaded as a top-level module by the plugin loader
         skills_frame,
         start_frame,
         status_frame,
+        usage_frame,
     )
     from relay_client import RelayClient
     from filelog import FileLog
@@ -137,6 +142,8 @@ except ImportError:  # loaded as a top-level module by the plugin loader
         ANSWER_STREAM_TYPE,
         PROMPT_FILES,
         FileTransfers,
+        SessionUsageStore,
+        active_llm_detail,
         active_llm_of,
         approval_owner_ok,
         decode_file_entry,
@@ -258,6 +265,8 @@ class WebChannel(BaseChannel):
         self._files = FileTransfers()
         # Rotating local log of the relay lifecycle (M7.2); owned by start().
         self._flog: Optional[FileLog] = None
+        # Per-session token usage read from the agent's session files (M11).
+        self._usage = SessionUsageStore()
 
     # -- construction / session mapping ---------------------------------
 
@@ -459,10 +468,11 @@ class WebChannel(BaseChannel):
     async def _send_control(self, frame: Dict[str, Any]) -> None:
         """Send a control frame directly through the relay (M7).
 
-        ``models`` / ``model_changed`` / ``status`` belong to no chat stream,
-        so they are sent without a ``seq`` and are neither ring-buffered nor
-        replayed on ``resume``. A failed control send is logged and swallowed:
-        it must never surface into the handler that produced it.
+        ``models`` / ``model_changed`` / ``status`` (plus the later
+        ``effort`` / ``usage`` replies) belong to no chat stream, so they are
+        sent without a ``seq`` and are neither ring-buffered nor replayed on
+        ``resume``. A failed control send is logged and swallowed: it must
+        never surface into the handler that produced it.
         """
         relay = self._relay
         if relay is None:
@@ -508,6 +518,8 @@ class WebChannel(BaseChannel):
             await self._handle_get_effort(frame)
         elif kind == "set_effort":
             await self._handle_set_effort(frame)
+        elif kind == "get_usage":
+            await self._handle_get_usage(frame)
         elif kind == "chats":
             await self._handle_chats(frame)
         elif kind == "del_chat":
@@ -1004,8 +1016,13 @@ class WebChannel(BaseChannel):
             return None
         return payload
 
-    async def _fetch_active(self):
-        """``(provider, model)`` of the agent's effective model, else ``("", "")``."""
+    async def _fetch_active_detail(self):
+        """``(provider, model, effective_max_input_length)`` of the agent.
+
+        The length is ``0`` when the app omits it (usage then shows no
+        percentage). One local call answers both the header's model and the
+        usage line's context window.
+        """
         status, payload = await self._api_json(
             "GET",
             "/api/models/active",
@@ -1015,8 +1032,13 @@ class WebChannel(BaseChannel):
             logger.warning(
                 "webchannel: GET /api/models/active failed: HTTP %s", status,
             )
-            return ("", "")
-        return active_llm_of(payload)
+            return ("", "", 0)
+        return active_llm_detail(payload)
+
+    async def _fetch_active(self):
+        """``(provider, model)`` of the agent's effective model, else ``("", "")``."""
+        provider, model, _limit = await self._fetch_active_detail()
+        return (provider, model)
 
     async def _agent_display_name(self) -> str:
         """Human-readable agent name, falling back to its id (M7).
@@ -1320,6 +1342,65 @@ class WebChannel(BaseChannel):
             await self._effort_error(
                 chat, "thinking setting failed", req_id=req_id,
             )
+
+    # -- M11: per-session token usage -----------------------------------
+
+    async def _handle_get_usage(self, frame: Dict[str, Any]) -> None:
+        """Reply to ``{t:"get_usage", chat, id?}`` with ``{t:"usage", ...}``.
+
+        Data path (protocol/frames.md §11): QwenPaw writes each turn's provider
+        usage onto the closing assistant message, and those messages are
+        persisted under ``<workspace>/sessions/web/*.json``. The plugin reads
+        that one file (mtime/size cached) and sums the per-turn
+        ``qwenpaw_turn_usage.usage`` fields; ``context_tokens`` is the latest
+        turn's prompt size, i.e. an approximation of the live context.
+        ``context_limit`` is the active model's ``effective_max_input_length``.
+
+        The handler always answers -- at least ``{t:"usage", chat}`` -- so a
+        client can tell "no data" apart from "request dropped", and never
+        raises into the chat path (every failure degrades to an empty frame).
+        """
+        chat = str(frame.get("chat") or "default")
+        req_id = frame.get("id") if isinstance(frame.get("id"), str) else None
+        fields: Dict[str, Any] = {}
+        try:
+            try:
+                chat_id = await self._resolve_chat_id(chat)
+            except Exception:  # noqa: BLE001 - usage is best-effort
+                chat_id = None
+                logger.debug(
+                    "webchannel: get_usage chat=%s could not resolve ChatSpec",
+                    chat, exc_info=True,
+                )
+
+            session_id = self.resolve_session_id(
+                SENDER_ID, {"chat_id": chat},
+            )
+            usage = await asyncio.to_thread(
+                self._usage.usage_for,
+                self._workspace_dir() / "sessions",
+                session_id,
+                chat,
+                chat_id or "",
+            )
+            if isinstance(usage, dict):
+                for key in ("input_total", "output_total", "context_tokens"):
+                    value = usage.get(key)
+                    if (
+                        isinstance(value, int)
+                        and not isinstance(value, bool)
+                        and value >= 0
+                    ):
+                        fields[key] = value
+
+            _provider, _model, limit = await self._fetch_active_detail()
+            if limit > 0:
+                fields["context_limit"] = limit
+        except Exception:  # noqa: BLE001 - a control frame never fails a chat
+            logger.warning(
+                "webchannel: get_usage failed for chat=%s", chat, exc_info=True,
+            )
+        await self._send_control(usage_frame(chat, req_id=req_id, **fields))
 
     # -- M8: server-side chat list / delete / rename & workspace prompts --
 

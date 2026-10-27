@@ -31,7 +31,10 @@ const RATE_CAPACITY = 30; // burst
 const RATE_REFILL_PER_SEC = 30; // steady state
 const BUSY_NOTICE_MS = 1000; // at most one E_BUSY per second
 
-const TOKEN_TTL_SECONDS = 12 * 60 * 60; // login token lifetime
+// Login token lifetime: 30 days (M11 persistent login). The SPA stores the
+// token and this expiry in localStorage and pre-empts an expired one locally;
+// the server still enforces it on every upgrade.
+const TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
 const OUTBOX_KEY = 'outbox';
 const REPLACED_CODE = 4000;
 const REPLACED_REASON = 'replaced by new agent connection';
