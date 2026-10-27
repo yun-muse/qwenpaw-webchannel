@@ -53,6 +53,7 @@ import {
   STARTER_PROMPTS,
 } from './prompts';
 import type { SkillItem, StarterPrompt } from './prompts';
+import { BUILD_GIT, formatBuildLabel } from './version';
 import './App.css';
 
 /** protocol/frames.md §5 — UTF-8 bytes of the serialized JSON. */
@@ -2698,7 +2699,11 @@ export default function App() {
               <span>{endpointMode === 'cloud' ? '云端 CF 节点' : '本地演示节点'}</span>
             </button>
           ) : (
-            <span>WebChannel · v2</span>
+            <span>
+              {BUILD_GIT === 'unknown' || BUILD_GIT === 'dev'
+                ? 'WebChannel · v2'
+                : `WebChannel · v2 · ${BUILD_GIT}`}
+            </span>
           )}
           <div className="sidebar-foot-actions">
             <button
@@ -3232,6 +3237,7 @@ export default function App() {
               • 在输入框敲 <strong><code>@</code></strong>（或点击左下角「技能」按钮）即可呼出技能列表（包含容器内已启用的技能与内置工作流技能）。<br />
               • 敲 <strong><code>/model</code></strong> 回车即可直接在输入框正上方用键盘方向键切换模型。
             </p>
+            <p className="help-build">{formatBuildLabel()}</p>
           </div>
         </div>
       ) : null}

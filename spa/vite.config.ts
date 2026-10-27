@@ -1,7 +1,58 @@
-import { defineConfig } from 'vite';
+import { execSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+import { isAbsolute, join, resolve } from 'node:path';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 
+/**
+ * Computed once, when Vite evaluates this config, so every build gets a fresh
+ * id while all three constants stay consistent within that build.
+ */
+const buildInfo = (() => {
+  let git = 'unknown';
+  try {
+    git =
+      execSync('git rev-parse --short HEAD', {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim() || 'unknown';
+  } catch {
+    git = 'unknown';
+  }
+  return { git, time: new Date().toISOString(), build: `${git}-${Date.now()}` };
+})();
+
+/**
+ * Emits `version.json` into the real build output directory (never into
+ * `public/`, which is copied verbatim and would serve a stale probe).
+ */
+function versionJsonPlugin(): Plugin {
+  let outDir = 'dist';
+  return {
+    name: 'webchannel-version-json',
+    apply: 'build',
+    configResolved(config) {
+      outDir = isAbsolute(config.build.outDir)
+        ? config.build.outDir
+        : resolve(config.root, config.build.outDir);
+    },
+    writeBundle() {
+      const payload = {
+        build: buildInfo.build,
+        git: buildInfo.git,
+        time: buildInfo.time,
+      };
+      writeFileSync(join(outDir, 'version.json'), `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react()],
+  define: {
+    __BUILD_ID__: JSON.stringify(buildInfo.build),
+    __BUILD_GIT__: JSON.stringify(buildInfo.git),
+    __BUILD_TIME__: JSON.stringify(buildInfo.time),
+  },
+  plugins: [react(), versionJsonPlugin()],
   server: { port: 5173 },
 });
