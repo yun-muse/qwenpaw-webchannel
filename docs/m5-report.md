@@ -122,6 +122,22 @@ guard config — unchanged since M3, user declined tool_guard on 2026-10-27).
   hash as the local build — containing the v2 strings and the production wss
   URL.
 
+## Hosted completion (2026-10-27, by Muse)
+
+- The M5 plugin ZIP (29,894 B) was installed on the hosted `work` agent via the
+  console (uninstall old → install new; direct reinstall is refused with
+  "already loaded"). After the channel off/on toggle the agent showed online
+  and the relay health agreed, but it **never replied to messages** — the
+  channel was wedged (WS connected, frames in, nothing processed). A full
+  platform **Restart** fixed it: plugin + channel config persisted, the agent
+  reconnected, chat replies resumed. Lesson: after a hosted plugin
+  uninstall/reinstall, restart the instance instead of trusting the toggle.
+- Public end-to-end (browser → CF relay → hosted container) then PASSED:
+  connectivity reply ok; a 614,400-byte file sent from the public SPA arrived
+  byte-identical — the agent's own `sha256sum` returned
+  751a00fcda127f2f8485b0c86608da30ed97d2fe6f1392f87aa906c20747e4ad, matching the
+  source file, size 614,400. M5 is fully closed.
+
 ## Deviations / notes
 
 - `file_ready`/`file_error` go through the plugin's `_emit`, so they carry a
