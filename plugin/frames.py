@@ -14,21 +14,27 @@ try:  # package-relative (tests, ``python -m plugin...``)
     from .util import (
         CHUNK_RAW_BYTES,
         MAX_FILE_BYTES,
+        PROMPT_FILES,
         TRANSFER_TTL_S,
         FileTransfers,
         RingBuffer,
         SeqCounter,
         StreamDiffer,
+        extract_skill_items,
+        extract_web_chats,
     )
 except ImportError:  # loaded as a top-level module by the plugin loader
     from util import (
         CHUNK_RAW_BYTES,
         MAX_FILE_BYTES,
+        PROMPT_FILES,
         TRANSFER_TTL_S,
         FileTransfers,
         RingBuffer,
         SeqCounter,
         StreamDiffer,
+        extract_skill_items,
+        extract_web_chats,
     )
 
 __all__ = [
@@ -36,15 +42,21 @@ __all__ = [
     "FileTransfers",
     "MAX_FILE_BYTES",
     "MAX_FRAME_BYTES",
+    "PROMPT_FILES",
     "RingBuffer",
     "SeqCounter",
     "StreamDiffer",
     "TRANSFER_TTL_S",
     "approval_frame",
+    "chat_deleted_frame",
+    "chat_renamed_frame",
+    "chats_frame",
     "check_size",
     "end_frame",
     "error_frame",
     "evt_frame",
+    "extract_skill_items",
+    "extract_web_chats",
     "file_error_frame",
     "file_ready_frame",
     "hist_frame",
@@ -52,7 +64,10 @@ __all__ = [
     "models_frame",
     "msg_frame",
     "parse_inbound",
+    "prompt_saved_frame",
+    "prompts_frame",
     "resync_frame",
+    "skills_frame",
     "start_frame",
     "status_frame",
 ]
@@ -252,6 +267,36 @@ def status_frame(agent_name, provider=None, model=None):
     if isinstance(model, str) and model:
         frame["model"] = model
     return frame
+
+
+def chats_frame(items):
+    """Server-side chat list reply: ``{t:"chats", items:[{chat, title, updated_at}]}``."""
+    return {"t": "chats", "items": items}
+
+
+def chat_deleted_frame(chat):
+    """Chat deletion confirmation: ``{t:"chat_deleted", chat}``."""
+    return {"t": "chat_deleted", "chat": chat}
+
+
+def chat_renamed_frame(chat, title):
+    """Chat rename confirmation: ``{t:"chat_renamed", chat, title}``."""
+    return {"t": "chat_renamed", "chat": chat, "title": title}
+
+
+def prompts_frame(files_dict):
+    """Workspace prompt files reply: ``{t:"prompts", files:{name: content}}``."""
+    return {"t": "prompts", "files": files_dict}
+
+
+def prompt_saved_frame(filename):
+    """Workspace prompt file saved confirmation: ``{t:"prompt_saved", file}``."""
+    return {"t": "prompt_saved", "file": filename}
+
+
+def skills_frame(items):
+    """Available skills reply: ``{t:"skills", items:[{id, name, description}]}``."""
+    return {"t": "skills", "items": items}
 
 
 def parse_inbound(raw):

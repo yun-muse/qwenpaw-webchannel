@@ -25,12 +25,34 @@ import httpx
 # qwenpaw.app.channels.base, which (like console/channel.py's ``..base``
 # import) re-exports ContentType / TextContent / FileContent from
 # qwenpaw.schemas.
-from qwenpaw.app.channels.base import (
-    BaseChannel,
-    ContentType,
-    FileContent,
-    TextContent,
-)
+try:
+    from qwenpaw.app.channels.base import (
+        BaseChannel,
+        ContentType,
+        FileContent,
+        TextContent,
+    )
+except ImportError:  # standalone test environment without host package
+    class BaseChannel:  # type: ignore[no-redef]
+        def __init__(self, process, **kwargs):
+            self.process = process
+            self._workspace = None
+            self._enqueue = None
+
+    class ContentType:  # type: ignore[no-redef]
+        TEXT = "text"
+        FILE = "file"
+
+    class TextContent:  # type: ignore[no-redef]
+        def __init__(self, type=None, text=""):
+            self.type = type
+            self.text = text
+
+    class FileContent:  # type: ignore[no-redef]
+        def __init__(self, type=None, filename="", file_url=""):
+            self.type = type
+            self.filename = filename
+            self.file_url = file_url
 
 try:  # package-relative (tests, ``python -m plugin...``)
     from .frames import (
@@ -38,6 +60,9 @@ try:  # package-relative (tests, ``python -m plugin...``)
         SeqCounter,
         StreamDiffer,
         approval_frame,
+        chat_deleted_frame,
+        chat_renamed_frame,
+        chats_frame,
         check_size,
         end_frame,
         error_frame,
@@ -48,7 +73,10 @@ try:  # package-relative (tests, ``python -m plugin...``)
         model_changed_frame,
         models_frame,
         msg_frame,
+        prompt_saved_frame,
+        prompts_frame,
         resync_frame,
+        skills_frame,
         start_frame,
         status_frame,
     )
@@ -57,10 +85,13 @@ try:  # package-relative (tests, ``python -m plugin...``)
     from .turso_archive import TursoArchiver
     from .util import (
         ANSWER_STREAM_TYPE,
+        PROMPT_FILES,
         FileTransfers,
         active_llm_of,
         approval_owner_ok,
         decode_file_entry,
+        extract_skill_items,
+        extract_web_chats,
         hist_limit,
         history_messages,
         model_items,
@@ -74,6 +105,9 @@ except ImportError:  # loaded as a top-level module by the plugin loader
         SeqCounter,
         StreamDiffer,
         approval_frame,
+        chat_deleted_frame,
+        chat_renamed_frame,
+        chats_frame,
         check_size,
         end_frame,
         error_frame,
@@ -84,7 +118,10 @@ except ImportError:  # loaded as a top-level module by the plugin loader
         model_changed_frame,
         models_frame,
         msg_frame,
+        prompt_saved_frame,
+        prompts_frame,
         resync_frame,
+        skills_frame,
         start_frame,
         status_frame,
     )
@@ -93,10 +130,13 @@ except ImportError:  # loaded as a top-level module by the plugin loader
     from turso_archive import TursoArchiver
     from util import (
         ANSWER_STREAM_TYPE,
+        PROMPT_FILES,
         FileTransfers,
         active_llm_of,
         approval_owner_ok,
         decode_file_entry,
+        extract_skill_items,
+        extract_web_chats,
         hist_limit,
         history_messages,
         model_items,
@@ -321,23 +361,13 @@ class WebChannel(BaseChannel):
             return cached
 
         session_id = self.resolve_session_id(SENDER_ID, {"chat_id": chat})
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(
-                    f"{API_BASE}/api/chats",
-                    params={"channel": self.channel},
-                    headers=self._headers(),
-                )
-            if response.status_code >= 400:
-                logger.warning(
-                    "webchannel: GET /api/chats failed for chat=%s: HTTP %s",
-                    chat, response.status_code,
-                )
-                return None
-            specs = response.json()
-        except Exception:  # noqa: BLE001 - a failed lookup sends nothing
+        status, specs = await self._api_json(
+            "GET", "/api/chats", params={"channel": self.channel},
+        )
+        if not 200 <= status < 300:
             logger.warning(
-                "webchannel: chat lookup failed for chat=%s", chat, exc_info=True,
+                "webchannel: GET /api/chats failed for chat=%s: HTTP %s",
+                chat, status,
             )
             return None
 
@@ -466,6 +496,18 @@ class WebChannel(BaseChannel):
             await self._handle_models(frame)
         elif kind == "set_model":
             await self._handle_set_model(frame)
+        elif kind == "chats":
+            await self._handle_chats(frame)
+        elif kind == "del_chat":
+            await self._handle_del_chat(frame)
+        elif kind == "rename_chat":
+            await self._handle_rename_chat(frame)
+        elif kind == "get_prompts":
+            await self._handle_get_prompts(frame)
+        elif kind == "set_prompt":
+            await self._handle_set_prompt(frame)
+        elif kind == "skills":
+            await self._handle_skills(frame)
         elif kind in ("ready", "peer"):
             # Attach / client-presence: refresh the header's identity + model.
             await self._send_status()
@@ -1073,6 +1115,144 @@ class WebChannel(BaseChannel):
         )
         await self._send_control(model_changed_frame(new_provider, new_model))
         await self._send_status()
+
+    # -- M8: server-side chat list / delete / rename & workspace prompts --
+
+    def _workspace_dir(self) -> Path:
+        """Agent workspace directory on disk."""
+        ws_dir = getattr(self._workspace, "workspace_dir", None)
+        if ws_dir:
+            return Path(ws_dir)
+        return Path.home() / ".qwenpaw" / "workspaces" / self._agent_id()
+
+    async def _handle_chats(self, frame: Dict[str, Any]) -> None:
+        """Reply to ``{t:"chats"}`` with ``{t:"chats", items:[...]}``."""
+        del frame
+        status, payload = await self._api_json(
+            "GET", "/api/chats", params={"channel": self.channel},
+        )
+        if not (200 <= status < 300 and isinstance(payload, list)):
+            await self._send_control(chats_frame([]))
+            return
+
+        prefix = f"{self.channel}:{SENDER_ID}:"
+        for spec in payload:
+            if not isinstance(spec, dict):
+                continue
+            if spec.get("channel") != self.channel:
+                continue
+            session_id = spec.get("session_id")
+            chat_id = spec.get("id")
+            if (
+                isinstance(session_id, str)
+                and session_id.startswith(prefix)
+                and chat_id
+            ):
+                chat = session_id.split(":", 2)[2]
+                if chat:
+                    self._chat_ids[chat] = str(chat_id)
+
+        items = extract_web_chats(
+            payload, channel=self.channel, sender_id=SENDER_ID,
+        )
+        await self._send_control(chats_frame(items))
+
+    async def _handle_del_chat(self, frame: Dict[str, Any]) -> None:
+        """Delete a server-side chat and confirm ``{t:"chat_deleted", chat}``."""
+        chat = str(frame.get("chat") or "")
+        if chat:
+            chat_id = await self._resolve_chat_id(chat)
+            if chat_id:
+                await self._api_json("DELETE", f"/api/chats/{chat_id}")
+                self._chat_ids.pop(chat, None)
+        await self._send_control(chat_deleted_frame(chat))
+
+    async def _handle_rename_chat(self, frame: Dict[str, Any]) -> None:
+        """Acknowledge chat rename with ``{t:"chat_renamed", chat, title}``."""
+        chat = str(frame.get("chat") or "")
+        title = str(frame.get("title") or "").strip()
+        await self._send_control(chat_renamed_frame(chat, title))
+
+    async def _handle_get_prompts(self, frame: Dict[str, Any]) -> None:
+        """Read workspace prompt markdown files and reply ``{t:"prompts", files}``."""
+        del frame
+        ws_dir = self._workspace_dir()
+        files_dict: Dict[str, str] = {}
+        for fname in PROMPT_FILES:
+            fpath = ws_dir / fname
+            try:
+                if fpath.is_file():
+                    files_dict[fname] = fpath.read_text(
+                        encoding="utf-8", errors="replace",
+                    )[:65536]
+                else:
+                    files_dict[fname] = ""
+            except OSError:
+                files_dict[fname] = ""
+        await self._send_control(prompts_frame(files_dict))
+
+    async def _handle_set_prompt(self, frame: Dict[str, Any]) -> None:
+        """Validate and write one workspace prompt file, then reply ``prompt_saved``."""
+        fname = frame.get("file")
+        content = frame.get("content")
+        if (
+            not isinstance(fname, str)
+            or fname not in PROMPT_FILES
+            or not isinstance(content, str)
+            or len(content.encode("utf-8")) > 65536
+        ):
+            await self._send_control(
+                error_frame("E_PROMPT", "invalid prompt file or content"),
+            )
+            return
+        try:
+            ws_dir = self._workspace_dir()
+            ws_dir.mkdir(parents=True, exist_ok=True)
+            (ws_dir / fname).write_text(content, encoding="utf-8")
+        except OSError as exc:
+            await self._send_control(
+                error_frame("E_PROMPT", f"failed to write prompt: {exc}"),
+            )
+            return
+        await self._send_control(prompt_saved_frame(fname))
+
+    async def _handle_skills(self, frame: Dict[str, Any]) -> None:
+        """Reply to ``{t:"skills"}`` with ``{t:"skills", items:[...]}``."""
+        del frame
+        status, payload = await self._api_json("GET", "/api/skills")
+        if 200 <= status < 300:
+            items = extract_skill_items(payload)
+            if items:
+                await self._send_control(skills_frame(items))
+                return
+
+        items = []
+        try:
+            import qwenpaw.agents.skill_system.registry as skill_reg
+
+            resolve = getattr(skill_reg, "resolve_effective_skills", None)
+            if callable(resolve):
+                raw_skills = resolve(self._workspace_dir(), "console")
+                if isinstance(raw_skills, (list, tuple, set)):
+                    items = extract_skill_items(list(raw_skills))
+        except Exception:  # noqa: BLE001
+            pass
+
+        if not items:
+            try:
+                import json as _json
+
+                agent_json = self._workspace_dir() / "agent.json"
+                if agent_json.is_file():
+                    data = _json.loads(
+                        agent_json.read_text(encoding="utf-8", errors="replace"),
+                    )
+                    if isinstance(data, dict):
+                        items = extract_skill_items(data)
+            except Exception:  # noqa: BLE001
+                pass
+
+        await self._send_control(skills_frame(items))
 
     # -- outbound hooks --------------------------------------------------
 
