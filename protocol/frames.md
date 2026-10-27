@@ -30,7 +30,7 @@ One JSON object per WebSocket **text** message, UTF-8 encoded:
 
 | `t` | fields | notes |
 |---|---|---|
-| `hello` | `token?`, `instance`, `agent` | optional after header auth; relay acks with `ready`, frame is not forwarded |
+| `hello` | `token?`, `instance`, `agent`, `session`, `started` | first frame after the upgrade; wins the agent slot by generation (see §3); relay acks with `ready`, frame is not forwarded |
 | `ping` | — | answered locally with `pong`, not forwarded |
 | `pong` | — | reserved; the relay answers `ping` locally in v1 |
 
@@ -39,7 +39,7 @@ One JSON object per WebSocket **text** message, UTF-8 encoded:
 | `t` | fields | notes |
 |---|---|---|
 | `ready` | `agentOnline` | ack of `hello` / attach |
-| `peer` | `clients` | connected client count, sent on agent connect and on every client join/leave |
+| `peer` | `clients` | connected client count, sent when an agent's hello wins the slot and on every client join/leave |
 | `error` | `code`, `id?` | protocol error |
 | `pong` | — | answer to `ping` |
 
@@ -109,10 +109,10 @@ chat's stream, and are never ring-buffered or replayed on `resume` (§9.4).
 container                relay                   browser
     │── ws upgrade ───────▶│                        │
     │   Bearer <token>     │                        │
+    │ hello(session,started)│                        │
+    ├─────────────────────▶│                        │
     │        peer(n)       │                        │
     │◀─────────────────────┤                        │
-    │ hello(token) [opt.]  │                        │
-    ├─────────────────────▶│                        │
     │        ready         │                        │
     │◀─────────────────────┤                        │
     │                      │◀──── ws /ws/client ────┤
@@ -123,9 +123,16 @@ container                relay                   browser
     │◀─── msg/stop/... ────│◀─── msg/stop/... ──────┤
 ```
 
-- Agent auth happens on the HTTP upgrade (`Authorization: Bearer`); the relay sends `peer` as soon
-  as the socket is attached. The `hello` frame is optional metadata in v1: the relay answers
-  `ready` and does not forward it. There is no separate login round-trip in local dev.
+- Agent auth happens on the HTTP upgrade (`Authorization: Bearer`). The socket is then *parked*:
+  the single agent slot is won by the `hello` frame, by generation. `started` is the client
+  instance's construction time (wall-clock microseconds) and `session` its per-instance id.
+  A hello whose `started` is older than the current holder's is *superseded*: the relay closes
+  that socket with code 4000 and the holder is not disturbed. A newer-or-equal hello takes the
+  slot, closing the previous socket with code 4000 ("replaced by new agent connection"); the
+  relay then sends `peer`, flushes the offline buffer, and answers `ready`. A client whose
+  socket was closed with 4000 has been superseded by a newer instance and MUST NOT reconnect.
+  Legacy hellos without `started` count as generation 0. There is no separate login round-trip
+  in local dev.
 - In local dev the agent token defaults to `dev-agent-token`; clients are not authenticated.
 - After `ready`, either side may send frames immediately. The relay never rewrites payloads.
 - `peer` is the only client-presence signal: the agent gets the current `clients` count on connect

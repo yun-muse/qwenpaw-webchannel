@@ -12,8 +12,12 @@
  *   - a per-tenant token bucket enforces the 30 frames/s limit from
  *     `protocol/frames.md` §5 (relay-node does not).
  *
- * Socket state is rebuilt from `getWebSockets()` attachments after
- * hibernation; the offline buffer lives in DO storage.
+ * The single agent slot is won at `hello` time by generation: the plugin's
+ * hello carries `started` (construction time) and `session` (per-client id),
+ * and an older generation is closed with 4000 instead of evicting the current
+ * agent. Socket state — including the winning agent's generation — is rebuilt
+ * from `getWebSockets()` attachments after hibernation, so the same winner is
+ * restored; the offline buffer lives in DO storage.
  */
 import { DurableObject } from 'cloudflare:workers';
 
@@ -31,6 +35,7 @@ const TOKEN_TTL_SECONDS = 12 * 60 * 60; // login token lifetime
 const OUTBOX_KEY = 'outbox';
 const REPLACED_CODE = 4000;
 const REPLACED_REASON = 'replaced by new agent connection';
+const SUPERSEDED_REASON = 'superseded by newer agent connection';
 
 const encoder = new TextEncoder();
 
@@ -171,12 +176,26 @@ export default {
 
 // ---- Durable Object -------------------------------------------------------
 
+/**
+ * Socket attachment. `won: false` marks a parked agent socket that never won
+ * the slot (or lost it); `started`/`session` carry the winning generation so a
+ * hibernation rebuild can restore the same winner.
+ */
+type SocketAttachment = {
+  role?: string;
+  won?: boolean;
+  started?: number;
+  session?: string;
+};
+
 export class RelayDO extends DurableObject {
   /** Bindings/secrets, kept local so we do not rely on the base class fields. */
   private readonly cfg: Env;
 
-  /** The single container socket (a newer agent replaces it). */
+  /** The single container socket (the agent that won the slot at hello). */
   private agent: WebSocket | null = null;
+  /** Generation of the current agent, mirroring its attachment. */
+  private agentMeta: { started: number; session: string } | null = null;
   /** Every connected browser socket. */
   private clients = new Set<WebSocket>();
 
@@ -201,13 +220,25 @@ export class RelayDO extends DurableObject {
         new WebSocketRequestResponsePair('{"t":"ping"}', '{"t":"pong"}'),
       );
 
+      // Pick the winning agent socket: the greatest `started` wins; ties go to
+      // the last socket in iteration order (legacy attachments count as won,
+      // with generation 0). No socket is closed here.
+      let winner: { socket: WebSocket; started: number; session: string } | null = null;
       for (const socket of this.ctx.getWebSockets()) {
-        const attachment = socket.deserializeAttachment() as { role?: string } | null;
+        const attachment = socket.deserializeAttachment() as SocketAttachment | null;
         if (attachment?.role === 'agent') {
-          this.agent = socket; // last one wins, same as relay-node
+          if (attachment.won === false) continue;
+          const started = attachment.started ?? 0;
+          if (winner === null || started >= winner.started) {
+            winner = { socket, started, session: attachment.session ?? '' };
+          }
         } else if (attachment?.role === 'client') {
           this.clients.add(socket);
         }
+      }
+      if (winner !== null) {
+        this.agent = winner.socket;
+        this.agentMeta = { started: winner.started, session: winner.session };
       }
     });
   }
@@ -240,20 +271,9 @@ export class RelayDO extends DurableObject {
       return new Response('unauthorized', { status: 401 });
     }
 
-    const [client, server] = this.accept('agent');
+    const [client] = this.accept('agent');
 
-    if (this.agent && this.agent !== server) {
-      try {
-        this.agent.close(REPLACED_CODE, REPLACED_REASON);
-      } catch {
-        /* already gone; the close handler is a no-op for a stale socket */
-      }
-    }
-    this.agent = server;
-
-    this.sendJson(server, { t: 'peer', clients: this.clients.size });
-    await this.flushOutbox();
-
+    // No eviction here: the slot changes hands at hello time, by generation.
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -309,19 +329,79 @@ export class RelayDO extends DurableObject {
       return this.tooBusy(ws, typeof frame.id === 'string' ? frame.id : undefined);
     }
 
+    // Post-hibernation safety net: if the slot is empty, re-adopt a sender
+    // that still carries a winning attachment (replaces the old unconditional
+    // re-adopt inside the agent branch). A hello is excluded: the slot is won
+    // — and the outbox flushed — only in handleAgentHello.
+    if (this.agent === null && frame.t !== 'hello') {
+      const attachment = ws.deserializeAttachment() as SocketAttachment | null;
+      if (attachment?.role === 'agent' && attachment.won !== false) {
+        this.agent = ws;
+        this.agentMeta = { started: attachment.started ?? 0, session: attachment.session ?? '' };
+      }
+    }
+
     if (role === 'agent') {
-      if (this.agent === null) this.agent = ws; // re-adopt after a lost wake
       if (frame.t === 'hello') {
-        this.sendJson(ws, { t: 'ready', agentOnline: true });
+        await this.handleAgentHello(ws, frame);
         return;
       }
-      this.broadcast(message);
+      // Only the agent that owns the slot may reach clients; frames from
+      // parked or superseded sockets are dropped.
+      if (ws === this.agent) this.broadcast(message);
       return;
     }
 
     // client → agent: forward verbatim, or buffer while the agent is offline.
     if (this.sendText(this.agent, message)) return;
     await this.bufferForAgent(message);
+  }
+
+  /**
+   * The slot is won at hello time by generation. An older generation is
+   * superseded — closed with REPLACED_CODE and never allowed to evict the
+   * current agent — while a newer (or equal) one replaces it. Legacy hellos
+   * without `started` count as generation 0.
+   */
+  private async handleAgentHello(ws: WebSocket, frame: any): Promise<void> {
+    const started =
+      typeof frame.started === 'number' && Number.isFinite(frame.started) && frame.started > 0
+        ? frame.started
+        : 0;
+    const session = typeof frame.session === 'string' ? frame.session : '';
+
+    if (this.agent && this.agent !== ws && started < (this.agentMeta?.started ?? 0)) {
+      try {
+        ws.close(REPLACED_CODE, SUPERSEDED_REASON);
+      } catch {
+        /* already gone */
+      }
+      return;
+    }
+
+    if (ws === this.agent) {
+      // Re-hello from the agent that already owns the slot: refresh in place.
+      this.agentMeta = { started, session };
+      ws.serializeAttachment({ role: 'agent', won: true, started, session });
+      this.sendJson(ws, { t: 'ready', agentOnline: true });
+      return;
+    }
+
+    // Win: evict the previous agent (if any) and take the slot.
+    if (this.agent) {
+      try {
+        this.agent.close(REPLACED_CODE, REPLACED_REASON);
+      } catch {
+        /* already gone; the close handler ignores non-current sockets */
+      }
+    }
+    this.agent = ws;
+    this.agentMeta = { started, session };
+    ws.serializeAttachment({ role: 'agent', won: true, started, session });
+
+    this.sendJson(ws, { t: 'peer', clients: this.clients.size });
+    await this.flushOutbox();
+    this.sendJson(ws, { t: 'ready', agentOnline: true });
   }
 
   /** Hibernation close/error: drop the socket from our bookkeeping. */
@@ -334,7 +414,7 @@ export class RelayDO extends DurableObject {
   }
 
   private roleOf(ws: WebSocket): 'agent' | 'client' | null {
-    const attachment = ws.deserializeAttachment() as { role?: string } | null;
+    const attachment = ws.deserializeAttachment() as SocketAttachment | null;
     if (attachment?.role === 'agent') return 'agent';
     if (attachment?.role === 'client') return 'client';
     // Fallback for sockets adopted without an attachment (should not happen).
@@ -388,6 +468,7 @@ export class RelayDO extends DurableObject {
   private forget(ws: WebSocket): void {
     if (ws === this.agent) {
       this.agent = null;
+      this.agentMeta = null;
       return;
     }
     if (this.clients.delete(ws)) this.notifyPeer();

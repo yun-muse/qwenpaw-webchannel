@@ -4,7 +4,7 @@
 // Assertions (tasks/m3-prep-brief.md Part 1):
 //  1. POST /api/login: wrong password -> 401; correct -> 200 {token, expires}.
 //  2. /ws/client without token -> upgrade rejected; with bad agent token too.
-//  3. Agent connects (Bearer) -> peer; client connects (token) -> ready
+//  3. Agent connects (Bearer) + hello -> peer; client connects (token) -> ready
 //     agentOnline:true; client msg -> agent receives it verbatim.
 //  4. Agent streams start + 20 evt + end -> client receives all 20 evt in order.
 //  5. Oversize frame (>256KB) -> sender gets E_TOOBIG, agent receives nothing.
@@ -12,6 +12,8 @@
 //     receives all 3 in order (after the peer frame).
 //  7. Rate limit: a 40-frame burst -> some frames dropped, >=1 E_BUSY.
 //  8. GET /poll -> 501 (documented deferral), GET /health -> 200.
+//  9. GENERATION: a stale hello (older `started`) is closed with 4000 and does
+//     not disturb the current agent (still reachable, /health agentOnline:true).
 import { createRequire } from 'node:module';
 import { readFileSync, writeFileSync } from 'node:fs';
 
@@ -49,6 +51,8 @@ function connect(url, headers) {
       ws,
       frames: [],
       waiters: [],
+      closeInfo: null,
+      closeWaiters: [],
       send(obj) {
         const text = typeof obj === 'string' ? obj : JSON.stringify(obj);
         logFrame('->', text);
@@ -75,6 +79,18 @@ function connect(url, headers) {
       close() {
         try { ws.close(); } catch { /* ignore */ }
       },
+      /** Resolves with { code, reason } once the relay (or peer) closes us. */
+      waitForClose(timeoutMs = 5000) {
+        return new Promise((res, rej) => {
+          if (sock.closeInfo) return res(sock.closeInfo);
+          const w = { res };
+          sock.closeWaiters.push(w);
+          setTimeout(() => {
+            sock.closeWaiters = sock.closeWaiters.filter((x) => x !== w);
+            rej(new Error('close timeout'));
+          }, timeoutMs);
+        });
+      },
     };
     ws.on('message', (raw) => {
       const text = raw.toString();
@@ -88,6 +104,12 @@ function connect(url, headers) {
         }
         return true;
       });
+    });
+    ws.on('close', (code, reason) => {
+      sock.closeInfo = { code, reason: reason ? reason.toString() : '' };
+      const waiters = sock.closeWaiters;
+      sock.closeWaiters = [];
+      for (const w of waiters) w.res(sock.closeInfo);
     });
     ws.on('open', () => resolve(sock));
     ws.on('error', (err) => reject(err));
@@ -133,14 +155,18 @@ async function main() {
   must('AUTH-REJECT');
 
   // Warm-up: connect an agent once to flush any stale offline buffer left in
-  // local DO storage by earlier runs, then disconnect.
+  // local DO storage by earlier runs, then disconnect. It wins the slot with
+  // generation 1, so the flush (peer) happens at the hello.
   const warm = await connect(agentUrl, agentHeaders);
-  await warm.waitFor((f) => f.t === 'peer').catch(() => {});
+  warm.send({ t: 'hello', instance: 'e2e-cf', agent: 'default', started: 1, session: 'warm' });
+  await warm.waitFor((f) => f.t === 'ready').catch(() => {});
   await sleep(400);
   warm.close();
-  await sleep(300);
+  await sleep(500); // let the DO clear the slot (generation 1) before section 3
 
   // -- 3. pairing + client -> agent -----------------------------------------
+  // This hello stays LEGACY (no `started`/`session`) on purpose: it pins the
+  // legacy path, where a hello without `started` counts as generation 0.
   const agent = await connect(agentUrl, agentHeaders);
   agent.send({ t: 'hello', instance: 'e2e-cf', agent: 'default' });
   await agent.waitFor((f) => f.t === 'ready');
@@ -191,6 +217,10 @@ async function main() {
   for (let i = 0; i < 3; i++) client.send({ t: 'msg', chat: 'c2', text: `buffered-${i}` });
   await sleep(400); // let the DO persist the outbox
   const agent2 = await connect(agentUrl, agentHeaders);
+  // Gated hello: generation 2 beats the legacy generation-0 agent, which is
+  // evicted at the hello; the outbox flush happens as part of winning the slot.
+  agent2.send({ t: 'hello', instance: 'e2e-cf', agent: 'default', started: 2, session: 'e2e-cf-2' });
+  await agent2.waitFor((f) => f.t === 'ready');
   const flushed = [];
   const flushDone = new Promise((resolve) => {
     const iv = setInterval(() => {
@@ -226,10 +256,31 @@ async function main() {
   verdict('POLL-AND-HEALTH', poll.status === 501 && health.ok === true && health.agentOnline === true,
     `poll=${poll.status} health=${JSON.stringify(health)}`);
 
+  // -- 9. generation gating -----------------------------------------------------
+  // A stale agent (older `started`) is closed with 4000 and must not disturb
+  // the current agent (agent2) or /health.
+  await sleep(1200); // let the rate bucket refill
+  const stale = await connect(agentUrl, agentHeaders);
+  stale.send({ t: 'hello', instance: 'e2e-cf', agent: 'default', started: 1, session: 'stale' });
+  const staleClose = await stale.waitForClose().catch(() => ({ code: 0, reason: 'no close' }));
+  const healthAfterStale = await (await fetch(`${BASE}/health`)).json();
+
+  await sleep(1200); // refill: the stale hello spent a token
+  const agent2Seen = agent2.frames.length;
+  client.send({ t: 'msg', chat: 'c9', text: 'gen-probe' });
+  const probe = await agent2
+    .waitFor((f) => f.t === 'msg' && f.chat === 'c9', 5000, agent2Seen)
+    .catch(() => null);
+  verdict('GENERATION',
+    staleClose.code === 4000 && healthAfterStale.agentOnline === true &&
+      probe !== null && probe.text === 'gen-probe',
+    `staleClose=${staleClose.code} agentOnline=${healthAfterStale.agentOnline} probe=${probe ? JSON.stringify(probe.text) : 'missing'}`);
+  must('GENERATION');
+
   client.close();
   agent2.close();
 
-  const mandatory = ['LOGIN', 'AUTH-REJECT', 'PAIRING', 'STREAM-ORDER', 'E_TOOBIG', 'OFFLINE-BUFFER', 'RATE-LIMIT'];
+  const mandatory = ['LOGIN', 'AUTH-REJECT', 'PAIRING', 'STREAM-ORDER', 'E_TOOBIG', 'OFFLINE-BUFFER', 'RATE-LIMIT', 'GENERATION'];
   const failed = mandatory.filter((n) => !results[n]);
   console.log(failed.length === 0 ? 'E2E_CF PASS' : `E2E_CF FAIL (${failed.join(', ')})`);
   process.exit(failed.length === 0 ? 0 : 1);

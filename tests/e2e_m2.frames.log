@@ -1,249 +1,816 @@
 {"t":"ready","agentOnline":true}
+{"t":"status","agent_name":"Default","provider":"kilo","model":"openrouter/free"}
+{"t":"status","agent_name":"Default","provider":"kilo","model":"openrouter/free"}
 {"t":"error","code":"E_AUTH","detail":"approval not pending for this agent","chat":"m2main","req_id":"bogus-req-12345","seq":1}
 {"t":"start","chat":"m2main","seq":2,"stream_type":"reasoning"}
 {"t":"evt","chat":"m2main","seq":3,"data":{"text":"The","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":4,"data":{"text":" user has","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":5,"data":{"text":" asked me to write","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":6,"data":{"text":" a short paragraph about","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":7,"data":{"text":" the ocean,","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":8,"data":{"text":" at least three sentences","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":9,"data":{"text":" long, for the","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":10,"data":{"text":" fifth time in a","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":11,"data":{"text":" row. I've","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":12,"data":{"text":" already provided","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":13,"data":{"text":" four distinct","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":14,"data":{"text":" paragraphs. I should","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":15,"data":{"text":" provide","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":16,"data":{"text":" a","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":17,"data":{"text":" new","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":18,"data":{"text":",","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":19,"data":{"text":" distinct paragraph","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":20,"data":{"text":" that meets the requirements","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":21,"data":{"text":" (short","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":22,"data":{"text":", about","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":23,"data":{"text":" the ocean, at","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":24,"data":{"text":" least three sentences).","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":25,"data":{"text":" I don","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":26,"data":{"text":"'t need to use","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":27,"data":{"text":" any tools for","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":28,"data":{"text":" this - it's","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":29,"data":{"text":" a simple","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2main","seq":30,"data":{"text":" creative writing task.","stream_type":"reasoning"}}
-{"t":"end","chat":"m2main","seq":31,"stream_type":"reasoning"}
-{"t":"start","chat":"m2main","seq":32,"stream_type":"message"}
-{"t":"evt","chat":"m2main","seq":33,"data":{"text":"The ocean stretches","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":34,"data":{"text":" wide","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":35,"data":{"text":" beneath","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":36,"data":{"text":" an","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":37,"data":{"text":" open","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":38,"data":{"text":" sky, its surface","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":39,"data":{"text":" shifting","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":40,"data":{"text":" from glass","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":41,"data":{"text":" to","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":42,"data":{"text":" chop","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":43,"data":{"text":"py","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":44,"data":{"text":" with the whisper","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":45,"data":{"text":" of wind. Along","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":46,"data":{"text":" the shore, waves","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":47,"data":{"text":" retreat","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":48,"data":{"text":" and","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":49,"data":{"text":" return","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":50,"data":{"text":", leaving behind shells","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":51,"data":{"text":" smoothed","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":52,"data":{"text":" by time","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":53,"data":{"text":" and salt. Far","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":54,"data":{"text":" below, life","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":55,"data":{"text":" pulses","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":56,"data":{"text":" in quiet","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":57,"data":{"text":" corners","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":58,"data":{"text":"—coral gardens","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":59,"data":{"text":", dart","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":60,"data":{"text":"ing fish, and","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":61,"data":{"text":" the","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":62,"data":{"text":" slow drift of kel","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":63,"data":{"text":"p in currents","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":64,"data":{"text":" that never","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":65,"data":{"text":" sleep","stream_type":"message"}}
-{"t":"evt","chat":"m2main","seq":66,"data":{"text":".","stream_type":"message"}}
-{"t":"end","chat":"m2main","seq":67,"stream_type":"message"}
-{"t":"msg","chat":"m2main","parts":[{"type":"text","text":"The ocean stretches wide beneath an open sky, its surface shifting from glass to choppy with the whisper of wind. Along the shore, waves retreat and return, leaving behind shells smoothed by time and salt. Far below, life pulses in quiet corners—coral gardens, darting fish, and the slow drift of kelp in currents that never sleep."}],"seq":68}
+{"t":"evt","chat":"m2main","seq":4,"data":{"text":" user keeps","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":5,"data":{"text":" asking for the same","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":6,"data":{"text":" thing repeatedly","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":7,"data":{"text":" - a short paragraph","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":8,"data":{"text":" about the ocean,","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":9,"data":{"text":" at least three sentences","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":10,"data":{"text":" long. I","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":11,"data":{"text":"'ve already provided ","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":12,"data":{"text":"7 different versions","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":13,"data":{"text":". They might be","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":14,"data":{"text":" testing something","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":15,"data":{"text":", or they might","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":16,"data":{"text":" want","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":17,"data":{"text":" me","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":18,"data":{"text":" to stop","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":19,"data":{"text":".","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":20,"data":{"text":" But the","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":21,"data":{"text":" instruction","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":22,"data":{"text":" says to answer the","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":23,"data":{"text":" request. I'll","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":24,"data":{"text":" provide another one","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":25,"data":{"text":", slightly","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":26,"data":{"text":" different from the previous","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2main","seq":27,"data":{"text":" ones.","stream_type":"reasoning"}}
+{"t":"end","chat":"m2main","seq":28,"stream_type":"reasoning"}
+{"t":"start","chat":"m2main","seq":29,"stream_type":"message"}
+{"t":"evt","chat":"m2main","seq":30,"data":{"text":"The","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":31,"data":{"text":" ocean breath","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":32,"data":{"text":"es in and","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":33,"data":{"text":" out with the moon","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":34,"data":{"text":"'s","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":35,"data":{"text":" pull, a","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":36,"data":{"text":" slow","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":37,"data":{"text":" pulse","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":38,"data":{"text":" felt","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":39,"data":{"text":" along","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":40,"data":{"text":" every coast. W","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":41,"data":{"text":"aves curl","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":42,"data":{"text":" and collapse","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":43,"data":{"text":", his","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":44,"data":{"text":"sing as","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":45,"data":{"text":" they kiss the sand","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":46,"data":{"text":", only","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":47,"data":{"text":" to gather","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":48,"data":{"text":" again for the next","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":49,"data":{"text":" run. Below","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":50,"data":{"text":", the deep","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":51,"data":{"text":" is","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":52,"data":{"text":" not","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":53,"data":{"text":" empty—it hum","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":54,"data":{"text":"s with pressure","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":55,"data":{"text":", cold","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":56,"data":{"text":", and life","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":57,"data":{"text":" adapted","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":58,"data":{"text":" to a","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":59,"data":{"text":" world without","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":60,"data":{"text":" light","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":61,"data":{"text":", where time","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":62,"data":{"text":" moves on","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":63,"data":{"text":" a scale","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":64,"data":{"text":" we","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":65,"data":{"text":" barely","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":66,"data":{"text":" grasp","stream_type":"message"}}
+{"t":"evt","chat":"m2main","seq":67,"data":{"text":".","stream_type":"message"}}
+{"t":"end","chat":"m2main","seq":68,"stream_type":"message"}
+{"t":"msg","chat":"m2main","parts":[{"type":"text","text":"The ocean breathes in and out with the moon's pull, a slow pulse felt along every coast. Waves curl and collapse, hissing as they kiss the sand, only to gather again for the next run. Below, the deep is not empty—it hums with pressure, cold, and life adapted to a world without light, where time moves on a scale we barely grasp."}],"seq":69}
 {"t":"ready","agentOnline":true}
-{"t":"hist","chat":"m2main","messages":[{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user wants a short paragraph about the ocean, at least three sentences long. This is a simple creative writing request. No tools needed. I'll write a paragraph about the ocean."},{"role":"assistant","text":"The ocean stretches beyond the horizon, a vast expanse of deep blue that covers most of our planet. Its waves carry ancient stories, rhythmic and unceasing, while beneath the surface lies a world of mystery teeming with life unseen by human eyes. Standing at its edge, you feel both small and connected, reminded of nature's quiet power and the calm it can bring to a restless mind."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me to write a short paragraph about the ocean, at least three sentences long. This is exactly the same request they just made, and I already fulfilled it. I should provide a fresh paragraph rather than repeating the exact same one, since they're asking again. Let me write something new about the ocean."},{"role":"assistant","text":"The ocean breathes with the planet, its tides pulled by the moon's quiet command. Salt hangs in the air, sharp and ancient, while sunlight fractures into shifting gold across the rolling surface. Even in its calmest moments, the sea holds an endless depth—a reminder that some mysteries are meant to be felt, not solved."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me again to write a short paragraph about the ocean, at least three sentences long. I already did this twice in the previous turns. Let me provide a fresh, different paragraph that meets the criteria."},{"role":"assistant","text":"The ocean is a world unto itself, vast and restless under an open sky. Waves roll in with a steady heartbeat, carrying salt spray and the scent of distant shores. Beneath the surface, coral reefs glow with color and life thrives in the crushing dark, hidden from view but pulsing with its own quiet energy."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me to write a short paragraph about the ocean, at least three sentences long. They've asked this multiple times already. I should just do it again, providing a fresh paragraph that meets the criteria."},{"role":"assistant","text":"The ocean rolls in with a rhythm older than memory, each wave breaking and receding like a slow, patient breath. Salt air stings the skin while the horizon blurs where water meets sky, endless and unbroken. Down below, sunlight fades into cool blue silence where creatures drift and glow in the deep, untouched by the world above."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me to write a short paragraph about the ocean, at least three sentences long. This is the fourth time they've made this exact same request. They may be testing whether I'll vary my response or noticing repetition. I should write a fresh, distinct paragraph about the ocean that meets the requirements (at least three sentences)."},{"role":"assistant","text":"The ocean crashes against the shore with relentless energy, foam spraying high before vanishing back into the swell. Miles offshore, the water deepens to a color no painter could fully capture, shifting from storm-gray to translucent turquoise with the angle of the sun. Somewhere beneath that surface, currents carry warmth and cold across continents, quietly shaping the weather and the fate of every shoreline."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user has asked me to write a short paragraph about the ocean, at least three sentences long, for the fifth time in a row. I've already provided four distinct paragraphs. I should provide a new, distinct paragraph that meets the requirements (short, about the ocean, at least three sentences). I don't need to use any tools for this - it's a simple creative writing task."},{"role":"assistant","text":"The ocean stretches wide beneath an open sky, its surface shifting from glass to choppy with the whisper of wind. Along the shore, waves retreat and return, leaving behind shells smoothed by time and salt. Far below, life pulses in quiet corners—coral gardens, darting fish, and the slow drift of kelp in currents that never sleep."}],"seq":69}
-{"t":"hist","chat":"m2main","messages":[{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user wants a short paragraph about the ocean, at least three sentences long. This is a simple creative writing request. No tools needed. I'll write a paragraph about the ocean."},{"role":"assistant","text":"The ocean stretches beyond the horizon, a vast expanse of deep blue that covers most of our planet. Its waves carry ancient stories, rhythmic and unceasing, while beneath the surface lies a world of mystery teeming with life unseen by human eyes. Standing at its edge, you feel both small and connected, reminded of nature's quiet power and the calm it can bring to a restless mind."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me to write a short paragraph about the ocean, at least three sentences long. This is exactly the same request they just made, and I already fulfilled it. I should provide a fresh paragraph rather than repeating the exact same one, since they're asking again. Let me write something new about the ocean."},{"role":"assistant","text":"The ocean breathes with the planet, its tides pulled by the moon's quiet command. Salt hangs in the air, sharp and ancient, while sunlight fractures into shifting gold across the rolling surface. Even in its calmest moments, the sea holds an endless depth—a reminder that some mysteries are meant to be felt, not solved."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me again to write a short paragraph about the ocean, at least three sentences long. I already did this twice in the previous turns. Let me provide a fresh, different paragraph that meets the criteria."},{"role":"assistant","text":"The ocean is a world unto itself, vast and restless under an open sky. Waves roll in with a steady heartbeat, carrying salt spray and the scent of distant shores. Beneath the surface, coral reefs glow with color and life thrives in the crushing dark, hidden from view but pulsing with its own quiet energy."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me to write a short paragraph about the ocean, at least three sentences long. They've asked this multiple times already. I should just do it again, providing a fresh paragraph that meets the criteria."},{"role":"assistant","text":"The ocean rolls in with a rhythm older than memory, each wave breaking and receding like a slow, patient breath. Salt air stings the skin while the horizon blurs where water meets sky, endless and unbroken. Down below, sunlight fades into cool blue silence where creatures drift and glow in the deep, untouched by the world above."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me to write a short paragraph about the ocean, at least three sentences long. This is the fourth time they've made this exact same request. They may be testing whether I'll vary my response or noticing repetition. I should write a fresh, distinct paragraph about the ocean that meets the requirements (at least three sentences)."},{"role":"assistant","text":"The ocean crashes against the shore with relentless energy, foam spraying high before vanishing back into the swell. Miles offshore, the water deepens to a color no painter could fully capture, shifting from storm-gray to translucent turquoise with the angle of the sun. Somewhere beneath that surface, currents carry warmth and cold across continents, quietly shaping the weather and the fate of every shoreline."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user has asked me to write a short paragraph about the ocean, at least three sentences long, for the fifth time in a row. I've already provided four distinct paragraphs. I should provide a new, distinct paragraph that meets the requirements (short, about the ocean, at least three sentences). I don't need to use any tools for this - it's a simple creative writing task."},{"role":"assistant","text":"The ocean stretches wide beneath an open sky, its surface shifting from glass to choppy with the whisper of wind. Along the shore, waves retreat and return, leaving behind shells smoothed by time and salt. Far below, life pulses in quiet corners—coral gardens, darting fish, and the slow drift of kelp in currents that never sleep."}],"seq":69}
+{"t":"status","agent_name":"Default","provider":"kilo","model":"openrouter/free"}
+{"t":"status","agent_name":"Default","provider":"kilo","model":"openrouter/free"}
+{"t":"hist","chat":"m2main","messages":[{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user wants a short paragraph about the ocean, at least three sentences long. This is a simple creative writing request. No tools needed. I'll write a paragraph about the ocean."},{"role":"assistant","text":"The ocean stretches beyond the horizon, a vast expanse of deep blue that covers most of our planet. Its waves carry ancient stories, rhythmic and unceasing, while beneath the surface lies a world of mystery teeming with life unseen by human eyes. Standing at its edge, you feel both small and connected, reminded of nature's quiet power and the calm it can bring to a restless mind."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me to write a short paragraph about the ocean, at least three sentences long. This is exactly the same request they just made, and I already fulfilled it. I should provide a fresh paragraph rather than repeating the exact same one, since they're asking again. Let me write something new about the ocean."},{"role":"assistant","text":"The ocean breathes with the planet, its tides pulled by the moon's quiet command. Salt hangs in the air, sharp and ancient, while sunlight fractures into shifting gold across the rolling surface. Even in its calmest moments, the sea holds an endless depth—a reminder that some mysteries are meant to be felt, not solved."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me again to write a short paragraph about the ocean, at least three sentences long. I already did this twice in the previous turns. Let me provide a fresh, different paragraph that meets the criteria."},{"role":"assistant","text":"The ocean is a world unto itself, vast and restless under an open sky. Waves roll in with a steady heartbeat, carrying salt spray and the scent of distant shores. Beneath the surface, coral reefs glow with color and life thrives in the crushing dark, hidden from view but pulsing with its own quiet energy."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me to write a short paragraph about the ocean, at least three sentences long. They've asked this multiple times already. I should just do it again, providing a fresh paragraph that meets the criteria."},{"role":"assistant","text":"The ocean rolls in with a rhythm older than memory, each wave breaking and receding like a slow, patient breath. Salt air stings the skin while the horizon blurs where water meets sky, endless and unbroken. Down below, sunlight fades into cool blue silence where creatures drift and glow in the deep, untouched by the world above."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me to write a short paragraph about the ocean, at least three sentences long. This is the fourth time they've made this exact same request. They may be testing whether I'll vary my response or noticing repetition. I should write a fresh, distinct paragraph about the ocean that meets the requirements (at least three sentences)."},{"role":"assistant","text":"The ocean crashes against the shore with relentless energy, foam spraying high before vanishing back into the swell. Miles offshore, the water deepens to a color no painter could fully capture, shifting from storm-gray to translucent turquoise with the angle of the sun. Somewhere beneath that surface, currents carry warmth and cold across continents, quietly shaping the weather and the fate of every shoreline."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user has asked me to write a short paragraph about the ocean, at least three sentences long, for the fifth time in a row. I've already provided four distinct paragraphs. I should provide a new, distinct paragraph that meets the requirements (short, about the ocean, at least three sentences). I don't need to use any tools for this - it's a simple creative writing task."},{"role":"assistant","text":"The ocean stretches wide beneath an open sky, its surface shifting from glass to choppy with the whisper of wind. Along the shore, waves retreat and return, leaving behind shells smoothed by time and salt. Far below, life pulses in quiet corners—coral gardens, darting fish, and the slow drift of kelp in currents that never sleep."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me to write another ocean paragraph for the sixth time. I'll create one more distinct paragraph."},{"role":"assistant","text":"The ocean's surface shimmers with a restless light, catching the sun in scattered diamonds that dance across its rolling expanse. Each morning, the tide crests higher than the day before, leaving behind a trail of seaweed and wisdom in its wake. Beneath the waves, the deep holds secrets untouched since the world was young—ancient seas and creatures that have never known land."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user keeps asking for the same thing repeatedly - a short paragraph about the ocean, at least three sentences long. I've already provided 7 different versions. They might be testing something, or they might want me to stop. But the instruction says to answer the request. I'll provide another one, slightly different from the previous ones."},{"role":"assistant","text":"The ocean breathes in and out with the moon's pull, a slow pulse felt along every coast. Waves curl and collapse, hissing as they kiss the sand, only to gather again for the next run. Below, the deep is not empty—it hums with pressure, cold, and life adapted to a world without light, where time moves on a scale we barely grasp."}],"seq":70}
+{"t":"hist","chat":"m2main","messages":[{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user wants a short paragraph about the ocean, at least three sentences long. This is a simple creative writing request. No tools needed. I'll write a paragraph about the ocean."},{"role":"assistant","text":"The ocean stretches beyond the horizon, a vast expanse of deep blue that covers most of our planet. Its waves carry ancient stories, rhythmic and unceasing, while beneath the surface lies a world of mystery teeming with life unseen by human eyes. Standing at its edge, you feel both small and connected, reminded of nature's quiet power and the calm it can bring to a restless mind."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me to write a short paragraph about the ocean, at least three sentences long. This is exactly the same request they just made, and I already fulfilled it. I should provide a fresh paragraph rather than repeating the exact same one, since they're asking again. Let me write something new about the ocean."},{"role":"assistant","text":"The ocean breathes with the planet, its tides pulled by the moon's quiet command. Salt hangs in the air, sharp and ancient, while sunlight fractures into shifting gold across the rolling surface. Even in its calmest moments, the sea holds an endless depth—a reminder that some mysteries are meant to be felt, not solved."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me again to write a short paragraph about the ocean, at least three sentences long. I already did this twice in the previous turns. Let me provide a fresh, different paragraph that meets the criteria."},{"role":"assistant","text":"The ocean is a world unto itself, vast and restless under an open sky. Waves roll in with a steady heartbeat, carrying salt spray and the scent of distant shores. Beneath the surface, coral reefs glow with color and life thrives in the crushing dark, hidden from view but pulsing with its own quiet energy."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me to write a short paragraph about the ocean, at least three sentences long. They've asked this multiple times already. I should just do it again, providing a fresh paragraph that meets the criteria."},{"role":"assistant","text":"The ocean rolls in with a rhythm older than memory, each wave breaking and receding like a slow, patient breath. Salt air stings the skin while the horizon blurs where water meets sky, endless and unbroken. Down below, sunlight fades into cool blue silence where creatures drift and glow in the deep, untouched by the world above."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me to write a short paragraph about the ocean, at least three sentences long. This is the fourth time they've made this exact same request. They may be testing whether I'll vary my response or noticing repetition. I should write a fresh, distinct paragraph about the ocean that meets the requirements (at least three sentences)."},{"role":"assistant","text":"The ocean crashes against the shore with relentless energy, foam spraying high before vanishing back into the swell. Miles offshore, the water deepens to a color no painter could fully capture, shifting from storm-gray to translucent turquoise with the angle of the sun. Somewhere beneath that surface, currents carry warmth and cold across continents, quietly shaping the weather and the fate of every shoreline."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user has asked me to write a short paragraph about the ocean, at least three sentences long, for the fifth time in a row. I've already provided four distinct paragraphs. I should provide a new, distinct paragraph that meets the requirements (short, about the ocean, at least three sentences). I don't need to use any tools for this - it's a simple creative writing task."},{"role":"assistant","text":"The ocean stretches wide beneath an open sky, its surface shifting from glass to choppy with the whisper of wind. Along the shore, waves retreat and return, leaving behind shells smoothed by time and salt. Far below, life pulses in quiet corners—coral gardens, darting fish, and the slow drift of kelp in currents that never sleep."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user is asking me to write another ocean paragraph for the sixth time. I'll create one more distinct paragraph."},{"role":"assistant","text":"The ocean's surface shimmers with a restless light, catching the sun in scattered diamonds that dance across its rolling expanse. Each morning, the tide crests higher than the day before, leaving behind a trail of seaweed and wisdom in its wake. Beneath the waves, the deep holds secrets untouched since the world was young—ancient seas and creatures that have never known land."},{"role":"user","text":"Please write a short paragraph about the ocean, at least three sentences long."},{"role":"assistant","text":"The user keeps asking for the same thing repeatedly - a short paragraph about the ocean, at least three sentences long. I've already provided 7 different versions. They might be testing something, or they might want me to stop. But the instruction says to answer the request. I'll provide another one, slightly different from the previous ones."},{"role":"assistant","text":"The ocean breathes in and out with the moon's pull, a slow pulse felt along every coast. Waves curl and collapse, hissing as they kiss the sand, only to gather again for the next run. Below, the deep is not empty—it hums with pressure, cold, and life adapted to a world without light, where time moves on a scale we barely grasp."}],"seq":70}
+{"t":"status","agent_name":"Default","provider":"kilo","model":"openrouter/free"}
 {"t":"start","chat":"m2file","seq":1,"stream_type":"reasoning"}
-{"t":"evt","chat":"m2file","seq":2,"data":{"text":"The user attached another note.","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2file","seq":3,"data":{"text":" I should read it and reply with one","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2file","seq":4,"data":{"text":" short sentence confirming I got it.","stream_type":"reasoning"}}
-{"t":"end","chat":"m2file","seq":5,"stream_type":"reasoning"}
-{"t":"msg","chat":"m2file","parts":[{"type":"text","text":"🔧 **read_file**\n```\n{\"file_path\": \"media/573184e65672420fbfce099857163d2c_note.txt\"}\n```"}],"seq":6}
+{"t":"evt","chat":"m2file","seq":2,"data":{"text":"The","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":3,"data":{"text":" user wants","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":4,"data":{"text":" me to read","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":5,"data":{"text":" the attached file and","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":6,"data":{"text":" confirm","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":7,"data":{"text":" receipt in","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":8,"data":{"text":" one short sentence.","stream_type":"reasoning"}}
+{"t":"end","chat":"m2file","seq":9,"stream_type":"reasoning"}
+{"t":"msg","chat":"m2file","parts":[{"type":"text","text":"🔧 **read_file**\n```\n{\"file_path\":\"media/ddbbb49da1fb4f7a8278442648b82a85_note.txt\"}\n```"}],"seq":10}
 {"t":"ready","agentOnline":true}
-{"t":"msg","chat":"m2file","parts":[{"type":"text","text":"✅ **read_file**:\n```\nhello attachment from e2e_m2\n```"}],"seq":7}
-{"t":"msg","chat":"m2file","parts":[{"type":"text","text":"✅ **read_file**:\n```\nhello attachment from e2e_m2\n```"}],"seq":7}
-{"t":"start","chat":"m2file","seq":8,"stream_type":"reasoning"}
-{"t":"evt","chat":"m2file","seq":9,"data":{"text":"The note says \"hello attachment","stream_type":"reasoning"}}
-{"t":"start","chat":"m2file","seq":8,"stream_type":"reasoning"}
-{"t":"evt","chat":"m2file","seq":9,"data":{"text":"The note says \"hello attachment","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2file","seq":10,"data":{"text":" from e2e_m2\". I need to reply with one short sentence confirming","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2file","seq":11,"data":{"text":" I got it.","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2file","seq":10,"data":{"text":" from e2e_m2\". I need to reply with one short sentence confirming","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2file","seq":11,"data":{"text":" I got it.","stream_type":"reasoning"}}
-{"t":"end","chat":"m2file","seq":12,"stream_type":"reasoning"}
-{"t":"start","chat":"m2file","seq":13,"stream_type":"message"}
-{"t":"end","chat":"m2file","seq":12,"stream_type":"reasoning"}
-{"t":"start","chat":"m2file","seq":13,"stream_type":"message"}
-{"t":"evt","chat":"m2file","seq":14,"data":{"text":"Got it — received","stream_type":"message"}}
-{"t":"evt","chat":"m2file","seq":14,"data":{"text":"Got it — received","stream_type":"message"}}
-{"t":"evt","chat":"m2file","seq":15,"data":{"text":" your small note.","stream_type":"message"}}
-{"t":"evt","chat":"m2file","seq":15,"data":{"text":" your small note.","stream_type":"message"}}
-{"t":"end","chat":"m2file","seq":16,"stream_type":"message"}
-{"t":"msg","chat":"m2file","parts":[{"type":"text","text":"Got it — received your small note."}],"seq":17}
-{"t":"end","chat":"m2file","seq":16,"stream_type":"message"}
-{"t":"msg","chat":"m2file","parts":[{"type":"text","text":"Got it — received your small note."}],"seq":17}
+{"t":"status","agent_name":"Default","provider":"kilo","model":"openrouter/free"}
+{"t":"status","agent_name":"Default","provider":"kilo","model":"openrouter/free"}
+{"t":"msg","chat":"m2file","parts":[{"type":"text","text":"✅ **read_file**:\n```\nhello attachment from e2e_m2\n```"}],"seq":11}
+{"t":"msg","chat":"m2file","parts":[{"type":"text","text":"✅ **read_file**:\n```\nhello attachment from e2e_m2\n```"}],"seq":11}
+{"t":"start","chat":"m2file","seq":12,"stream_type":"reasoning"}
+{"t":"evt","chat":"m2file","seq":13,"data":{"text":"The","stream_type":"reasoning"}}
+{"t":"start","chat":"m2file","seq":12,"stream_type":"reasoning"}
+{"t":"evt","chat":"m2file","seq":13,"data":{"text":"The","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":14,"data":{"text":" user has been repeatedly","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":14,"data":{"text":" user has been repeatedly","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":15,"data":{"text":" att","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":15,"data":{"text":" att","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":16,"data":{"text":"aching notes that","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":16,"data":{"text":"aching notes that","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":17,"data":{"text":" all","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":17,"data":{"text":" all","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":18,"data":{"text":" say \"hello attachment from e2e_m","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":18,"data":{"text":" say \"hello attachment from e2e_m","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":19,"data":{"text":"2\".","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":19,"data":{"text":"2\".","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":20,"data":{"text":" I","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":20,"data":{"text":" I","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":21,"data":{"text":" need","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":21,"data":{"text":" need","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":22,"data":{"text":" to confirm I","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":22,"data":{"text":" to confirm I","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":23,"data":{"text":" got the","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":23,"data":{"text":" got the","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":24,"data":{"text":" last","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":24,"data":{"text":" last","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":25,"data":{"text":" one","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":25,"data":{"text":" one","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":26,"data":{"text":". The file","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":26,"data":{"text":". The file","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":27,"data":{"text":" at","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":27,"data":{"text":" at","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":28,"data":{"text":" `","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":28,"data":{"text":" `","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":29,"data":{"text":"media/ddbbb49da1fb","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":29,"data":{"text":"media/ddbbb49da1fb","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":30,"data":{"text":"4f7","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":30,"data":{"text":"4f7","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":31,"data":{"text":"a","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":31,"data":{"text":"a","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":32,"data":{"text":"827","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":33,"data":{"text":"844","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":32,"data":{"text":"827","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":33,"data":{"text":"844","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":34,"data":{"text":"2648b82","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":34,"data":{"text":"2648b82","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":35,"data":{"text":"a85_n","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":35,"data":{"text":"a85_n","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":36,"data":{"text":"ote.txt` contains","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":36,"data":{"text":"ote.txt` contains","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":37,"data":{"text":" \"hello attachment from e2e_m","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":37,"data":{"text":" \"hello attachment from e2e_m","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":38,"data":{"text":"2\".\n\n","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":38,"data":{"text":"2\".\n\n","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":39,"data":{"text":"I should reply","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":39,"data":{"text":"I should reply","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":40,"data":{"text":" with one short sentence confirming I got it","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":40,"data":{"text":" with one short sentence confirming I got it","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":41,"data":{"text":",","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":41,"data":{"text":",","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":42,"data":{"text":" as instructed.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2file","seq":42,"data":{"text":" as instructed.","stream_type":"reasoning"}}
+{"t":"end","chat":"m2file","seq":43,"stream_type":"reasoning"}
+{"t":"start","chat":"m2file","seq":44,"stream_type":"message"}
+{"t":"end","chat":"m2file","seq":43,"stream_type":"reasoning"}
+{"t":"start","chat":"m2file","seq":44,"stream_type":"message"}
+{"t":"evt","chat":"m2file","seq":45,"data":{"text":"Got it —","stream_type":"message"}}
+{"t":"evt","chat":"m2file","seq":45,"data":{"text":"Got it —","stream_type":"message"}}
+{"t":"evt","chat":"m2file","seq":46,"data":{"text":" I received your note \"","stream_type":"message"}}
+{"t":"evt","chat":"m2file","seq":46,"data":{"text":" I received your note \"","stream_type":"message"}}
+{"t":"evt","chat":"m2file","seq":47,"data":{"text":"hello attachment from e2e_m","stream_type":"message"}}
+{"t":"evt","chat":"m2file","seq":47,"data":{"text":"hello attachment from e2e_m","stream_type":"message"}}
+{"t":"evt","chat":"m2file","seq":48,"data":{"text":"2.\"","stream_type":"message"}}
+{"t":"evt","chat":"m2file","seq":48,"data":{"text":"2.\"","stream_type":"message"}}
+{"t":"end","chat":"m2file","seq":49,"stream_type":"message"}
+{"t":"msg","chat":"m2file","parts":[{"type":"text","text":"Got it — I received your note \"hello attachment from e2e_m2.\""}],"seq":50}
+{"t":"end","chat":"m2file","seq":49,"stream_type":"message"}
+{"t":"msg","chat":"m2file","parts":[{"type":"text","text":"Got it — I received your note \"hello attachment from e2e_m2.\""}],"seq":50}
 {"t":"start","chat":"m2resume","seq":1,"stream_type":"reasoning"}
+{"t":"evt","chat":"m2resume","seq":2,"data":{"text":"The","stream_type":"reasoning"}}
 {"t":"start","chat":"m2resume","seq":1,"stream_type":"reasoning"}
-{"t":"evt","chat":"m2resume","seq":2,"data":{"text":"The user wants","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2resume","seq":2,"data":{"text":"The user wants","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2resume","seq":3,"data":{"text":" a numbered list of 10 tips for better sleep, each tip one full","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2resume","seq":3,"data":{"text":" a numbered list of 10 tips for better sleep, each tip one full","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2resume","seq":4,"data":{"text":" sentence. Let me write","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2resume","seq":4,"data":{"text":" sentence. Let me write","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2resume","seq":5,"data":{"text":" them out.","stream_type":"reasoning"}}
-{"t":"end","chat":"m2resume","seq":6,"stream_type":"reasoning"}
-{"t":"start","chat":"m2resume","seq":7,"stream_type":"message"}
-{"t":"evt","chat":"m2resume","seq":8,"data":{"text":"1.","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":9,"data":{"text":" Maintain a consistent sleep schedule by going","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":10,"data":{"text":" to bed and waking up at the same time","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":11,"data":{"text":" every day, including weekends, to reinforce your body's","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":12,"data":{"text":" natural circadian rhythm.\n\n2. Create","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":13,"data":{"text":" a calming pre-bedtime routine that signals to your brain it is time to wind","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":14,"data":{"text":" down, such as reading a book, taking a warm bath, or practicing gentle","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":15,"data":{"text":" stretching.\n\n3. Optimize your bedroom","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":16,"data":{"text":" environment by keeping it cool, dark,","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":17,"data":{"text":" and quiet, and invest in a comfortable","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":18,"data":{"text":" mattress and supportive pillows suited to your preferred","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":19,"data":{"text":" sleeping position.\n\n4. Limit exposure","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":20,"data":{"text":" to blue light from phones, tablets, computers","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":21,"data":{"text":", and televisions for at least one hour before bed, since it suppresses","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":22,"data":{"text":" melatonin production and delays sleep onset.\n\n5. Avoid","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":23,"data":{"text":" caffeine, nicotine, and other stimul","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":24,"data":{"text":"ants in the late afternoon and evening because","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":25,"data":{"text":" they can linger in your system for hours","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":26,"data":{"text":" and disrupt your ability to fall asleep.\n\n","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":27,"data":{"text":"6. Engage in regular physical activity","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":28,"data":{"text":" during the day, but finish vigorous exercise","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":29,"data":{"text":" at least three hours before bedtime so your body has adequate time to cool","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":30,"data":{"text":" down and relax.\n\n7. Be mindful of your evening","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":31,"data":{"text":" meals by avoiding heavy, spicy, or very large dinners close to bedtime, and","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":32,"data":{"text":" limit excessive fluid intake to prevent nighttime awaken","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":33,"data":{"text":"ings.\n\n8. If you cannot fall asleep after about twenty minutes, get out","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":34,"data":{"text":" of bed and do a quiet, low","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":35,"data":{"text":"-light activity until you feel sleepy, then return to bed to reinforce","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":36,"data":{"text":" the association between bed and sleep.\n\n9","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":37,"data":{"text":". Manage stress and racing thoughts through techniques","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":38,"data":{"text":" such as deep breathing, meditation, or","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":39,"data":{"text":" journaling before bed, since mental arousal is one","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":40,"data":{"text":" of the most common barriers to restful sleep.\n\n10. Reserve your bed","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":41,"data":{"text":" primarily for sleep and intimacy, avoiding work","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":42,"data":{"text":", eating, or prolonged wakefulness in bed, so your brain learns to associate","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":43,"data":{"text":" it with rest rather than activity.","stream_type":"message"}}
-{"t":"end","chat":"m2resume","seq":44,"stream_type":"message"}
-{"t":"msg","chat":"m2resume","parts":[{"type":"text","text":"1. Maintain a consistent sleep schedule by going to bed and waking up at the same time every day, including weekends, to reinforce your body's natural circadian rhythm.\n\n2. Create a calming pre-bedtime routine that signals to your brain it is time to wind down, such as reading a book, taking a warm bath, or practicing gentle stretching.\n\n3. Optimize your bedroom environment by keeping it cool, dark, and quiet, and invest in a comfortable mattress and supportive pillows suited to your preferred sleeping position.\n\n4. Limit exposure to blue light from phones, tablets, computers, and televisions for at least one hour before bed, since it suppresses melatonin production and delays sleep onset.\n\n5. Avoid caffeine, nicotine, and other stimulants in the late afternoon and evening because they can linger in your system for hours and disrupt your ability to fall asleep.\n\n6. Engage in regular physical activity during the day, but finish vigorous exercise at least three hours before bedtime so your body has adequate time to cool down and relax.\n\n7. Be mindful of your evening meals by avoiding heavy, spicy, or very large dinners close to bedtime, and limit excessive fluid intake to prevent nighttime awakenings.\n\n8. If you cannot fall asleep after about twenty minutes, get out of bed and do a quiet, low-light activity until you feel sleepy, then return to bed to reinforce the association between bed and sleep.\n\n9. Manage stress and racing thoughts through techniques such as deep breathing, meditation, or journaling before bed, since mental arousal is one of the most common barriers to restful sleep.\n\n10. Reserve your bed primarily for sleep and intimacy, avoiding work, eating, or prolonged wakefulness in bed, so your brain learns to associate it with rest rather than activity."}],"seq":45}
+{"t":"evt","chat":"m2resume","seq":2,"data":{"text":"The","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":3,"data":{"text":" user has","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":3,"data":{"text":" user has","stream_type":"reasoning"}}
+{"t":"status","agent_name":"Default","provider":"kilo","model":"openrouter/free"}
+{"t":"evt","chat":"m2resume","seq":4,"data":{"text":" asked me multiple","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":5,"data":{"text":" times to write the","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":6,"data":{"text":" same thing","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":7,"data":{"text":": a detailed numbered","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":8,"data":{"text":" list of 1","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":9,"data":{"text":"0 tips for better","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":10,"data":{"text":" sleep, each tip","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":11,"data":{"text":" one full sentence.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":12,"data":{"text":" I've already provided","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":13,"data":{"text":" this","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":14,"data":{"text":" several times. I","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":15,"data":{"text":" should provide","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":16,"data":{"text":" a","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":17,"data":{"text":" fresh response","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":18,"data":{"text":",","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":19,"data":{"text":" perhaps with slightly varied","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":20,"data":{"text":" wording but still","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":21,"data":{"text":" meeting the exact","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":22,"data":{"text":" requirements: numbered","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":23,"data":{"text":" list, 1","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":24,"data":{"text":"0 tips","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":25,"data":{"text":", each one","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":26,"data":{"text":" full sentence, detailed","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":27,"data":{"text":".","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":28,"data":{"text":" I should","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":29,"data":{"text":" not over","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":30,"data":{"text":"think","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":31,"data":{"text":" this. Just give","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":32,"data":{"text":" a","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":33,"data":{"text":" clean list.\n\nLet","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":34,"data":{"text":" me write 1","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":35,"data":{"text":"0 distinct tips,","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":36,"data":{"text":" each one sentence:","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":37,"data":{"text":"\n\n1. Stick","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":38,"data":{"text":" to a consistent sleep","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":39,"data":{"text":" schedule by going to","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":40,"data":{"text":" bed and waking up","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":41,"data":{"text":" at the same time","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":42,"data":{"text":" every day, even","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":43,"data":{"text":" on weekends, to","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":44,"data":{"text":" regulate","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":45,"data":{"text":" your body's internal","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":46,"data":{"text":" clock.\n2.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":47,"data":{"text":" Develop","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":48,"data":{"text":" a relaxing bed","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":49,"data":{"text":"time ritual","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":50,"data":{"text":" such","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":51,"data":{"text":" as reading,","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":52,"data":{"text":" gentle","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":53,"data":{"text":" stretching, or a","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":54,"data":{"text":" warm bath to signal","stream_type":"reasoning"}}
 {"t":"ready","agentOnline":true}
-{"t":"evt","chat":"m2resume","seq":4,"data":{"text":" sentence. Let me write","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2resume","seq":5,"data":{"text":" them out.","stream_type":"reasoning"}}
-{"t":"end","chat":"m2resume","seq":6,"stream_type":"reasoning"}
-{"t":"start","chat":"m2resume","seq":7,"stream_type":"message"}
-{"t":"evt","chat":"m2resume","seq":8,"data":{"text":"1.","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":9,"data":{"text":" Maintain a consistent sleep schedule by going","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":10,"data":{"text":" to bed and waking up at the same time","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":11,"data":{"text":" every day, including weekends, to reinforce your body's","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":12,"data":{"text":" natural circadian rhythm.\n\n2. Create","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":13,"data":{"text":" a calming pre-bedtime routine that signals to your brain it is time to wind","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":4,"data":{"text":" sentence. Let me write","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2resume","seq":5,"data":{"text":" them out.","stream_type":"reasoning"}}
-{"t":"end","chat":"m2resume","seq":6,"stream_type":"reasoning"}
-{"t":"start","chat":"m2resume","seq":7,"stream_type":"message"}
-{"t":"evt","chat":"m2resume","seq":8,"data":{"text":"1.","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":9,"data":{"text":" Maintain a consistent sleep schedule by going","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":10,"data":{"text":" to bed and waking up at the same time","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":11,"data":{"text":" every day, including weekends, to reinforce your body's","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":12,"data":{"text":" natural circadian rhythm.\n\n2. Create","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":13,"data":{"text":" a calming pre-bedtime routine that signals to your brain it is time to wind","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":14,"data":{"text":" down, such as reading a book, taking a warm bath, or practicing gentle","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":15,"data":{"text":" stretching.\n\n3. Optimize your bedroom","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":16,"data":{"text":" environment by keeping it cool, dark,","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":17,"data":{"text":" and quiet, and invest in a comfortable","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":18,"data":{"text":" mattress and supportive pillows suited to your preferred","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":19,"data":{"text":" sleeping position.\n\n4. Limit exposure","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":20,"data":{"text":" to blue light from phones, tablets, computers","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":21,"data":{"text":", and televisions for at least one hour before bed, since it suppresses","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":22,"data":{"text":" melatonin production and delays sleep onset.\n\n5. Avoid","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":23,"data":{"text":" caffeine, nicotine, and other stimul","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":24,"data":{"text":"ants in the late afternoon and evening because","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":14,"data":{"text":" down, such as reading a book, taking a warm bath, or practicing gentle","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":15,"data":{"text":" stretching.\n\n3. Optimize your bedroom","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":16,"data":{"text":" environment by keeping it cool, dark,","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":17,"data":{"text":" and quiet, and invest in a comfortable","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":18,"data":{"text":" mattress and supportive pillows suited to your preferred","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":19,"data":{"text":" sleeping position.\n\n4. Limit exposure","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":20,"data":{"text":" to blue light from phones, tablets, computers","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":21,"data":{"text":", and televisions for at least one hour before bed, since it suppresses","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":22,"data":{"text":" melatonin production and delays sleep onset.\n\n5. Avoid","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":23,"data":{"text":" caffeine, nicotine, and other stimul","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":24,"data":{"text":"ants in the late afternoon and evening because","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":25,"data":{"text":" they can linger in your system for hours","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":26,"data":{"text":" and disrupt your ability to fall asleep.\n\n","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":27,"data":{"text":"6. Engage in regular physical activity","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":28,"data":{"text":" during the day, but finish vigorous exercise","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":29,"data":{"text":" at least three hours before bedtime so your body has adequate time to cool","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":30,"data":{"text":" down and relax.\n\n7. Be mindful of your evening","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":31,"data":{"text":" meals by avoiding heavy, spicy, or very large dinners close to bedtime, and","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":32,"data":{"text":" limit excessive fluid intake to prevent nighttime awaken","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":33,"data":{"text":"ings.\n\n8. If you cannot fall asleep after about twenty minutes, get out","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":25,"data":{"text":" they can linger in your system for hours","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":26,"data":{"text":" and disrupt your ability to fall asleep.\n\n","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":27,"data":{"text":"6. Engage in regular physical activity","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":28,"data":{"text":" during the day, but finish vigorous exercise","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":29,"data":{"text":" at least three hours before bedtime so your body has adequate time to cool","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":30,"data":{"text":" down and relax.\n\n7. Be mindful of your evening","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":31,"data":{"text":" meals by avoiding heavy, spicy, or very large dinners close to bedtime, and","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":32,"data":{"text":" limit excessive fluid intake to prevent nighttime awaken","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":33,"data":{"text":"ings.\n\n8. If you cannot fall asleep after about twenty minutes, get out","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":34,"data":{"text":" of bed and do a quiet, low","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":35,"data":{"text":"-light activity until you feel sleepy, then return to bed to reinforce","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":36,"data":{"text":" the association between bed and sleep.\n\n9","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":37,"data":{"text":". Manage stress and racing thoughts through techniques","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":38,"data":{"text":" such as deep breathing, meditation, or","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":39,"data":{"text":" journaling before bed, since mental arousal is one","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":40,"data":{"text":" of the most common barriers to restful sleep.\n\n10. Reserve your bed","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":41,"data":{"text":" primarily for sleep and intimacy, avoiding work","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":42,"data":{"text":", eating, or prolonged wakefulness in bed, so your brain learns to associate","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":43,"data":{"text":" it with rest rather than activity.","stream_type":"message"}}
-{"t":"end","chat":"m2resume","seq":44,"stream_type":"message"}
-{"t":"msg","chat":"m2resume","parts":[{"type":"text","text":"1. Maintain a consistent sleep schedule by going to bed and waking up at the same time every day, including weekends, to reinforce your body's natural circadian rhythm.\n\n2. Create a calming pre-bedtime routine that signals to your brain it is time to wind down, such as reading a book, taking a warm bath, or practicing gentle stretching.\n\n3. Optimize your bedroom environment by keeping it cool, dark, and quiet, and invest in a comfortable mattress and supportive pillows suited to your preferred sleeping position.\n\n4. Limit exposure to blue light from phones, tablets, computers, and televisions for at least one hour before bed, since it suppresses melatonin production and delays sleep onset.\n\n5. Avoid caffeine, nicotine, and other stimulants in the late afternoon and evening because they can linger in your system for hours and disrupt your ability to fall asleep.\n\n6. Engage in regular physical activity during the day, but finish vigorous exercise at least three hours before bedtime so your body has adequate time to cool down and relax.\n\n7. Be mindful of your evening meals by avoiding heavy, spicy, or very large dinners close to bedtime, and limit excessive fluid intake to prevent nighttime awakenings.\n\n8. If you cannot fall asleep after about twenty minutes, get out of bed and do a quiet, low-light activity until you feel sleepy, then return to bed to reinforce the association between bed and sleep.\n\n9. Manage stress and racing thoughts through techniques such as deep breathing, meditation, or journaling before bed, since mental arousal is one of the most common barriers to restful sleep.\n\n10. Reserve your bed primarily for sleep and intimacy, avoiding work, eating, or prolonged wakefulness in bed, so your brain learns to associate it with rest rather than activity."}],"seq":45}
-{"t":"evt","chat":"m2resume","seq":34,"data":{"text":" of bed and do a quiet, low","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":35,"data":{"text":"-light activity until you feel sleepy, then return to bed to reinforce","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":36,"data":{"text":" the association between bed and sleep.\n\n9","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":37,"data":{"text":". Manage stress and racing thoughts through techniques","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":38,"data":{"text":" such as deep breathing, meditation, or","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":39,"data":{"text":" journaling before bed, since mental arousal is one","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":40,"data":{"text":" of the most common barriers to restful sleep.\n\n10. Reserve your bed","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":41,"data":{"text":" primarily for sleep and intimacy, avoiding work","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":42,"data":{"text":", eating, or prolonged wakefulness in bed, so your brain learns to associate","stream_type":"message"}}
-{"t":"evt","chat":"m2resume","seq":43,"data":{"text":" it with rest rather than activity.","stream_type":"message"}}
-{"t":"end","chat":"m2resume","seq":44,"stream_type":"message"}
-{"t":"msg","chat":"m2resume","parts":[{"type":"text","text":"1. Maintain a consistent sleep schedule by going to bed and waking up at the same time every day, including weekends, to reinforce your body's natural circadian rhythm.\n\n2. Create a calming pre-bedtime routine that signals to your brain it is time to wind down, such as reading a book, taking a warm bath, or practicing gentle stretching.\n\n3. Optimize your bedroom environment by keeping it cool, dark, and quiet, and invest in a comfortable mattress and supportive pillows suited to your preferred sleeping position.\n\n4. Limit exposure to blue light from phones, tablets, computers, and televisions for at least one hour before bed, since it suppresses melatonin production and delays sleep onset.\n\n5. Avoid caffeine, nicotine, and other stimulants in the late afternoon and evening because they can linger in your system for hours and disrupt your ability to fall asleep.\n\n6. Engage in regular physical activity during the day, but finish vigorous exercise at least three hours before bedtime so your body has adequate time to cool down and relax.\n\n7. Be mindful of your evening meals by avoiding heavy, spicy, or very large dinners close to bedtime, and limit excessive fluid intake to prevent nighttime awakenings.\n\n8. If you cannot fall asleep after about twenty minutes, get out of bed and do a quiet, low-light activity until you feel sleepy, then return to bed to reinforce the association between bed and sleep.\n\n9. Manage stress and racing thoughts through techniques such as deep breathing, meditation, or journaling before bed, since mental arousal is one of the most common barriers to restful sleep.\n\n10. Reserve your bed primarily for sleep and intimacy, avoiding work, eating, or prolonged wakefulness in bed, so your brain learns to associate it with rest rather than activity."}],"seq":45}
+{"t":"evt","chat":"m2resume","seq":55,"data":{"text":" to your brain","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":55,"data":{"text":" to your brain","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":56,"data":{"text":" that it is time","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":56,"data":{"text":" that it is time","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":57,"data":{"text":" to wind down.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":57,"data":{"text":" to wind down.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":58,"data":{"text":"\n3. Transform","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":58,"data":{"text":"\n3. Transform","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":59,"data":{"text":" your bedroom into a","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":59,"data":{"text":" your bedroom into a","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":60,"data":{"text":" sleep sanctuary","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":60,"data":{"text":" sleep sanctuary","stream_type":"reasoning"}}
+{"t":"status","agent_name":"Default","provider":"kilo","model":"openrouter/free"}
+{"t":"status","agent_name":"Default","provider":"kilo","model":"openrouter/free"}
+{"t":"evt","chat":"m2resume","seq":4,"data":{"text":" asked me multiple","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":5,"data":{"text":" times to write the","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":6,"data":{"text":" same thing","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":7,"data":{"text":": a detailed numbered","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":8,"data":{"text":" list of 1","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":9,"data":{"text":"0 tips for better","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":10,"data":{"text":" sleep, each tip","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":11,"data":{"text":" one full sentence.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":12,"data":{"text":" I've already provided","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":4,"data":{"text":" asked me multiple","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":5,"data":{"text":" times to write the","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":6,"data":{"text":" same thing","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":7,"data":{"text":": a detailed numbered","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":8,"data":{"text":" list of 1","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":9,"data":{"text":"0 tips for better","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":10,"data":{"text":" sleep, each tip","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":11,"data":{"text":" one full sentence.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":12,"data":{"text":" I've already provided","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":13,"data":{"text":" this","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":14,"data":{"text":" several times. I","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":15,"data":{"text":" should provide","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":16,"data":{"text":" a","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":17,"data":{"text":" fresh response","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":18,"data":{"text":",","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":19,"data":{"text":" perhaps with slightly varied","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":20,"data":{"text":" wording but still","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":21,"data":{"text":" meeting the exact","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":22,"data":{"text":" requirements: numbered","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":23,"data":{"text":" list, 1","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":24,"data":{"text":"0 tips","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":25,"data":{"text":", each one","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":26,"data":{"text":" full sentence, detailed","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":27,"data":{"text":".","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":28,"data":{"text":" I should","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":29,"data":{"text":" not over","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":30,"data":{"text":"think","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":13,"data":{"text":" this","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":14,"data":{"text":" several times. I","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":15,"data":{"text":" should provide","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":16,"data":{"text":" a","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":17,"data":{"text":" fresh response","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":18,"data":{"text":",","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":19,"data":{"text":" perhaps with slightly varied","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":20,"data":{"text":" wording but still","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":21,"data":{"text":" meeting the exact","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":22,"data":{"text":" requirements: numbered","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":23,"data":{"text":" list, 1","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":24,"data":{"text":"0 tips","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":25,"data":{"text":", each one","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":26,"data":{"text":" full sentence, detailed","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":27,"data":{"text":".","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":28,"data":{"text":" I should","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":29,"data":{"text":" not over","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":30,"data":{"text":"think","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":31,"data":{"text":" this. Just give","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":32,"data":{"text":" a","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":33,"data":{"text":" clean list.\n\nLet","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":34,"data":{"text":" me write 1","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":35,"data":{"text":"0 distinct tips,","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":36,"data":{"text":" each one sentence:","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":37,"data":{"text":"\n\n1. Stick","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":38,"data":{"text":" to a consistent sleep","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":39,"data":{"text":" schedule by going to","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":40,"data":{"text":" bed and waking up","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":41,"data":{"text":" at the same time","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":42,"data":{"text":" every day, even","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":43,"data":{"text":" on weekends, to","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":44,"data":{"text":" regulate","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":45,"data":{"text":" your body's internal","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":46,"data":{"text":" clock.\n2.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":47,"data":{"text":" Develop","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":48,"data":{"text":" a relaxing bed","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":49,"data":{"text":"time ritual","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":50,"data":{"text":" such","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":51,"data":{"text":" as reading,","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":52,"data":{"text":" gentle","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":53,"data":{"text":" stretching, or a","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":54,"data":{"text":" warm bath to signal","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":55,"data":{"text":" to your brain","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":56,"data":{"text":" that it is time","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":57,"data":{"text":" to wind down.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":58,"data":{"text":"\n3. Transform","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":59,"data":{"text":" your bedroom into a","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":60,"data":{"text":" sleep sanctuary","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":61,"data":{"text":" by keeping it cool","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":62,"data":{"text":", dark, quiet","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":31,"data":{"text":" this. Just give","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":32,"data":{"text":" a","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":33,"data":{"text":" clean list.\n\nLet","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":34,"data":{"text":" me write 1","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":35,"data":{"text":"0 distinct tips,","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":36,"data":{"text":" each one sentence:","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":37,"data":{"text":"\n\n1. Stick","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":38,"data":{"text":" to a consistent sleep","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":39,"data":{"text":" schedule by going to","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":40,"data":{"text":" bed and waking up","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":41,"data":{"text":" at the same time","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":42,"data":{"text":" every day, even","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":43,"data":{"text":" on weekends, to","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":44,"data":{"text":" regulate","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":45,"data":{"text":" your body's internal","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":46,"data":{"text":" clock.\n2.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":47,"data":{"text":" Develop","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":48,"data":{"text":" a relaxing bed","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":49,"data":{"text":"time ritual","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":50,"data":{"text":" such","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":51,"data":{"text":" as reading,","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":52,"data":{"text":" gentle","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":53,"data":{"text":" stretching, or a","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":54,"data":{"text":" warm bath to signal","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":55,"data":{"text":" to your brain","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":56,"data":{"text":" that it is time","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":57,"data":{"text":" to wind down.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":58,"data":{"text":"\n3. Transform","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":59,"data":{"text":" your bedroom into a","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":60,"data":{"text":" sleep sanctuary","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":61,"data":{"text":" by keeping it cool","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":62,"data":{"text":", dark, quiet","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":63,"data":{"text":", and free","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":63,"data":{"text":", and free","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":64,"data":{"text":" of clutter,","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":64,"data":{"text":" of clutter,","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":65,"data":{"text":" with a comfortable mattress","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":65,"data":{"text":" with a comfortable mattress","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":66,"data":{"text":" and pillows that","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":66,"data":{"text":" and pillows that","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":67,"data":{"text":" match your sleeping style","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":67,"data":{"text":" match your sleeping style","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":68,"data":{"text":".\n4. Power","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":68,"data":{"text":".\n4. Power","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":69,"data":{"text":" down screens and avoid","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":69,"data":{"text":" down screens and avoid","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":70,"data":{"text":" blue light from","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":70,"data":{"text":" blue light from","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":71,"data":{"text":" phones, tablets,","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":71,"data":{"text":" phones, tablets,","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":72,"data":{"text":" and computers at","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":72,"data":{"text":" and computers at","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":73,"data":{"text":" least sixty","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":73,"data":{"text":" least sixty","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":74,"data":{"text":" minutes before bedtime","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":74,"data":{"text":" minutes before bedtime","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":75,"data":{"text":" to protect your","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":75,"data":{"text":" to protect your","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":76,"data":{"text":" natural melatonin production.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":76,"data":{"text":" natural melatonin production.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":77,"data":{"text":"\n5. Cut","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":77,"data":{"text":"\n5. Cut","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":78,"data":{"text":" off caffeine, nicotine","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":78,"data":{"text":" off caffeine, nicotine","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":79,"data":{"text":", and other stim","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":79,"data":{"text":", and other stim","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":80,"data":{"text":"ulants by","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":80,"data":{"text":"ulants by","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":81,"data":{"text":" early afternoon so","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":81,"data":{"text":" early afternoon so","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":82,"data":{"text":" they do not interfere","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":82,"data":{"text":" they do not interfere","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":83,"data":{"text":" with your ability to","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":83,"data":{"text":" with your ability to","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":84,"data":{"text":" fall asleep at","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":84,"data":{"text":" fall asleep at","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":85,"data":{"text":" night.\n6.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":85,"data":{"text":" night.\n6.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":86,"data":{"text":" Inc","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":86,"data":{"text":" Inc","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":87,"data":{"text":"orporate regular physical","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":87,"data":{"text":"orporate regular physical","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":88,"data":{"text":" activity into your day","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":88,"data":{"text":" activity into your day","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":89,"data":{"text":", but finish intense","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":89,"data":{"text":", but finish intense","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":90,"data":{"text":" workouts at least","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":90,"data":{"text":" workouts at least","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":91,"data":{"text":" three hours before bed","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":91,"data":{"text":" three hours before bed","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":92,"data":{"text":" to give","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":92,"data":{"text":" to give","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":93,"data":{"text":" your body time to","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":93,"data":{"text":" your body time to","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":94,"data":{"text":" cool down.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":94,"data":{"text":" cool down.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":95,"data":{"text":"\n7. Watch","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":95,"data":{"text":"\n7. Watch","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":96,"data":{"text":" what","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":96,"data":{"text":" what","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":97,"data":{"text":" you eat and drink","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":97,"data":{"text":" you eat and drink","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":98,"data":{"text":" in the evening by","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":98,"data":{"text":" in the evening by","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":99,"data":{"text":" avoiding heavy, sp","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":99,"data":{"text":" avoiding heavy, sp","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":100,"data":{"text":"icy, or large","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":100,"data":{"text":"icy, or large","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":101,"data":{"text":" meals and limiting liquids","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":101,"data":{"text":" meals and limiting liquids","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":102,"data":{"text":" close to bedtime","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":102,"data":{"text":" close to bedtime","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":103,"data":{"text":" to reduce","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":103,"data":{"text":" to reduce","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":104,"data":{"text":" dis","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":104,"data":{"text":" dis","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":105,"data":{"text":"ruptions.\n8.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":105,"data":{"text":"ruptions.\n8.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":106,"data":{"text":" If you lie awake","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":106,"data":{"text":" If you lie awake","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":107,"data":{"text":" for more","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":107,"data":{"text":" for more","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":108,"data":{"text":" than twenty minutes,","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":108,"data":{"text":" than twenty minutes,","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":109,"data":{"text":" get out","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":109,"data":{"text":" get out","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":110,"data":{"text":" of bed and do","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":110,"data":{"text":" of bed and do","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":111,"data":{"text":" something quiet in","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":112,"data":{"text":" dim light until you","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":111,"data":{"text":" something quiet in","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":112,"data":{"text":" dim light until you","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":113,"data":{"text":" feel drowsy","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":113,"data":{"text":" feel drowsy","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":114,"data":{"text":", then return to","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":114,"data":{"text":", then return to","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":115,"data":{"text":" bed to preserve","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":115,"data":{"text":" bed to preserve","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":116,"data":{"text":" the bed","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":116,"data":{"text":" the bed","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":117,"data":{"text":"-sleep connection","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":117,"data":{"text":"-sleep connection","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":118,"data":{"text":".\n9. E","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":118,"data":{"text":".\n9. E","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":119,"data":{"text":"ase a","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":119,"data":{"text":"ase a","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":120,"data":{"text":" racing mind before sleep","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":120,"data":{"text":" racing mind before sleep","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":121,"data":{"text":" with journal","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":121,"data":{"text":" with journal","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":122,"data":{"text":"ing, deep breathing","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":122,"data":{"text":"ing, deep breathing","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":123,"data":{"text":", or mindfulness","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":123,"data":{"text":", or mindfulness","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":124,"data":{"text":" meditation to lower","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":124,"data":{"text":" meditation to lower","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":125,"data":{"text":" mental","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":125,"data":{"text":" mental","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":126,"data":{"text":" arousal and invite","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":126,"data":{"text":" arousal and invite","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":127,"data":{"text":" rest.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":127,"data":{"text":" rest.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":128,"data":{"text":"\n10. Use","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":128,"data":{"text":"\n10. Use","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":129,"data":{"text":" your bed almost","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":129,"data":{"text":" your bed almost","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":130,"data":{"text":" exclusively for sleep and","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":130,"data":{"text":" exclusively for sleep and","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":131,"data":{"text":" intimacy so your brain","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":131,"data":{"text":" intimacy so your brain","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":132,"data":{"text":" forms","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":132,"data":{"text":" forms","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":133,"data":{"text":" a strong association between","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":133,"data":{"text":" a strong association between","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":134,"data":{"text":" the bed","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":134,"data":{"text":" the bed","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":135,"data":{"text":" and rest rather","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":135,"data":{"text":" and rest rather","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":136,"data":{"text":" than wakeful","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":136,"data":{"text":" than wakeful","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":137,"data":{"text":" activities.\n\nEach","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":137,"data":{"text":" activities.\n\nEach","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":138,"data":{"text":" is one sentence.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":138,"data":{"text":" is one sentence.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":139,"data":{"text":" Numbered 1","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":139,"data":{"text":" Numbered 1","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":140,"data":{"text":"-10.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":140,"data":{"text":"-10.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":141,"data":{"text":" Detailed enough. I","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":141,"data":{"text":" Detailed enough. I","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":142,"data":{"text":"'ll output","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":142,"data":{"text":"'ll output","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":143,"data":{"text":" just the","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":143,"data":{"text":" just the","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":144,"data":{"text":" list.","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2resume","seq":144,"data":{"text":" list.","stream_type":"reasoning"}}
+{"t":"end","chat":"m2resume","seq":145,"stream_type":"reasoning"}
+{"t":"end","chat":"m2resume","seq":145,"stream_type":"reasoning"}
+{"t":"start","chat":"m2resume","seq":146,"stream_type":"message"}
+{"t":"start","chat":"m2resume","seq":146,"stream_type":"message"}
+{"t":"evt","chat":"m2resume","seq":147,"data":{"text":"1","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":147,"data":{"text":"1","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":148,"data":{"text":". Stick to a","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":148,"data":{"text":". Stick to a","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":149,"data":{"text":" consistent sleep schedule by","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":149,"data":{"text":" consistent sleep schedule by","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":150,"data":{"text":" going to bed and","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":150,"data":{"text":" going to bed and","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":151,"data":{"text":" waking up at the","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":151,"data":{"text":" waking up at the","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":152,"data":{"text":" same time every day","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":152,"data":{"text":" same time every day","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":153,"data":{"text":", even on weekends","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":153,"data":{"text":", even on weekends","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":154,"data":{"text":", to regulate your","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":154,"data":{"text":", to regulate your","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":155,"data":{"text":" body's internal clock","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":155,"data":{"text":" body's internal clock","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":156,"data":{"text":".\n\n2. Develop","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":157,"data":{"text":" a relaxing bedtime","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":156,"data":{"text":".\n\n2. Develop","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":157,"data":{"text":" a relaxing bedtime","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":158,"data":{"text":" ritual such as reading","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":158,"data":{"text":" ritual such as reading","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":159,"data":{"text":", gentle stretching,","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":160,"data":{"text":" or a warm bath","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":159,"data":{"text":", gentle stretching,","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":160,"data":{"text":" or a warm bath","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":161,"data":{"text":" to signal to your","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":161,"data":{"text":" to signal to your","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":162,"data":{"text":" brain that it is","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":162,"data":{"text":" brain that it is","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":163,"data":{"text":" time to wind down","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":163,"data":{"text":" time to wind down","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":164,"data":{"text":".\n\n3. Transform","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":164,"data":{"text":".\n\n3. Transform","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":165,"data":{"text":" your bedroom into a","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":165,"data":{"text":" your bedroom into a","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":166,"data":{"text":" sleep sanctuary by keeping","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":166,"data":{"text":" sleep sanctuary by keeping","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":167,"data":{"text":" it cool, dark","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":167,"data":{"text":" it cool, dark","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":168,"data":{"text":", quiet, and","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":168,"data":{"text":", quiet, and","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":169,"data":{"text":" free of clutter,","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":169,"data":{"text":" free of clutter,","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":170,"data":{"text":" with a comfortable mattress","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":170,"data":{"text":" with a comfortable mattress","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":171,"data":{"text":" and pillows that","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":171,"data":{"text":" and pillows that","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":172,"data":{"text":" match your sleeping style","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":172,"data":{"text":" match your sleeping style","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":173,"data":{"text":".\n\n4. Power","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":173,"data":{"text":".\n\n4. Power","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":174,"data":{"text":" down screens and avoid","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":174,"data":{"text":" down screens and avoid","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":175,"data":{"text":" blue light from phones","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":175,"data":{"text":" blue light from phones","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":176,"data":{"text":", tablets, and","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":176,"data":{"text":", tablets, and","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":177,"data":{"text":" computers at least sixty","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":177,"data":{"text":" computers at least sixty","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":178,"data":{"text":" minutes before bedtime","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":178,"data":{"text":" minutes before bedtime","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":179,"data":{"text":" to protect your natural","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":179,"data":{"text":" to protect your natural","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":180,"data":{"text":" melatonin production.\n\n5","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":180,"data":{"text":" melatonin production.\n\n5","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":181,"data":{"text":". Cut off caffeine","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":181,"data":{"text":". Cut off caffeine","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":182,"data":{"text":", nicotine, and","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":182,"data":{"text":", nicotine, and","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":183,"data":{"text":" other stimulants by","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":183,"data":{"text":" other stimulants by","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":184,"data":{"text":" early afternoon so they","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":184,"data":{"text":" early afternoon so they","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":185,"data":{"text":" do not interfere with","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":185,"data":{"text":" do not interfere with","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":186,"data":{"text":" your ability to fall","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":186,"data":{"text":" your ability to fall","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":187,"data":{"text":" asleep at night.\n\n","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":187,"data":{"text":" asleep at night.\n\n","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":188,"data":{"text":"6. Incorpor","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":188,"data":{"text":"6. Incorpor","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":189,"data":{"text":"ate regular physical activity","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":189,"data":{"text":"ate regular physical activity","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":190,"data":{"text":" into your day,","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":190,"data":{"text":" into your day,","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":191,"data":{"text":" but finish intense work","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":191,"data":{"text":" but finish intense work","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":192,"data":{"text":"outs at least three","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":192,"data":{"text":"outs at least three","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":193,"data":{"text":" hours before bed to","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":193,"data":{"text":" hours before bed to","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":194,"data":{"text":" give your body time","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":194,"data":{"text":" give your body time","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":195,"data":{"text":" to cool down.\n\n","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":195,"data":{"text":" to cool down.\n\n","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":196,"data":{"text":"7. Watch what","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":196,"data":{"text":"7. Watch what","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":197,"data":{"text":" you eat and drink","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":197,"data":{"text":" you eat and drink","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":198,"data":{"text":" in the evening by","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":198,"data":{"text":" in the evening by","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":199,"data":{"text":" avoiding heavy, sp","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":199,"data":{"text":" avoiding heavy, sp","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":200,"data":{"text":"icy, or large","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":200,"data":{"text":"icy, or large","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":201,"data":{"text":" meals and limiting liquids","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":201,"data":{"text":" meals and limiting liquids","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":202,"data":{"text":" close to bedtime","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":202,"data":{"text":" close to bedtime","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":203,"data":{"text":" to reduce dis","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":203,"data":{"text":" to reduce dis","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":204,"data":{"text":"ruptions.\n\n8.","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":204,"data":{"text":"ruptions.\n\n8.","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":205,"data":{"text":" If you lie awake","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":205,"data":{"text":" If you lie awake","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":206,"data":{"text":" for more than twenty","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":206,"data":{"text":" for more than twenty","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":207,"data":{"text":" minutes, get out","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":207,"data":{"text":" minutes, get out","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":208,"data":{"text":" of bed and do","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":208,"data":{"text":" of bed and do","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":209,"data":{"text":" something quiet in dim","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":209,"data":{"text":" something quiet in dim","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":210,"data":{"text":" light until you feel","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":210,"data":{"text":" light until you feel","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":211,"data":{"text":" drowsy,","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":211,"data":{"text":" drowsy,","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":212,"data":{"text":" then return to bed","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":212,"data":{"text":" then return to bed","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":213,"data":{"text":" to preserve the bed","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":213,"data":{"text":" to preserve the bed","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":214,"data":{"text":"-sleep connection.\n\n","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":214,"data":{"text":"-sleep connection.\n\n","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":215,"data":{"text":"9. Ease","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":215,"data":{"text":"9. Ease","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":216,"data":{"text":" a racing mind before","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":216,"data":{"text":" a racing mind before","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":217,"data":{"text":" sleep with journaling","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":217,"data":{"text":" sleep with journaling","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":218,"data":{"text":", deep breathing,","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":218,"data":{"text":", deep breathing,","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":219,"data":{"text":" or mindfulness meditation to","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":220,"data":{"text":" lower mental arousal and","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":219,"data":{"text":" or mindfulness meditation to","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":220,"data":{"text":" lower mental arousal and","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":221,"data":{"text":" invite rest.\n\n1","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":221,"data":{"text":" invite rest.\n\n1","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":222,"data":{"text":"0. Use your","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":222,"data":{"text":"0. Use your","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":223,"data":{"text":" bed almost exclusively for","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":223,"data":{"text":" bed almost exclusively for","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":224,"data":{"text":" sleep and intimacy so","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":224,"data":{"text":" sleep and intimacy so","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":225,"data":{"text":" your brain forms a","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":225,"data":{"text":" your brain forms a","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":226,"data":{"text":" strong association between the","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":226,"data":{"text":" strong association between the","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":227,"data":{"text":" bed and rest rather","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":227,"data":{"text":" bed and rest rather","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":228,"data":{"text":" than wakeful activities","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":228,"data":{"text":" than wakeful activities","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":229,"data":{"text":".\n\n","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":229,"data":{"text":".\n\n","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":230,"data":{"text":"1. Stick to a consistent sleep schedule by going to bed and waking up at the same time every day, even on weekends, to regulate your body's internal clock.\n\n2. Develop a relaxing bedtime ritual such as reading, gentle stretching, or a warm bath to signal to your brain that it is time to wind down.\n\n3. Transform your bedroom into a sleep sanctuary by keeping it cool, dark, quiet, and free of clutter, with a comfortable mattress and pillows that match your sleeping style.\n\n4. Power down screens and avoid blue light from phones, tablets, and computers at least sixty minutes before bedtime to protect your natural melatonin production.\n\n5. Cut off caffeine, nicotine, and other stimulants by early afternoon so they do not interfere with your ability to fall asleep at night.\n\n6. Incorporate regular physical activity into your day, but finish intense workouts at least three hours before bed to give your body time to cool down.\n\n7. Watch what you eat and drink in the evening by avoiding heavy, spicy, or large meals and limiting liquids close to bedtime to reduce disruptions.\n\n8. If you lie awake for more than twenty minutes, get out of bed and do something quiet in dim light until you feel drowsy, then return to bed to preserve the bed-sleep connection.\n\n9. Ease a racing mind before sleep with journaling, deep breathing, or mindfulness meditation to lower mental arousal and invite rest.\n\n10. Use your bed almost exclusively for sleep and intimacy so your brain forms a strong association between the bed and rest rather than wakeful activities.","stream_type":"message"}}
+{"t":"evt","chat":"m2resume","seq":230,"data":{"text":"1. Stick to a consistent sleep schedule by going to bed and waking up at the same time every day, even on weekends, to regulate your body's internal clock.\n\n2. Develop a relaxing bedtime ritual such as reading, gentle stretching, or a warm bath to signal to your brain that it is time to wind down.\n\n3. Transform your bedroom into a sleep sanctuary by keeping it cool, dark, quiet, and free of clutter, with a comfortable mattress and pillows that match your sleeping style.\n\n4. Power down screens and avoid blue light from phones, tablets, and computers at least sixty minutes before bedtime to protect your natural melatonin production.\n\n5. Cut off caffeine, nicotine, and other stimulants by early afternoon so they do not interfere with your ability to fall asleep at night.\n\n6. Incorporate regular physical activity into your day, but finish intense workouts at least three hours before bed to give your body time to cool down.\n\n7. Watch what you eat and drink in the evening by avoiding heavy, spicy, or large meals and limiting liquids close to bedtime to reduce disruptions.\n\n8. If you lie awake for more than twenty minutes, get out of bed and do something quiet in dim light until you feel drowsy, then return to bed to preserve the bed-sleep connection.\n\n9. Ease a racing mind before sleep with journaling, deep breathing, or mindfulness meditation to lower mental arousal and invite rest.\n\n10. Use your bed almost exclusively for sleep and intimacy so your brain forms a strong association between the bed and rest rather than wakeful activities.","stream_type":"message"}}
+{"t":"end","chat":"m2resume","seq":231,"stream_type":"message"}
+{"t":"end","chat":"m2resume","seq":231,"stream_type":"message"}
+{"t":"msg","chat":"m2resume","parts":[{"type":"text","text":"1. Stick to a consistent sleep schedule by going to bed and waking up at the same time every day, even on weekends, to regulate your body's internal clock.\n\n2. Develop a relaxing bedtime ritual such as reading, gentle stretching, or a warm bath to signal to your brain that it is time to wind down.\n\n3. Transform your bedroom into a sleep sanctuary by keeping it cool, dark, quiet, and free of clutter, with a comfortable mattress and pillows that match your sleeping style.\n\n4. Power down screens and avoid blue light from phones, tablets, and computers at least sixty minutes before bedtime to protect your natural melatonin production.\n\n5. Cut off caffeine, nicotine, and other stimulants by early afternoon so they do not interfere with your ability to fall asleep at night.\n\n6. Incorporate regular physical activity into your day, but finish intense workouts at least three hours before bed to give your body time to cool down.\n\n7. Watch what you eat and drink in the evening by avoiding heavy, spicy, or large meals and limiting liquids close to bedtime to reduce disruptions.\n\n8. If you lie awake for more than twenty minutes, get out of bed and do something quiet in dim light until you feel drowsy, then return to bed to preserve the bed-sleep connection.\n\n9. Ease a racing mind before sleep with journaling, deep breathing, or mindfulness meditation to lower mental arousal and invite rest.\n\n10. Use your bed almost exclusively for sleep and intimacy so your brain forms a strong association between the bed and rest rather than wakeful activities."}],"seq":232}
+{"t":"msg","chat":"m2resume","parts":[{"type":"text","text":"1. Stick to a consistent sleep schedule by going to bed and waking up at the same time every day, even on weekends, to regulate your body's internal clock.\n\n2. Develop a relaxing bedtime ritual such as reading, gentle stretching, or a warm bath to signal to your brain that it is time to wind down.\n\n3. Transform your bedroom into a sleep sanctuary by keeping it cool, dark, quiet, and free of clutter, with a comfortable mattress and pillows that match your sleeping style.\n\n4. Power down screens and avoid blue light from phones, tablets, and computers at least sixty minutes before bedtime to protect your natural melatonin production.\n\n5. Cut off caffeine, nicotine, and other stimulants by early afternoon so they do not interfere with your ability to fall asleep at night.\n\n6. Incorporate regular physical activity into your day, but finish intense workouts at least three hours before bed to give your body time to cool down.\n\n7. Watch what you eat and drink in the evening by avoiding heavy, spicy, or large meals and limiting liquids close to bedtime to reduce disruptions.\n\n8. If you lie awake for more than twenty minutes, get out of bed and do something quiet in dim light until you feel drowsy, then return to bed to preserve the bed-sleep connection.\n\n9. Ease a racing mind before sleep with journaling, deep breathing, or mindfulness meditation to lower mental arousal and invite rest.\n\n10. Use your bed almost exclusively for sleep and intimacy so your brain forms a strong association between the bed and rest rather than wakeful activities."}],"seq":232}
+{"t":"status","agent_name":"Default","provider":"kilo","model":"openrouter/free"}
 {"t":"start","chat":"m2appr","seq":1,"stream_type":"reasoning"}
-{"t":"evt","chat":"m2appr","seq":2,"data":{"text":"The user is asking me to","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2appr","seq":3,"data":{"text":" run the same command again. Let me do that.","stream_type":"reasoning"}}
-{"t":"end","chat":"m2appr","seq":4,"stream_type":"reasoning"}
-{"t":"msg","chat":"m2appr","parts":[{"type":"text","text":"🔧 **execute_shell_command**\n```\n{\"command\": \"echo m2-approval-probe\"}\n```"}],"seq":5}
-{"t":"msg","chat":"m2appr","parts":[{"type":"text","text":"✅ **execute_shell_command**:\n```\nm2-approval-probe\n```"}],"seq":6}
-{"t":"start","chat":"m2appr","seq":7,"stream_type":"reasoning"}
-{"t":"evt","chat":"m2appr","seq":8,"data":{"text":"The command printed \"m2","stream_type":"reasoning"}}
-{"t":"evt","chat":"m2appr","seq":9,"data":{"text":"-approval-probe\". I'll report that.","stream_type":"reasoning"}}
-{"t":"end","chat":"m2appr","seq":10,"stream_type":"reasoning"}
-{"t":"start","chat":"m2appr","seq":11,"stream_type":"message"}
-{"t":"evt","chat":"m2appr","seq":12,"data":{"text":"The command printed `m2-approval-probe`.","stream_type":"message"}}
-{"t":"end","chat":"m2appr","seq":13,"stream_type":"message"}
-{"t":"msg","chat":"m2appr","parts":[{"type":"text","text":"The command printed `m2-approval-probe`."}],"seq":14}
+{"t":"evt","chat":"m2appr","seq":2,"data":{"text":"The","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":3,"data":{"text":" user","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":4,"data":{"text":" keeps","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":5,"data":{"text":" asking","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":6,"data":{"text":" me","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":7,"data":{"text":" to","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":8,"data":{"text":" run","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":9,"data":{"text":" the","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":10,"data":{"text":" same","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":11,"data":{"text":" command","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":12,"data":{"text":" \"","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":13,"data":{"text":"echo","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":14,"data":{"text":" m","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":15,"data":{"text":"2","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":16,"data":{"text":"-","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":17,"data":{"text":"approval","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":18,"data":{"text":"-pro","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":19,"data":{"text":"be","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":20,"data":{"text":"\"","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":21,"data":{"text":" and","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":22,"data":{"text":" tell","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":23,"data":{"text":" them","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":24,"data":{"text":" what","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":25,"data":{"text":" it","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":26,"data":{"text":" printed","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":27,"data":{"text":".","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":28,"data":{"text":" I","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":29,"data":{"text":"'ve","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":30,"data":{"text":" already","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":31,"data":{"text":" done","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":32,"data":{"text":" this","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":33,"data":{"text":" 5","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":34,"data":{"text":" times","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":35,"data":{"text":" now","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":36,"data":{"text":".","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":37,"data":{"text":" The","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":38,"data":{"text":" command","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":39,"data":{"text":" always","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":40,"data":{"text":" prints","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":41,"data":{"text":" \"","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":42,"data":{"text":"m","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":43,"data":{"text":"2","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":44,"data":{"text":"-","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":45,"data":{"text":"approval","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":46,"data":{"text":"-pro","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":47,"data":{"text":"be","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":48,"data":{"text":"\".","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":49,"data":{"text":" The","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":50,"data":{"text":" user","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":51,"data":{"text":" seems","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":52,"data":{"text":" to","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":53,"data":{"text":" be","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":54,"data":{"text":" testing","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":55,"data":{"text":" or","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":56,"data":{"text":" perhaps","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":57,"data":{"text":" there","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":58,"data":{"text":"'s","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":59,"data":{"text":" some","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":60,"data":{"text":" issue","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":61,"data":{"text":" with","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":62,"data":{"text":" the","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":63,"data":{"text":" conversation","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":64,"data":{"text":" flow","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":65,"data":{"text":".","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":66,"data":{"text":"\n\nI","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":67,"data":{"text":" should","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":68,"data":{"text":" just","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":69,"data":{"text":" run","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":70,"data":{"text":" the","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":71,"data":{"text":" command","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":72,"data":{"text":" again","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":73,"data":{"text":" and","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":74,"data":{"text":" provide","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":75,"data":{"text":" the","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":76,"data":{"text":" result","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":77,"data":{"text":".","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":78,"data":{"text":" It","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":79,"data":{"text":"'s","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":80,"data":{"text":" a","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":81,"data":{"text":" simple","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":82,"data":{"text":" shell","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":83,"data":{"text":" command","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":84,"data":{"text":" that","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":85,"data":{"text":" I","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":86,"data":{"text":" can","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":87,"data":{"text":" execute","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":88,"data":{"text":".","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":89,"data":{"text":" Let","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":90,"data":{"text":" me","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":91,"data":{"text":" run","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":92,"data":{"text":" it","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":93,"data":{"text":" one","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":94,"data":{"text":" more","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":95,"data":{"text":" time","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":96,"data":{"text":".","stream_type":"reasoning"}}
+{"t":"end","chat":"m2appr","seq":97,"stream_type":"reasoning"}
+{"t":"msg","chat":"m2appr","parts":[{"type":"text","text":"🔧 **execute_shell_command**\n```\n{\"command\":\"echo m2-approval-probe\"}\n```"}],"seq":98}
+{"t":"msg","chat":"m2appr","parts":[{"type":"text","text":"✅ **execute_shell_command**:\n```\nm2-approval-probe\n```"}],"seq":99}
+{"t":"start","chat":"m2appr","seq":100,"stream_type":"reasoning"}
+{"t":"evt","chat":"m2appr","seq":101,"data":{"text":"The","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":102,"data":{"text":" command","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":103,"data":{"text":" printed `m2","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":104,"data":{"text":"-approval-probe","stream_type":"reasoning"}}
+{"t":"evt","chat":"m2appr","seq":105,"data":{"text":"`.","stream_type":"reasoning"}}
+{"t":"end","chat":"m2appr","seq":106,"stream_type":"reasoning"}
+{"t":"start","chat":"m2appr","seq":107,"stream_type":"message"}
+{"t":"evt","chat":"m2appr","seq":108,"data":{"text":"\n\nIt","stream_type":"message"}}
+{"t":"evt","chat":"m2appr","seq":109,"data":{"text":" printed:","stream_type":"message"}}
+{"t":"evt","chat":"m2appr","seq":110,"data":{"text":" `m2-","stream_type":"message"}}
+{"t":"evt","chat":"m2appr","seq":111,"data":{"text":"approval-probe`","stream_type":"message"}}
+{"t":"end","chat":"m2appr","seq":112,"stream_type":"message"}
+{"t":"msg","chat":"m2appr","parts":[{"type":"text","text":"\n\nIt printed: `m2-approval-probe`"}],"seq":113}

@@ -121,7 +121,7 @@ function connect() {
 
   socket.on('open', () => {
     console.log(`[mock] connected (token: ${AGENT_TOKEN === 'dev-agent-token' ? 'dev default' : 'custom'})`);
-    send({ t: 'hello', instance: 'mock-agent', agent: 'default' });
+    send({ t: 'hello', instance: 'mock-agent', agent: 'default', session: `mock-${Date.now()}`, started: Date.now() * 1000 });
   });
   socket.on('message', onFrame);
   socket.on('error', (err) => console.error('[mock] ws error:', err.message));

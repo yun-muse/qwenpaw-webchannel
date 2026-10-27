@@ -84,6 +84,21 @@ async function waitFor(ws, predicate, label, timeoutMs = 3000) {
   return found;
 }
 
+function hello(ws, started, session) {
+  ws.send(JSON.stringify({
+    t: 'hello',
+    token: 'dev-agent-token',
+    instance: 'smoke',
+    agent: 'default',
+    started,
+    session,
+  }));
+}
+
+function closeCode(ws) {
+  return new Promise((resolve) => ws.once('close', (code) => resolve(code)));
+}
+
 async function main() {
   const server = spawn(process.execPath, [SERVER], {
     env: { ...process.env, PORT: String(PORT), AGENT_TOKEN: 'dev-agent-token' },
@@ -100,8 +115,9 @@ async function main() {
     check(health.agentOnline === false, 'health should report agentOnline=false initially');
     check(health.clients === 0, 'health should report 0 clients initially');
 
-    // 1. agent connects (Bearer token) -> peer frame with client count
+    // 1. agent connects (Bearer token) -> hello wins the slot -> peer frame with client count
     agent = await connect(AGENT_URL, { headers: { Authorization: 'Bearer dev-agent-token' } });
+    hello(agent, 1000, 'smoke-a');
     const firstPeer = await waitFor(agent, (f) => f.t === 'peer', 'agent peer frame');
     check(firstPeer.clients === 0, `expected 0 clients, got ${firstPeer.clients}`);
 
@@ -143,12 +159,46 @@ async function main() {
     client.send(JSON.stringify({ t: 'msg', chat: 'c1', text: 'buffered' }));
 
     agent = await connect(AGENT_URL, { headers: { Authorization: 'Bearer dev-agent-token' } });
+    hello(agent, 2000, 'smoke-a2');
     const replayed = await waitFor(
       agent,
       (f) => f.t === 'msg' && f.text === 'buffered',
       'buffered msg replay after agent reconnect',
     );
     check(replayed.chat === 'c1', 'buffered msg lost chat field');
+
+    // 6. generation gating: older hellos are refused, newer ones take the slot
+    const stale = await connect(AGENT_URL, { headers: { Authorization: 'Bearer dev-agent-token' } });
+    const staleClosed = closeCode(stale);
+    hello(stale, 500, 'stale');
+    check((await staleClosed) === 4000, 'stale agent hello should be closed with code 4000');
+    check((await waitHealth((h) => h.agentOnline === true, 'agent online after stale hello')).agentOnline === true,
+      'health should still report agentOnline=true after a stale hello');
+
+    agent.send(JSON.stringify({ t: 'evt', chat: 'c1', seq: 99, data: 'y' }));
+    const undisturbed = await waitFor(
+      client,
+      (f) => f.t === 'evt' && f.chat === 'c1' && f.seq === 99,
+      'client to receive evt after stale hello',
+    );
+    check(undisturbed.data === 'y', 'evt after stale hello corrupted');
+
+    const previous = agent;
+    const previousClosed = closeCode(previous);
+    const newer = await connect(AGENT_URL, { headers: { Authorization: 'Bearer dev-agent-token' } });
+    hello(newer, 3000, 'newer');
+    check((await previousClosed) === 4000, 'previous agent should be closed with code 4000');
+    agent = newer;
+
+    client.send(JSON.stringify({ t: 'msg', chat: 'c1', text: 'after-newer' }));
+    const routed = await waitFor(
+      newer,
+      (f) => f.t === 'msg' && f.chat === 'c1' && f.text === 'after-newer',
+      'newer agent to receive client msg',
+    );
+    check(routed.text === 'after-newer', 'newer agent got wrong msg payload');
+
+    if (stale.readyState === WebSocket.OPEN) stale.close();
 
     console.log('PASS');
   } catch (error) {

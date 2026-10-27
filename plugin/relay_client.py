@@ -3,7 +3,9 @@
 Only third-party dependency: ``websockets`` (a QwenPaw core dependency).
 Handles bearer auth, the ``hello`` handshake, an app-level heartbeat every
 25 s, exponential-backoff reconnect (1 s -> 30 s) and an ordered send queue
-that buffers frames while the socket is down.
+that buffers frames while the socket is down. Reconnect stops permanently
+when the relay closes the socket with code 4000 (the client was superseded by
+a newer instance).
 """
 
 from __future__ import annotations
@@ -13,6 +15,8 @@ import inspect
 import json
 import logging
 import socket
+import time
+import uuid
 from typing import Any, Awaitable, Callable, Optional
 
 import websockets
@@ -29,6 +33,10 @@ PONG_TIMEOUT_S = 10.0
 BACKOFF_INITIAL_S = 1.0
 BACKOFF_MAX_S = 30.0
 QUEUE_MAXSIZE = 1000
+# The relay closes a superseded agent socket with this code, reason
+# "replaced by new agent connection" (see protocol/frames.md). Such a client
+# must never reconnect: the newer instance owns the single agent slot.
+REPLACED_CLOSE_CODE = 4000
 
 FrameCallback = Optional[Callable[[dict], Any]]
 
@@ -61,6 +69,10 @@ class RelayClient:
         self.relay_url = relay_url
         self.token = token
         self.agent_id = agent_id or "default"
+        self.session = uuid.uuid4().hex
+        # Wall-clock microseconds; fits exactly in a JS double so the relay can
+        # compare generations without precision loss.
+        self.started_us = time.time_ns() // 1000
         self.instance = instance or socket.gethostname()
         self.on_frame = on_frame
         self.ping_interval = ping_interval
@@ -69,6 +81,7 @@ class RelayClient:
         self._queue: asyncio.Queue = asyncio.Queue(maxsize=queue_maxsize)
         self._task: Optional[asyncio.Task] = None
         self._ws: Any = None
+        self._close_code: Optional[int] = None
         self._tx_lock = asyncio.Lock()
         self._pong = asyncio.Event()
         self._closed = False
@@ -154,6 +167,7 @@ class RelayClient:
             ws = None
             try:
                 ws = await self._connect()
+                self._close_code = None
                 self._ws = ws
                 self._connected = True
                 self._backoff = BACKOFF_INITIAL_S
@@ -169,6 +183,8 @@ class RelayClient:
                         "token": self.token,
                         "instance": self.instance,
                         "agent": self.agent_id,
+                        "session": self.session,
+                        "started": self.started_us,
                     },
                 )
                 writer = asyncio.create_task(self._writer(ws))
@@ -182,6 +198,12 @@ class RelayClient:
                         writer,
                         heartbeat,
                         return_exceptions=True,
+                    )
+                if self._close_code == REPLACED_CLOSE_CODE and not self._closed:
+                    self._fatal = True
+                    logger.error(
+                        "relay: superseded by a newer instance (close 4000); "
+                        "not reconnecting"
                     )
             except asyncio.CancelledError:
                 raise
@@ -243,7 +265,8 @@ class RelayClient:
         while True:
             try:
                 raw = await ws.recv()
-            except websockets.ConnectionClosed:
+            except websockets.ConnectionClosed as exc:
+                self._close_code = getattr(exc, "code", None)
                 return
             frame = parse_inbound(raw)
             if frame is None:
