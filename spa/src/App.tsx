@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ChangeEvent, FormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { RelayClient } from './relay';
@@ -32,6 +32,14 @@ const TOKEN_KEY = 'webchannel.token';
 const CHATS_KEY = 'webchannel.chats';
 const ACTIVE_KEY = 'webchannel.activeChat';
 
+/** User-given chat titles, keyed by chat id (M7). */
+const NAMES_KEY = 'webchannel.chatNames';
+/** 'light' | 'dark' (M7). */
+const THEME_KEY = 'webchannel.theme';
+
+/** Distance from the bottom (px) that still counts as "reading the latest". */
+const NEAR_BOTTOM_PX = 80;
+
 function readToken(): string | null {
   return sessionStorage.getItem(TOKEN_KEY);
 }
@@ -62,6 +70,36 @@ function persistedChats(): string[] {
     return parsed.filter((id): id is string => typeof id === 'string' && id.length > 0);
   } catch {
     return [];
+  }
+}
+
+/** Custom chat titles from the last visit; anything malformed is dropped. */
+function persistedNames(): Record<string, string> {
+  const raw = storageGet(NAMES_KEY);
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out: Record<string, string> = {};
+    for (const [id, name] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof name === 'string' && name.trim()) out[id] = name;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+type Theme = 'light' | 'dark';
+
+/** Stored choice first, then the OS preference. */
+function initialTheme(): Theme {
+  const stored = storageGet(THEME_KEY);
+  if (stored === 'light' || stored === 'dark') return stored;
+  try {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  } catch {
+    return 'light';
   }
 }
 
@@ -103,7 +141,40 @@ interface ChatMessage {
   parts?: ContentPart[];
   attachments?: string[];
   approval?: ApprovalMeta;
+  /** client-side creation time (ms epoch); absent on history rows */
+  ts?: number;
 }
+
+/** One row of a `models` control frame (protocol §9.1). */
+interface ModelItem {
+  provider: string;
+  model: string;
+  active: boolean;
+}
+
+interface ModelRef {
+  provider: string;
+  model: string;
+}
+
+interface CommandSpec {
+  /** matched against what the user typed after the slash; also the frame-free id */
+  id: string;
+  label: string;
+  hint: string;
+}
+
+/** `/` palette (M7). Labels are fixed by the task spec. */
+const COMMANDS: CommandSpec[] = [
+  { id: 'new', label: '新建会话', hint: 'start a new chat' },
+  { id: 'stop', label: '停止生成', hint: 'stop the current reply' },
+  { id: 'model', label: '切换模型', hint: 'pick the agent model' },
+  { id: 'rename', label: '重命名当前会话', hint: 'rename this chat' },
+  { id: 'delete', label: '删除当前会话', hint: 'delete this chat' },
+  { id: 'clear', label: '清空当前会话显示（仅本地）', hint: 'local display only' },
+  { id: 'theme', label: '切换深浅色', hint: 'toggle dark mode' },
+  { id: 'help', label: '帮助', hint: 'commands + shortcuts' },
+];
 
 interface AttachmentInline {
   kind: 'inline';
@@ -265,6 +336,21 @@ function textOf(parts: ContentPart[]): string {
     .join('\n');
 }
 
+/** `models.items` (§9.1): keep only well-formed rows the header can render. */
+function modelItemsOf(raw: unknown): ModelItem[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ModelItem[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const record = entry as { provider?: unknown; model?: unknown; active?: unknown };
+    const provider = asString(record.provider);
+    const model = asString(record.model);
+    if (!provider || !model) continue;
+    out.push({ provider, model, active: record.active === true });
+  }
+  return out;
+}
+
 interface HistoryMessage {
   role: Role;
   text: string;
@@ -288,6 +374,48 @@ function historyMessages(raw: unknown): HistoryMessage[] {
 function renderMarkdown(text: string): string {
   const html = marked.parse(text) as unknown as string;
   return DOMPurify.sanitize(html);
+}
+
+/** Clipboard with a textarea fallback for insecure contexts. Silent on failure. */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* fall through to execCommand */
+  }
+  try {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.top = '0';
+    area.style.left = '0';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(area);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Local wall clock, HH:MM. */
+function clockOf(ts: number): string {
+  const date = new Date(ts);
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function copySource(message: ChatMessage): string {
+  if (message.kind === 'parts' && message.parts?.length) {
+    const text = textOf(message.parts);
+    if (text) return text;
+  }
+  return message.text;
 }
 
 function partTitle(part: ContentPart): string {
@@ -317,6 +445,50 @@ function PartCard({ part }: { part: ContentPart }) {
       <summary>{partTitle(part)}</summary>
       <pre>{displayPart(part)}</pre>
     </details>
+  );
+}
+
+/**
+ * Rendered markdown. Code blocks get a hover `Copy` button appended to the
+ * `<pre>` (impure DOM work outside the React tree); the click itself is
+ * delegated to this container, as the task spec asks.
+ */
+function Markdown({ text }: { text: string }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const html = useMemo(() => renderMarkdown(text), [text]);
+
+  useEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+    root.querySelectorAll('pre').forEach((pre) => {
+      if (pre.querySelector('.pre-copy')) return;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'pre-copy';
+      button.textContent = 'Copy';
+      pre.appendChild(button);
+    });
+  }, [html]);
+
+  const onCopyClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null;
+    const button = target?.closest('.pre-copy');
+    if (!(button instanceof HTMLElement)) return;
+    const pre = button.closest('pre');
+    if (!pre) return;
+    const code = pre.querySelector('code');
+    const source = code?.textContent ?? pre.textContent ?? '';
+    void copyText(source).then((ok) => {
+      if (!ok) return;
+      button.textContent = 'Copied';
+      window.setTimeout(() => {
+        button.textContent = 'Copy';
+      }, 1200);
+    });
+  };
+
+  return (
+    <div className="md" ref={ref} onClick={onCopyClick} dangerouslySetInnerHTML={{ __html: html }} />
   );
 }
 
@@ -368,6 +540,16 @@ function MessageView({
   chat: string;
   onApproval: (chat: string, message: ChatMessage, action: 'approve' | 'deny') => void;
 }) {
+  const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+    },
+    [],
+  );
+
   if (message.kind === 'approval') {
     return (
       <div className="row assistant">
@@ -375,11 +557,21 @@ function MessageView({
       </div>
     );
   }
+
+  const copy = () => {
+    void copyText(copySource(message)).then((ok) => {
+      if (!ok) return;
+      setCopied(true);
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopied(false), 1200);
+    });
+  };
+
   const markdown = message.role === 'assistant' && !message.streaming;
   const bubble = (
     <div className={`bubble${message.streaming ? ' streaming' : ''}`}>
       {markdown && message.text ? (
-        <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(message.text) }} />
+        <Markdown text={message.text} />
       ) : (
         <span className="plain">
           {message.text}
@@ -398,6 +590,14 @@ function MessageView({
           ))}
         </div>
       ) : null}
+      {message.streaming ? null : (
+        <div className="bubble-foot">
+          {message.ts ? <span className="bubble-time">{clockOf(message.ts)}</span> : null}
+          <button className="copy-btn" onClick={copy} title="复制消息">
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+        </div>
+      )}
     </div>
   );
   return (
@@ -503,6 +703,24 @@ export default function App() {
   const [agentOnline, setAgentOnline] = useState(false);
   const [needsLogin, setNeedsLogin] = useState<boolean>(() => LOGIN_REQUIRED && !readToken());
 
+  // --- M7: identity, models, sidebar, palette, theme, layout ---
+  const [agentName, setAgentName] = useState('');
+  const [modelItems, setModelItems] = useState<ModelItem[]>([]);
+  const [currentModel, setCurrentModel] = useState<ModelRef | null>(null);
+  const [modelBusy, setModelBusy] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [paletteIndex, setPaletteIndex] = useState(0);
+  /** composer text at the moment Esc closed the palette (suppresses it until edited) */
+  const [paletteMuted, setPaletteMuted] = useState<string | null>(null);
+  const [chatNames, setChatNames] = useState<Record<string, string>>(persistedNames);
+  const [search, setSearch] = useState('');
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [theme, setTheme] = useState<Theme>(initialTheme);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [nearBottom, setNearBottom] = useState(true);
+
   const clientRef = useRef<RelayClient | null>(null);
   const activeRef = useRef<string>(session.active);
   const runtimes = useRef<Map<string, ChatRuntime>>(new Map());
@@ -511,6 +729,11 @@ export default function App() {
   const answeredApprovals = useRef<Set<string>>(new Set());
   /** the chunked transfer in flight (one attachment at a time) */
   const uploadRef = useRef<Upload | null>(null);
+  /** `{t:"models"}` is asked once per connection, not per state change (§9.4) */
+  const modelsRequested = useRef(false);
+  const modelWrapRef = useRef<HTMLDivElement | null>(null);
+  const nearBottomRef = useRef(true);
+  const lastChatRef = useRef<string>(session.active);
 
   const runtimeOf = (chat: string): ChatRuntime => {
     let rt = runtimes.current.get(chat);
@@ -713,6 +936,52 @@ export default function App() {
     storageSet(ACTIVE_KEY, activeChat);
   }, [chatIds, activeChat]);
 
+  // Custom titles survive a reload like the chat list itself.
+  useEffect(() => {
+    storageSet(NAMES_KEY, JSON.stringify(chatNames));
+  }, [chatNames]);
+
+  // The theme lives on <html data-theme>, which is what the CSS keys off.
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    storageSet(THEME_KEY, theme);
+  }, [theme]);
+
+  // A new query starts at the first command again.
+  useEffect(() => {
+    setPaletteIndex(0);
+  }, [input]);
+
+  // Esc / a click outside closes the model picker.
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const onDown = (event: MouseEvent) => {
+      const wrap = modelWrapRef.current;
+      if (wrap && event.target instanceof Node && !wrap.contains(event.target)) {
+        setPickerOpen(false);
+      }
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPickerOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [pickerOpen]);
+
+  // Esc closes the help dialog.
+  useEffect(() => {
+    if (!helpOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setHelpOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [helpOpen]);
+
   useEffect(() => {
     if (needsLogin) return;
     let raf = 0;
@@ -765,6 +1034,7 @@ export default function App() {
           text: '',
           thinking: '',
           streaming: true,
+          ts: Date.now(),
         },
       ]);
       return id;
@@ -862,7 +1132,14 @@ export default function App() {
             if (extra.length) {
               updateChat(chat, (prev) => [
                 ...prev,
-                { id: nextId++, role: 'assistant', kind: 'parts', text: '', parts: extra },
+                {
+                  id: nextId++,
+                  role: 'assistant',
+                  kind: 'parts',
+                  text: '',
+                  parts: extra,
+                  ts: Date.now(),
+                },
               ]);
             }
             break;
@@ -889,6 +1166,7 @@ export default function App() {
                 kind: extra.length ? 'parts' : 'text',
                 text,
                 parts: extra.length ? extra : undefined,
+                ts: Date.now(),
               },
             ];
           });
@@ -914,6 +1192,7 @@ export default function App() {
                 kind: 'approval',
                 text: '',
                 approval: { reqId, tool, severity, summary, status: 'pending' },
+                ts: Date.now(),
               },
             ];
           });
@@ -986,6 +1265,41 @@ export default function App() {
           break;
         }
 
+        // ---- M7 control frames (protocol §9) ----
+        case 'status': {
+          const name = asString(frame.agent_name);
+          if (name) setAgentName(name);
+          const provider = asString(frame.provider);
+          const model = asString(frame.model);
+          if (provider && model) setCurrentModel({ provider, model });
+          break;
+        }
+
+        case 'models': {
+          const items = modelItemsOf(frame.items);
+          setModelItems(items);
+          const active = items.find((item) => item.active);
+          setCurrentModel(active ? { provider: active.provider, model: active.model } : null);
+          break;
+        }
+
+        case 'model_changed': {
+          const provider = asString(frame.provider);
+          const model = asString(frame.model);
+          if (provider && model) {
+            setCurrentModel({ provider, model });
+            setModelItems((prev) =>
+              prev.map((item) => ({
+                ...item,
+                active: item.provider === provider && item.model === model,
+              })),
+            );
+          }
+          setModelBusy(false);
+          setPickerOpen(false);
+          break;
+        }
+
         case 'error': {
           const code = asString(frame.code) || 'E_UNKNOWN';
           const detail = asString(frame.detail);
@@ -999,6 +1313,8 @@ export default function App() {
               ),
             );
           }
+          // A refused switch keeps the picker open; the toast explains it.
+          if (code === 'E_MODEL') setModelBusy(false);
           setToast(detail ? `${code} — ${detail}` : code);
           break;
         }
@@ -1027,7 +1343,14 @@ export default function App() {
         setAgentOnline(info.agentOnline);
         if (next === 'live') {
           maybeRequestHist(activeRef.current);
+          // Control frames are never replayed on resume (§9.4): ask once per
+          // connection, and again after a reconnect.
+          if (!modelsRequested.current) {
+            modelsRequested.current = true;
+            clientRef.current?.send({ t: 'models' });
+          }
         } else if (next === 'connecting' || next === 'resuming') {
+          modelsRequested.current = false;
           // A hist request in flight dies with the socket; ask again later.
           for (const rt of runtimes.current.values()) {
             rt.histPending = false;
@@ -1052,12 +1375,37 @@ export default function App() {
   const messages = messagesByChat[activeChat] ?? [];
   const streaming = messages.some((m) => m.streaming);
 
+  // Follow the tail only when the reader is already there (or switched chats);
+  // otherwise their position in the history is left alone.
   useEffect(() => {
     const el = listRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    const chatChanged = lastChatRef.current !== activeChat;
+    lastChatRef.current = activeChat;
+    if (!chatChanged && !nearBottomRef.current) return;
+    nearBottomRef.current = true;
+    setNearBottom(true);
+    el.scrollTop = el.scrollHeight;
   }, [messages, activeChat]);
 
-  const titleOf = (id: string): string => {
+  const onListScroll = () => {
+    const el = listRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
+    nearBottomRef.current = atBottom;
+    setNearBottom(atBottom);
+  };
+
+  const scrollToBottom = () => {
+    const el = listRef.current;
+    if (!el) return;
+    nearBottomRef.current = true;
+    setNearBottom(true);
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  };
+
+  /** Derived title from the first user message (today's behaviour). */
+  const derivedTitle = (id: string): string => {
     const list = messagesByChat[id] ?? [];
     const first = list.find((m) => m.role === 'user' && m.text.trim());
     if (!first) return 'New chat';
@@ -1065,10 +1413,79 @@ export default function App() {
     return text.length > 34 ? `${text.slice(0, 34)}…` : text;
   };
 
+  const titleOf = (id: string): string => {
+    const custom = chatNames[id];
+    return custom && custom.trim() ? custom : derivedTitle(id);
+  };
+
+  const query = search.trim().toLowerCase();
+  const visibleChats = query
+    ? chatIds.filter((id) => titleOf(id).toLowerCase().includes(query))
+    : chatIds;
+
+  const requestModels = () => {
+    clientRef.current?.send({ t: 'models' });
+  };
+
+  const openModelPicker = () => {
+    setPickerOpen(true);
+    if (modelItems.length === 0) requestModels();
+  };
+
+  const toggleModelPicker = () => {
+    if (pickerOpen) setPickerOpen(false);
+    else openModelPicker();
+  };
+
+  const chooseModel = (item: ModelItem) => {
+    if (modelBusy) return;
+    if (item.active) {
+      setPickerOpen(false);
+      return;
+    }
+    if (!clientRef.current?.send({ t: 'set_model', provider: item.provider, model: item.model })) {
+      setToast('未连接：模型未切换');
+      return;
+    }
+    setModelBusy(true);
+  };
+
+  const startRename = (id: string) => {
+    if (!chatIds.includes(id)) return;
+    // `/rename` on a narrow screen has to reveal the drawer to show the input.
+    setSidebarOpen(true);
+    setRenamingId(id);
+    setRenameDraft(titleOf(id));
+  };
+
+  const commitRename = () => {
+    const id = renamingId;
+    if (!id) return;
+    const name = renameDraft.trim();
+    setChatNames((prev) => {
+      const next = { ...prev };
+      if (name) next[id] = name;
+      else delete next[id];
+      return next;
+    });
+    setRenamingId(null);
+    setRenameDraft('');
+  };
+
+  const cancelRename = () => {
+    setRenamingId(null);
+    setRenameDraft('');
+  };
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  };
+
   const selectChat = (id: string) => {
     setActiveChat(id);
     activeRef.current = id;
     clientRef.current?.setActiveChat(id);
+    setSidebarOpen(false);
     cancelUpload();
     setComposerError(null);
     setAttachment(null);
@@ -1082,10 +1499,73 @@ export default function App() {
     setActiveChat(id);
     activeRef.current = id;
     clientRef.current?.setActiveChat(id);
+    setSidebarOpen(false);
     cancelUpload();
     setComposerError(null);
     setAttachment(null);
     maybeRequestHist(id);
+  };
+
+  const deleteChat = (id: string) => {
+    const title = titleOf(id);
+    if (!window.confirm(`删除会话「${title}」？（仅从本浏览器移除）`)) return;
+    const remaining = chatIds.filter((item) => item !== id);
+    setChatIds(remaining);
+    setMessagesByChat((prev) => {
+      if (!(id in prev)) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    setChatNames((prev) => {
+      if (!(id in prev)) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    runtimes.current.delete(id);
+    if (renamingId === id) cancelRename();
+    if (id !== activeChat) return;
+    if (remaining.length > 0) selectChat(remaining[0]);
+    else newChat();
+  };
+
+  const stop = () => {
+    clientRef.current?.send({ t: 'stop', chat: activeChat });
+  };
+
+  const runCommand = (id: string) => {
+    setInput('');
+    setPaletteMuted(null);
+    setPaletteIndex(0);
+    switch (id) {
+      case 'new':
+        newChat();
+        break;
+      case 'stop':
+        stop();
+        break;
+      case 'model':
+        openModelPicker();
+        break;
+      case 'rename':
+        startRename(activeChat);
+        break;
+      case 'delete':
+        deleteChat(activeChat);
+        break;
+      case 'clear':
+        updateChat(activeChat, () => []);
+        break;
+      case 'theme':
+        toggleTheme();
+        break;
+      case 'help':
+        setHelpOpen(true);
+        break;
+      default:
+        break;
+    }
   };
 
   const removeAttachment = () => {
@@ -1121,6 +1601,9 @@ export default function App() {
       setComposerError('Not connected — reconnecting. Try again in a moment.');
       return;
     }
+    // Own message: always follow it to the bottom.
+    nearBottomRef.current = true;
+    setNearBottom(true);
     updateChat(chat, (prev) => [
       ...prev,
       {
@@ -1129,15 +1612,12 @@ export default function App() {
         kind: 'text',
         text,
         attachments: file ? [file.name] : undefined,
+        ts: Date.now(),
       },
     ]);
     setInput('');
     setAttachment(null);
     setComposerError(null);
-  };
-
-  const stop = () => {
-    clientRef.current?.send({ t: 'stop', chat: activeChat });
   };
 
   const onApproval = (chat: string, message: ChatMessage, action: 'approve' | 'deny') => {
@@ -1159,7 +1639,39 @@ export default function App() {
     );
   };
 
-  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+  // ---- `/` palette state for this keystroke ----
+  const paletteTyping = input.startsWith('/') && !/\s/.test(input) && paletteMuted !== input;
+  const paletteQuery = paletteTyping ? input.slice(1).toLowerCase() : '';
+  const paletteItems = paletteTyping
+    ? COMMANDS.filter((cmd) => cmd.id.toLowerCase().startsWith(paletteQuery))
+    : [];
+  const paletteOpen = paletteItems.length > 0;
+  const paletteCursor = paletteOpen ? Math.min(paletteIndex, paletteItems.length - 1) : 0;
+
+  const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (paletteOpen) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setPaletteIndex((index) => (index + 1) % paletteItems.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setPaletteIndex((index) => (index - 1 + paletteItems.length) % paletteItems.length);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setPaletteMuted(input);
+        return;
+      }
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        const command = paletteItems[paletteCursor];
+        if (command) runCommand(command.id);
+        return;
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       send();
@@ -1226,36 +1738,172 @@ export default function App() {
   }
 
   return (
-    <div className="app">
+    <div className={`app${sidebarOpen ? ' sidebar-open' : ''}`}>
       <aside className="sidebar">
         <div className="brand">QwenPaw</div>
+        <input
+          className="chat-search"
+          type="search"
+          value={search}
+          placeholder="搜索会话"
+          aria-label="搜索会话"
+          onChange={(e) => setSearch(e.target.value)}
+        />
         <button className="new-chat" onClick={newChat}>
           + New chat
         </button>
         <nav className="chat-list">
-          {chatIds.map((id) => (
-            <button
+          {visibleChats.length === 0 ? (
+            <div className="chat-none">{chatIds.length === 0 ? '还没有会话' : '无匹配会话'}</div>
+          ) : null}
+          {visibleChats.map((id) => (
+            <div
               key={id}
-              className={`chat-item${id === activeChat ? ' active' : ''}`}
-              onClick={() => selectChat(id)}
-              title={id}
+              className={`chat-item${id === activeChat ? ' active' : ''}${
+                renamingId === id ? ' renaming' : ''
+              }`}
             >
-              <span className="chat-title">{titleOf(id)}</span>
+              {renamingId === id ? (
+                <input
+                  className="chat-rename"
+                  value={renameDraft}
+                  autoFocus
+                  aria-label="会话名称"
+                  onChange={(e) => setRenameDraft(e.target.value)}
+                  onBlur={commitRename}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      commitRename();
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      cancelRename();
+                    }
+                  }}
+                />
+              ) : (
+                <button
+                  className="chat-title"
+                  onClick={() => selectChat(id)}
+                  onDoubleClick={() => startRename(id)}
+                  title={id}
+                >
+                  {titleOf(id)}
+                </button>
+              )}
               <span className="chat-id">{id}</span>
-            </button>
+              <span className="chat-actions">
+                <button
+                  className="chat-act"
+                  title="重命名"
+                  aria-label="重命名会话"
+                  onClick={() => startRename(id)}
+                >
+                  ✎
+                </button>
+                <button
+                  className="chat-act danger"
+                  title="删除"
+                  aria-label="删除会话"
+                  onClick={() => deleteChat(id)}
+                >
+                  ×
+                </button>
+              </span>
+            </div>
           ))}
         </nav>
-        <div className="sidebar-foot">WebChannel · protocol v1</div>
+        <div className="sidebar-foot">
+          <span>WebChannel · protocol v1</span>
+          <button
+            className="help-btn"
+            onClick={() => setHelpOpen(true)}
+            title="帮助"
+            aria-label="帮助"
+          >
+            ?
+          </button>
+        </div>
       </aside>
 
       <main className="main">
         <header className="top">
-          <div className="top-title">{titleOf(activeChat)}</div>
-          <div className="status">
-            <i className={`dot state-${state}`} />
-            <span className="status-label">{STATE_LABEL[state]}</span>
-            <i className={`dot agent-${agentOnline ? 'on' : 'off'}`} />
-            <span className="status-label">{agentOnline ? 'agent online' : 'agent offline'}</span>
+          <div className="top-left">
+            <button
+              className="hamburger"
+              onClick={() => setSidebarOpen((open) => !open)}
+              aria-label="会话列表"
+              aria-expanded={sidebarOpen}
+            >
+              ☰
+            </button>
+            <div className="top-title">{titleOf(activeChat)}</div>
+          </div>
+          <div className="top-right">
+            <div className="identity">
+              <span className="agent-name" title={agentName || 'agent'}>
+                {agentName || 'agent'}
+              </span>
+              <div className="model-wrap" ref={modelWrapRef}>
+                <button
+                  className={`model-button${pickerOpen ? ' open' : ''}`}
+                  onClick={toggleModelPicker}
+                  aria-haspopup="listbox"
+                  aria-expanded={pickerOpen}
+                  title={currentModel ? `${currentModel.provider} / ${currentModel.model}` : 'model —'}
+                >
+                  <span className="model-label">
+                    {currentModel ? `${currentModel.provider} / ${currentModel.model}` : 'model —'}
+                  </span>
+                  <span className="model-caret" aria-hidden="true">
+                    ▾
+                  </span>
+                </button>
+                {pickerOpen ? (
+                  <div className="model-picker" role="listbox" aria-label="模型">
+                    {modelItems.length === 0 ? (
+                      <div className="model-empty">No models available</div>
+                    ) : (
+                      modelItems.map((item) => (
+                        <button
+                          key={`${item.provider}/${item.model}`}
+                          className={`model-row${item.active ? ' active' : ''}`}
+                          role="option"
+                          aria-selected={item.active}
+                          aria-current={item.active ? 'true' : undefined}
+                          disabled={modelBusy}
+                          onClick={() => chooseModel(item)}
+                        >
+                          <span className="model-row-model">{item.model}</span>
+                          <span className="model-row-provider">{item.provider}</span>
+                          {item.active ? (
+                            <span className="model-row-check" aria-hidden="true">
+                              ●
+                            </span>
+                          ) : null}
+                        </button>
+                      ))
+                    )}
+                    {modelBusy ? <div className="model-busy">switching…</div> : null}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+            <button
+              className="icon-btn"
+              onClick={toggleTheme}
+              title={theme === 'dark' ? '切换到浅色' : '切换到深色'}
+              aria-label="切换主题"
+            >
+              {theme === 'dark' ? '☀' : '☾'}
+            </button>
+            <div className="status">
+              <i className={`dot state-${state}`} />
+              <span className="status-label">{STATE_LABEL[state]}</span>
+              <i className={`dot agent-${agentOnline ? 'on' : 'off'}`} />
+              <span className="status-label">{agentOnline ? 'agent online' : 'agent offline'}</span>
+            </div>
           </div>
         </header>
 
@@ -1266,18 +1914,49 @@ export default function App() {
           </div>
         ) : null}
 
-        <div className="messages" ref={listRef}>
-          {messages.length === 0 ? (
-            <p className="empty">
-              No messages yet. Say hello — replies stream in through the relay.
-            </p>
+        <div className="thread">
+          <div className="messages" ref={listRef} onScroll={onListScroll}>
+            {messages.length === 0 ? (
+              <p className="empty">
+                No messages yet. Say hello — replies stream in through the relay.
+              </p>
+            ) : null}
+            {messages.map((m) => (
+              <MessageView key={m.id} message={m} chat={activeChat} onApproval={onApproval} />
+            ))}
+          </div>
+          {!nearBottom && messages.length > 0 ? (
+            <button
+              className="scroll-bottom"
+              onClick={scrollToBottom}
+              title="回到最新"
+              aria-label="回到最新"
+            >
+              ↓
+            </button>
           ) : null}
-          {messages.map((m) => (
-            <MessageView key={m.id} message={m} chat={activeChat} onApproval={onApproval} />
-          ))}
         </div>
 
         <div className="composer">
+          {paletteOpen ? (
+            <div className="palette" role="listbox" aria-label="命令">
+              {paletteItems.map((command, index) => (
+                <button
+                  key={command.id}
+                  className={`palette-row${index === paletteCursor ? ' active' : ''}`}
+                  role="option"
+                  aria-selected={index === paletteCursor}
+                  onMouseEnter={() => setPaletteIndex(index)}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => runCommand(command.id)}
+                >
+                  <span className="palette-cmd">/{command.id}</span>
+                  <span className="palette-label">{command.label}</span>
+                  <span className="palette-hint">{command.hint}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
           {composerError ? <div className="composer-error">{composerError}</div> : null}
           {attachment ? (
             <div className="chips">
@@ -1334,6 +2013,37 @@ export default function App() {
           </div>
         </div>
       </main>
+
+      {helpOpen ? (
+        <div className="help-overlay" onClick={() => setHelpOpen(false)}>
+          <div
+            className="help-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="帮助"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="help-head">
+              <span>帮助</span>
+              <button className="help-close" onClick={() => setHelpOpen(false)} aria-label="关闭">
+                ×
+              </button>
+            </div>
+            <h4>命令</h4>
+            <ul className="help-list">
+              {COMMANDS.map((command) => (
+                <li key={command.id}>
+                  <code>/{command.id}</code>
+                  <span>{command.label}</span>
+                  <em>{command.hint}</em>
+                </li>
+              ))}
+            </ul>
+            <h4>快捷键</h4>
+            <p className="help-keys">Enter 发送 · Shift+Enter 换行 · `/` 命令面板 · Esc 关闭面板/对话框</p>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -44,20 +44,26 @@ try:  # package-relative (tests, ``python -m plugin...``)
         file_error_frame,
         file_ready_frame,
         hist_frame,
+        model_changed_frame,
+        models_frame,
         msg_frame,
         resync_frame,
         start_frame,
+        status_frame,
     )
     from .relay_client import RelayClient
     from .turso_archive import TursoArchiver
     from .util import (
         ANSWER_STREAM_TYPE,
         FileTransfers,
+        active_llm_of,
         approval_owner_ok,
         decode_file_entry,
         hist_limit,
         history_messages,
+        model_items,
         pack_history,
+        plan_model_switch,
         trailing_msg_text,
     )
 except ImportError:  # loaded as a top-level module by the plugin loader
@@ -73,20 +79,26 @@ except ImportError:  # loaded as a top-level module by the plugin loader
         file_error_frame,
         file_ready_frame,
         hist_frame,
+        model_changed_frame,
+        models_frame,
         msg_frame,
         resync_frame,
         start_frame,
+        status_frame,
     )
     from relay_client import RelayClient
     from turso_archive import TursoArchiver
     from util import (
         ANSWER_STREAM_TYPE,
         FileTransfers,
+        active_llm_of,
         approval_owner_ok,
         decode_file_entry,
         hist_limit,
         history_messages,
+        model_items,
         pack_history,
+        plan_model_switch,
         trailing_msg_text,
     )
 
@@ -189,6 +201,8 @@ class WebChannel(BaseChannel):
         self._active_streams: set = set()
         # Web chat id -> ChatSpec.id, resolved once per chat (A2/A3).
         self._chat_ids: Dict[str, str] = {}
+        # Display name of the bound agent, cached after the first lookup (M7).
+        self._agent_name: Optional[str] = None
         # Protocol v2 chunked uploads: in-progress assemblies + staged files.
         self._files = FileTransfers()
 
@@ -390,6 +404,30 @@ class WebChannel(BaseChannel):
             return
         await relay.send(frame)
 
+    async def _send_control(self, frame: Dict[str, Any]) -> None:
+        """Send a control frame directly through the relay (M7).
+
+        ``models`` / ``model_changed`` / ``status`` belong to no chat stream,
+        so they are sent without a ``seq`` and are neither ring-buffered nor
+        replayed on ``resume``. A failed control send is logged and swallowed:
+        it must never surface into the handler that produced it.
+        """
+        relay = self._relay
+        if relay is None:
+            logger.debug(
+                "webchannel: relay not running, dropping control t=%s",
+                frame.get("t"),
+            )
+            return
+        try:
+            await relay.send(frame)
+        except Exception:  # noqa: BLE001 - a control send never fails a handler
+            logger.warning(
+                "webchannel: control send failed for t=%s",
+                frame.get("t"),
+                exc_info=True,
+            )
+
     # -- inbound relay frames -------------------------------------------
 
     async def _on_relay_frame(self, frame: Dict[str, Any]) -> None:
@@ -410,6 +448,13 @@ class WebChannel(BaseChannel):
             await self._handle_file_chunk(frame)
         elif kind == "file_end":
             await self._handle_file_end(frame)
+        elif kind == "models":
+            await self._handle_models(frame)
+        elif kind == "set_model":
+            await self._handle_set_model(frame)
+        elif kind in ("ready", "peer"):
+            # Attach / client-presence: refresh the header's identity + model.
+            await self._send_status()
         else:
             logger.debug("webchannel: ignoring inbound frame t=%s", kind)
 
@@ -838,6 +883,182 @@ class WebChannel(BaseChannel):
                 "webchannel: %s POST failed for chat=%s req_id=%s",
                 action, chat, req_id, exc_info=True,
             )
+
+    # -- M7: model listing / switching ----------------------------------
+
+    async def _api_json(
+        self, method: str, path: str, params: Optional[Dict[str, Any]] = None,
+        json_body: Any = None,
+    ):
+        """One local API call -> ``(status, payload)``; never raises (M7).
+
+        ``payload`` is the decoded JSON body, or None when the body is not
+        JSON (or the request never completed). ``status`` is 0 for a transport
+        failure so callers can tell "app unreachable" from an HTTP rejection.
+        """
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.request(
+                    method,
+                    f"{API_BASE}{path}",
+                    params=params,
+                    json=json_body,
+                    headers=self._headers(),
+                )
+            try:
+                payload = response.json()
+            except Exception:  # noqa: BLE001 - a non-JSON body is not an error
+                payload = None
+            return response.status_code, payload
+        except Exception:  # noqa: BLE001 - transport failure -> status 0
+            logger.warning(
+                "webchannel: %s %s failed", method, path, exc_info=True,
+            )
+            return 0, None
+
+    async def _fetch_providers(self) -> Optional[List[Any]]:
+        """``GET /api/models`` list, or None when it is unusable (M7).
+
+        The raw ``ProviderInfo`` objects stay inside the plugin: they carry
+        ``api_key``, so callers must project them with ``model_items``.
+        """
+        status, payload = await self._api_json("GET", "/api/models")
+        if not 200 <= status < 300:
+            logger.warning(
+                "webchannel: GET /api/models failed: HTTP %s", status,
+            )
+            return None
+        if not isinstance(payload, list):
+            logger.warning(
+                "webchannel: GET /api/models returned %s, expected a list",
+                type(payload).__name__,
+            )
+            return None
+        return payload
+
+    async def _fetch_active(self):
+        """``(provider, model)`` of the agent's effective model, else ``("", "")``."""
+        status, payload = await self._api_json(
+            "GET",
+            "/api/models/active",
+            params={"scope": "effective", "agent_id": self._agent_id()},
+        )
+        if not 200 <= status < 300:
+            logger.warning(
+                "webchannel: GET /api/models/active failed: HTTP %s", status,
+            )
+            return ("", "")
+        return active_llm_of(payload)
+
+    async def _agent_display_name(self) -> str:
+        """Human-readable agent name, falling back to its id (M7).
+
+        Only a non-empty string ``name`` from ``GET /api/agents/{id}`` is
+        cached; a failure is retried on the next status push.
+        """
+        if self._agent_name:
+            return self._agent_name
+        agent_id = self._agent_id()
+        status, payload = await self._api_json("GET", f"/api/agents/{agent_id}")
+        if 200 <= status < 300 and isinstance(payload, dict):
+            name = payload.get("name")
+            if isinstance(name, str) and name:
+                self._agent_name = name
+                return name
+        return agent_id
+
+    async def _send_status(self) -> None:
+        """Push the identity/status frame; never raises (M7)."""
+        try:
+            provider, model = await self._fetch_active()
+            frame = status_frame(
+                await self._agent_display_name(),
+                provider or None,
+                model or None,
+            )
+            await self._send_control(frame)
+        except Exception:  # noqa: BLE001 - a status push must never raise
+            logger.warning("webchannel: status push failed", exc_info=True)
+
+    async def _handle_models(self, frame: Dict[str, Any]) -> None:
+        """Reply to ``{t:"models"}`` with the switchable model list (M7)."""
+        providers = await self._fetch_providers()
+        if providers is None:
+            await self._send_control(
+                error_frame("E_MODEL", "model list unavailable"),
+            )
+            return
+        active_provider, active_model = await self._fetch_active()
+        items = model_items(providers, active_provider, active_model)
+        await self._send_control(models_frame(items))
+
+    async def _handle_set_model(self, frame: Dict[str, Any]) -> None:
+        """Switch the agent's active model (M7).
+
+        The pair is validated against the list the client could have seen
+        before the PUT, because the app validates the slot again and a
+        rejection must surface as ``E_MODEL`` rather than as a broken socket.
+        """
+        provider = frame.get("provider")
+        provider = provider if isinstance(provider, str) else ""
+        model = frame.get("model")
+        model = model if isinstance(model, str) else ""
+
+        providers = await self._fetch_providers()
+        if providers is None:
+            await self._send_control(
+                error_frame("E_MODEL", "model list unavailable"),
+            )
+            return
+        active_provider, active_model = await self._fetch_active()
+        items = model_items(providers, active_provider, active_model)
+
+        action, detail = plan_model_switch(
+            items, active_provider, active_model, provider, model,
+        )
+        if action == "error":
+            await self._send_control(error_frame("E_MODEL", detail))
+            return
+        if action == "noop":
+            await self._send_control(model_changed_frame(provider, model))
+            return
+
+        status, payload = await self._api_json(
+            "PUT",
+            "/api/models/active",
+            json_body={
+                "provider_id": provider,
+                "model": model,
+                "scope": "agent",
+                "agent_id": self._agent_id(),
+            },
+        )
+        if not 200 <= status < 300:
+            app_detail = payload.get("detail") if isinstance(
+                payload, dict,
+            ) else None
+            if isinstance(app_detail, str) and app_detail:
+                message = app_detail[:200]
+            elif status == 0:
+                message = "model switch failed: app unreachable"
+            else:
+                message = "model switch rejected (HTTP %s)" % status
+            logger.warning(
+                "webchannel: switch to %s/%s failed: %s",
+                provider, model, message,
+            )
+            await self._send_control(error_frame("E_MODEL", message))
+            return
+
+        new_provider, new_model = active_llm_of(payload)
+        if not (new_provider and new_model):
+            new_provider, new_model = provider, model
+        logger.info(
+            "webchannel: active model switched to %s/%s",
+            new_provider, new_model,
+        )
+        await self._send_control(model_changed_frame(new_provider, new_model))
+        await self._send_status()
 
     # -- outbound hooks --------------------------------------------------
 

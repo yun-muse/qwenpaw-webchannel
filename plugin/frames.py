@@ -48,10 +48,13 @@ __all__ = [
     "file_error_frame",
     "file_ready_frame",
     "hist_frame",
+    "model_changed_frame",
+    "models_frame",
     "msg_frame",
     "parse_inbound",
     "resync_frame",
     "start_frame",
+    "status_frame",
 ]
 
 # 256 KB of serialized JSON, UTF-8. See protocol/frames.md section 5.
@@ -207,6 +210,47 @@ def error_frame(code, detail=""):
     frame = {"t": "error", "code": code}
     if detail:
         frame["detail"] = detail
+    return frame
+
+
+# ---------------------------------------------------------------------------
+# M7 -- control frames (protocol/frames.md section 9)
+#
+# ``models`` / ``model_changed`` / ``status`` are sent WITHOUT ``seq``: they
+# belong to no chat stream, so they are never ring-buffered or replayed.
+# ---------------------------------------------------------------------------
+
+
+def models_frame(items):
+    """Model list reply: ``{t:"models", items:[{provider, model, active}]}``.
+
+    *items* is passed through exactly as built by ``util.model_items`` -- the
+    plugin's projection of ``ProviderInfo``, which never carries credentials.
+    """
+    return {"t": "models", "items": items}
+
+
+def model_changed_frame(provider, model):
+    """A ``set_model`` succeeded: ``{t:"model_changed", provider, model}``.
+
+    The pair is the agent's active model from now on (the app's answer when it
+    normalised the ids, else the requested pair).
+    """
+    return {"t": "model_changed", "provider": provider, "model": model}
+
+
+def status_frame(agent_name, provider=None, model=None):
+    """Identity push: ``{t:"status", agent_name, provider?, model?}``.
+
+    Sent when the agent attaches and whenever a client joins/leaves; the header
+    displays it. ``provider`` / ``model`` are omitted unless they are non-empty
+    strings, so an unknown active model degrades to the name alone.
+    """
+    frame = {"t": "status", "agent_name": agent_name}
+    if isinstance(provider, str) and provider:
+        frame["provider"] = provider
+    if isinstance(model, str) and model:
+        frame["model"] = model
     return frame
 
 

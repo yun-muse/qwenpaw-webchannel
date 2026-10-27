@@ -53,6 +53,9 @@ One JSON object per WebSocket **text** message, UTF-8 encoded:
 | `msg` | `chat`, `seq?`, `parts[]` | complete message, tool result or attachment reference |
 | `approval` | `chat`, `req_id`, `tool`, `severity`, `summary` | approval request |
 | `resync` | `chat`, `reason?` | ring buffer miss; client must reload history |
+| `models` | `items:[{provider, model, active}]` | **v3** reply to a `models` request; exactly one item has `active:true` when the agent's current (effective) model is known |
+| `model_changed` | `provider`, `model` | **v3** a `set_model` succeeded; this pair is now the agent's active model |
+| `status` | `agent_name`, `provider?`, `model?` | **v3** identity push, sent when the agent attaches and whenever a client joins/leaves; the header displays it |
 | `file_ready` | `chat`, `id`, `seq?` | **v2** chunked upload verified and staged; `files[]` may now use `{"ref": id}` |
 | `file_error` | `chat`, `id`, `code`, `msg?`, `seq?` | **v2** chunked upload failed; `code` ∈ `E_CHECKSUM` / `E_TOOBIG` / `E_STATE` |
 | `pong` | — | reserved; the relay answers `ping` locally in v1 |
@@ -67,6 +70,9 @@ model's thinking and MUST NOT be concatenated into it. A reply is streaming unti
 segment's `end` — an `end` for `reasoning` closes that segment only. Missing `stream_type` means
 `message` (older containers).
 
+`models`, `model_changed` and `status` are **control frames**: they carry no `seq`, belong to no
+chat's stream, and are never ring-buffered or replayed on `resume` (§9.4).
+
 ### 2.4 browser → container
 
 | `t` | fields | notes |
@@ -76,6 +82,8 @@ segment's `end` — an `end` for `reasoning` closes that segment only. Missing `
 | `approve` / `deny` | `chat`, `req_id` | resolve an approval |
 | `resume` | `chat`, `last_seq` | replay frames with `seq > last_seq` |
 | `hist` | `chat`, `before?`, `limit?` | request history (agent answers with `msg`/`resync` frames) |
+| `models` | — | **v3** request the agent's switchable model list |
+| `set_model` | `provider`, `model` | **v3** switch the agent's active model |
 | `file_begin` | `chat`, `id`, `name`, `mime`, `size`, `chunks`, `sha256` | **v2** start a chunked upload; `chunks` is how many `file_chunk` frames follow |
 | `file_chunk` | `chat`, `id`, `i`, `data` | **v2** one chunk; `i` is 0-based, `data` is base64 of ≤96 KB raw bytes |
 | `file_end` | `chat`, `id` | **v2** client finished sending; agent answers `file_ready` or `file_error` |
@@ -164,6 +172,7 @@ Error frame: `{"t":"error","code":"...","id":"<offending frame id, if any>"}`.
 | `E_TOOBIG` | frame exceeds 256 KB | send smaller message / reject file (v1); use a chunked v2 upload (§8) for larger files |
 | `E_BADFRAME` | not JSON, not an object, missing/non-string `t`, binary message | drop frame; sender may fix and retry |
 | `E_RESYNC` | resume buffer miss | client reloads history |
+| `E_MODEL` | model list unavailable, unknown provider/model, or the app rejected the switch | client shows the error; the connection is unaffected |
 
 `E_AUTH` is enforced at the HTTP upgrade (401 before the socket opens), so it is normally not seen
 as a frame. `E_BADFRAME` is relay-local and never forwarded. `E_CHECKSUM` and `E_STATE` (§8) are
@@ -250,4 +259,62 @@ traffic). A 10 MB file is ~107 chunks, i.e. roughly 4–5 s of paced sends.
 On `file_error{code:"E_CHECKSUM"}` the client **retries the whole file once** — same `id`, a new
 `file_begin` followed by every chunk again. A second failure is reported to the user; there is no
 per-chunk retransmit protocol.
+
+## 9. Protocol v3 — model listing and switching
+
+Lets the browser list the models the bound agent can switch to and change the agent's active model.
+The relay needs **no changes**: these are ordinary frames it forwards verbatim. Each plugin instance
+serves one agent workspace, so the list is that agent's own view.
+
+### 9.1 Wire format
+
+Client → agent:
+
+```json
+{"t":"models"}
+{"t":"set_model","provider":"openai","model":"gpt-4o-mini"}
+```
+
+Agent → client:
+
+```json
+{"t":"models","items":[{"provider":"openai","model":"gpt-4o","active":true},
+                       {"provider":"openai","model":"gpt-4o-mini","active":false}]}
+{"t":"model_changed","provider":"openai","model":"gpt-4o-mini"}
+{"t":"status","agent_name":"Research","provider":"openai","model":"gpt-4o-mini"}
+{"t":"error","code":"E_MODEL","detail":"unknown model: openai/does-not-exist"}
+```
+
+- `items[]` carries **only** `{provider, model, active}`. Exactly one item is `active:true` when the
+  agent's current (effective) model is known; when that model is not in the list it is inserted as an
+  extra active item, so the header always has something to display.
+- `status` is the identity push: `agent_name`, plus `provider` / `model` when the active model is
+  known. It is sent when the agent attaches and whenever a client joins or leaves.
+- `set_model` is answered with exactly one of `model_changed` (success, including switching to the
+  model that is already active) or `error{code:"E_MODEL"}`.
+
+### 9.2 Eligibility mirror
+
+The agent mirrors the console's model selector: a provider is listed only when it is enabled and
+usable (`hub-managed` and free-tier providers always; others need models plus configured credentials
+for their kind — a `base_url` for custom providers, an API key when one is required). The plugin
+projects each raw provider object down to `{provider, model, active}`; **credential material
+(`api_key`) and every other provider field never cross the wire.** Clients treat the list as
+authoritative and never fetch provider data themselves.
+
+### 9.3 Validate before switching
+
+`set_model` is validated against the pair set the client was just offered **before** anything is
+written: a missing `provider`/`model`, or a pair that is not listed, is `E_MODEL` and no switch is
+attempted. The app validates the slot again and may still reject it (unknown model, unavailable
+model); that rejection is reported as `E_MODEL` carrying the app's `detail`, and the connection stays
+up. Switching to the pair that is already active is a no-op that still answers `model_changed`, so
+clients need no special case.
+
+### 9.4 Control frames
+
+`models` / `model_changed` / `status` are **control frames** — they are sent **without `seq`**, are
+not part of any chat's stream, and are not ring-buffered or replayed on `resume`. A client that
+reconnects must request `models` again (or wait for the `status` push) rather than expect these frames
+in the replay.
 

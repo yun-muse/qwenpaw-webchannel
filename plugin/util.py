@@ -516,3 +516,174 @@ class FileTransfers:
             del self._active[tid]
             return None
         return entry
+
+
+# ---------------------------------------------------------------------------
+# M7 -- model listing / switching
+# ---------------------------------------------------------------------------
+
+
+def _text(value):
+    """True for a non-empty string (the only shape the protocol accepts)."""
+    return isinstance(value, str) and bool(value)
+
+
+def _id_set(value):
+    """A set of non-empty string ids from ``removed_model_ids``/``hidden_*``."""
+    if not isinstance(value, list):
+        return set()
+    return {item for item in value if isinstance(item, str) and item}
+
+
+def _provider_model_ids(provider):
+    """Visible model ids of one ``ProviderInfo`` dict, in console order.
+
+    ``models`` then ``extra_models`` (each a list of dicts with an ``id``),
+    deduped in first-seen order, minus anything the provider reports as
+    ``removed_model_ids`` or ``hidden_model_ids``.
+    """
+    removed = _id_set(provider.get("removed_model_ids"))
+    hidden = _id_set(provider.get("hidden_model_ids"))
+
+    ids = []
+    seen = set()
+    for field in ("models", "extra_models"):
+        entries = provider.get(field)
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            model_id = entry.get("id")
+            if not _text(model_id) or model_id in seen:
+                continue
+            seen.add(model_id)
+            ids.append(model_id)
+    return [
+        model_id
+        for model_id in ids
+        if model_id not in removed and model_id not in hidden
+    ]
+
+
+def _provider_eligible(provider, model_count):
+    """Mirror the console's ``buildEligibleProviders`` for one provider.
+
+    ``hub-managed`` and free-tier providers are always usable; every other
+    provider needs models plus working credentials for its kind (custom ->
+    ``base_url``; API-key-based -> a key; no key required -> anything).
+    """
+    if provider.get("id") == "hub-managed":
+        return True
+    if provider.get("is_free_tier"):
+        return True
+    if model_count <= 0:
+        return False
+    if provider.get("is_custom"):
+        return _text(provider.get("base_url"))
+    if provider.get("require_api_key", True):
+        return _text(provider.get("api_key"))
+    return True
+
+
+def model_items(providers, active_provider="", active_model=""):
+    """Project ``ProviderInfo`` dicts to ``[{provider, model, active}]``.
+
+    Only the console-eligible providers/models are listed (see
+    ``_provider_eligible``), and only ``provider`` / ``model`` / ``active``
+    are copied out -- credential material such as ``api_key`` never reaches
+    the client.
+
+    *active* is True on the single item matching ``(active_provider,
+    active_model)``. When both are given but that pair is not in the list
+    (e.g. the provider is no longer eligible), it is inserted at index 0 so
+    the client always has one active entry to display.
+    """
+    active_provider = active_provider if isinstance(active_provider, str) else ""
+    active_model = active_model if isinstance(active_model, str) else ""
+
+    items = []
+    if isinstance(providers, list):
+        for provider in providers:
+            if not isinstance(provider, dict):
+                continue
+            provider_id = provider.get("id")
+            if not _text(provider_id):
+                continue
+            if provider.get("enabled") is False:
+                continue
+            model_ids = _provider_model_ids(provider)
+            if not _provider_eligible(provider, len(model_ids)):
+                continue
+            for model_id in model_ids:
+                items.append({
+                    "provider": provider_id,
+                    "model": model_id,
+                    "active": (
+                        provider_id == active_provider
+                        and model_id == active_model
+                    ),
+                })
+
+    if active_provider and active_model:
+        if not any(item["active"] for item in items):
+            items.insert(0, {
+                "provider": active_provider,
+                "model": active_model,
+                "active": True,
+            })
+    return items
+
+
+def active_llm_of(payload):
+    """``(provider, model)`` from an ``ActiveModelsInfo``-shaped dict.
+
+    Reads ``payload["active_llm"]["provider_id"/"model"]``; a null
+    ``active_llm`` or any off-shape input yields ``("", "")``.
+    """
+    if not isinstance(payload, dict):
+        return ("", "")
+    slot = payload.get("active_llm")
+    if not isinstance(slot, dict):
+        return ("", "")
+
+    provider = slot.get("provider_id")
+    model = slot.get("model")
+    return (
+        provider if isinstance(provider, str) else "",
+        model if isinstance(model, str) else "",
+    )
+
+
+def plan_model_switch(
+    items, active_provider, active_model, provider, model,
+):
+    """Decide what a ``set_model`` request needs: ``(action, detail)``.
+
+    ``action`` is ``"error"`` (nothing to switch to, *detail* explains),
+    ``"noop"`` (the pair is already active -- answer ``model_changed``
+    without a PUT) or ``"put"`` (validate-then-PUT ``/api/models/active``).
+    The pair must be one the client was just offered, which is what makes the
+    "validate before switch" rule enforceable without a second source of
+    truth.
+    """
+    if not (_text(provider) and _text(model)):
+        return ("error", "provider and model are required")
+
+    pairs = set()
+    if isinstance(items, list):
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            item_provider = item.get("provider")
+            item_model = item.get("model")
+            if _text(item_provider) and _text(item_model):
+                pairs.add((item_provider, item_model))
+    if (provider, model) not in pairs:
+        return ("error", "unknown model: %s/%s" % (provider, model))
+
+    active_provider = active_provider if isinstance(active_provider, str) else ""
+    active_model = active_model if isinstance(active_model, str) else ""
+    if (provider, model) == (active_provider, active_model):
+        return ("noop", "")
+    return ("put", "")
