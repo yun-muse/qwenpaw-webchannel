@@ -80,6 +80,15 @@ function handleAgent(ws) {
     if (code) return sendError(ws, code, id);
     if (frame.t === 'ping') return sendPong(ws, frame);
 
+    // M7.3 end-to-end heartbeat, in lockstep with relay-cf: the relay process
+    // itself acks, so a dead agent<->relay path is visible to the plugin. Not
+    // forwarded, and a parked/superseded socket gets no ack.
+    if (frame.t === 'hb') {
+      if (ws !== agent) return;
+      sendJson(ws, typeof frame.id === 'string' ? { t: 'hb_ack', id: frame.id } : { t: 'hb_ack' });
+      return;
+    }
+
     if (frame.t === 'hello') {
       const started = Number.isFinite(frame.started) && frame.started > 0 ? frame.started : 0;
       const session = typeof frame.session === 'string' ? frame.session : '';
@@ -131,6 +140,9 @@ function handleClient(ws) {
     const { frame, text, code, id } = readFrame(raw, isBinary);
     if (code) return sendError(ws, code, id);
     if (frame.t === 'ping') return sendPong(ws, frame);
+    // Agent-side liveness frames never come from a client and are never
+    // forwarded to the agent (M7.3); relay-cf drops `hb` the same way.
+    if (frame.t === 'hb') return;
 
     if (isOpen(agent)) agent.send(text);
     else bufferForAgent(text);

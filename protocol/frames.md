@@ -31,6 +31,7 @@ One JSON object per WebSocket **text** message, UTF-8 encoded:
 | `t` | fields | notes |
 |---|---|---|
 | `hello` | `token?`, `instance`, `agent`, `session`, `started` | first frame after the upgrade; wins the agent slot by generation (see §3); relay acks with `ready`, frame is not forwarded |
+| `hb` | `id` | **v3** end-to-end heartbeat (M7.3); the relay process echoes `hb_ack` with the same `id`. Never forwarded, never stamps `agentLastSeen`, exempt from the rate limit |
 | `ping` | — | answered locally with `pong`, not forwarded |
 | `pong` | — | reserved; the relay answers `ping` locally in v1 |
 
@@ -41,7 +42,19 @@ One JSON object per WebSocket **text** message, UTF-8 encoded:
 | `ready` | `agentOnline` | ack of `hello` / attach |
 | `peer` | `clients` | connected client count, sent when an agent's hello wins the slot and on every client join/leave |
 | `error` | `code`, `id?` | protocol error |
+| `hb_ack` | `id` | **v3** echoed answer to `hb`; produced by the relay process itself, never by the edge |
 | `pong` | — | answer to `ping` |
+
+**Why `hb` exists (v3).** `ping`/`pong` and WebSocket-level ping frames are answered *at the edge*:
+the hosted relay's `ping` is served by `setWebSocketAutoResponse` without waking the Durable
+Object, and Cloudflare also answers protocol pings in its WebSocket front end. Neither ever
+reaches the container's tunnel, so a half-open agent ↔ relay path looks perfectly healthy from
+both ends — pings keep being answered while no business frame can pass. `hb` is handled by the
+relay process itself, so its ack is real end-to-end evidence. The container sends it every 15 s,
+expects `hb_ack` within 10 s, and reconnects after 2 consecutive missed beats. `hb` is **not** a
+business frame: it is never forwarded to clients, does not update `agentLastSeen`, and (hosted
+relay) consumes no rate-limit token. A socket that does not own the agent slot (parked or
+superseded generation) is not acked.
 
 ### 2.3 container → browser (forwarded verbatim)
 
@@ -160,6 +173,7 @@ container                relay                   browser
 | offline buffer | 500 frames / 1 MB per tenant | oldest frames dropped first |
 | ring buffer | 400 frames per chat (container) | `resync` on miss |
 | heartbeat | `ping` every 25 s, `pong` expected within 10 s | otherwise reconnect with backoff |
+| end-to-end heartbeat (v3) | `hb` every 15 s, `hb_ack` expected within 10 s, 2 consecutive missed beats | container closes and reconnects with backoff |
 
 **Files (v1).** Files travel as base64 inside `msg.files[]`, so the *whole frame* must stay
 ≤ 256 KB. Base64 inflates payloads by 4/3, leaving roughly **180 KB of raw file data** after JSON

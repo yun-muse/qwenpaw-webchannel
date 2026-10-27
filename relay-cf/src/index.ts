@@ -202,8 +202,9 @@ export class RelayDO extends DurableObject {
    * it is a liveness hint, not state worth persisting, and a hibernation
    * rebuild starts it at 0 again. The app-level `{"t":"ping"}` heartbeat is
    * answered by setWebSocketAutoResponse and never reaches webSocketMessage,
-   * so it does NOT stamp — this field means "last agent business frame",
-   * which is exactly the tell for a silent-but-"online" agent.
+   * and the M7.3 `{"t":"hb"}` heartbeat is treated the same way (acked, but
+   * never stamped), so this field means "last agent business frame", which is
+   * exactly the tell for a silent-but-"online" agent.
    */
   private agentLastSeenAt = 0;
   /** Every connected browser socket. */
@@ -337,6 +338,19 @@ export class RelayDO extends DurableObject {
     // Heartbeats are free: no bucket token, never forwarded.
     if (frame.t === 'ping') {
       return this.sendPong(ws, typeof frame.id === 'string' ? frame.id : undefined);
+    }
+
+    // M7.3 end-to-end heartbeat. Handled here, in the object, so the ack
+    // proves the agent<->DO path is alive — unlike `ping`, which the edge
+    // answers without ever waking this object. Free like `ping` (no token),
+    // never forwarded, and it does not stamp agentLastSeenAt. A socket that
+    // does not own the slot (parked / superseded generation) gets no ack on
+    // purpose: it will notice the misses, reconnect and be told 4000 if it is
+    // genuinely stale.
+    if (frame.t === 'hb') {
+      if (ws !== this.agent) return;
+      this.sendJson(ws, typeof frame.id === 'string' ? { t: 'hb_ack', id: frame.id } : { t: 'hb_ack' });
+      return;
     }
 
     // Every other valid frame costs a token (both directions share the bucket).

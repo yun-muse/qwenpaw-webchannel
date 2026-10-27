@@ -1,16 +1,22 @@
 """Async WebSocket client for the WebChannel relay (protocol/frames.md v1).
 
 Only third-party dependency: ``websockets`` (a QwenPaw core dependency).
-Handles bearer auth, the ``hello`` handshake, an app-level heartbeat every
-25 s, WebSocket-level ping/pong, exponential-backoff reconnect (1 s -> 30 s)
-and an ordered send queue that buffers frames while the socket is down.
-Reconnect stops permanently when the relay closes the socket with code 4000
-(the client was superseded by a newer instance).
+Handles bearer auth, the ``hello`` handshake, an end-to-end ``hb`` heartbeat
+every 15 s (M7.3), WebSocket-level ping/pong, exponential-backoff reconnect
+(1 s -> 30 s) and an ordered send queue that buffers frames while the socket
+is down. Reconnect stops permanently when the relay closes the socket with code
+4000 (the client was superseded by a newer instance).
 
 M7.2 self-healing: every connection phase runs reader / writer / heartbeat
 under ``asyncio.wait(FIRST_COMPLETED)``, so a parked frame callback or a dead
 writer ends the phase instead of parking the loop; sends are time-bounded;
 and a supervisor restarts ``_run`` after any non-fatal exit.
+
+M7.3 end-to-end liveness: the app-level ``ping`` is answered at the edge
+(``setWebSocketAutoResponse`` on Cloudflare, and WebSocket-level pings are
+answered there too), so neither can see a dead agent<->relay path. ``hb`` is
+processed by the relay process itself and acked with ``hb_ack``; missing acks
+end the phase and the run loop reconnects.
 """
 
 from __future__ import annotations
@@ -35,8 +41,15 @@ except ImportError:  # loaded as a top-level module by the plugin loader
 
 logger = logging.getLogger(__name__)
 
-PING_INTERVAL_S = 25.0
+# End-to-end heartbeat (M7.3). The parameter names predate the frame change
+# (``ping_interval`` / ``pong_timeout`` drive the ``hb`` beat) and are kept so
+# existing callers and tests keep working. ``ping_interval=None`` disables it.
+PING_INTERVAL_S = 15.0
 PONG_TIMEOUT_S = 10.0
+HB_MAX_MISSED = 2
+# A missed beat is retried almost immediately rather than waiting a full
+# interval: two misses should cost seconds, not minutes.
+HB_RETRY_DELAY_S = 2.0
 # WebSocket-level keepalive (protocol pings), so a half-open tunnel is noticed
 # by the transport itself instead of by the app-level pong.
 WS_PING_INTERVAL_S = 20.0
@@ -76,9 +89,10 @@ def _encode(frame: dict) -> str:
 class RelayClient:
     """Maintain one outbound WebSocket to the relay.
 
-    ``on_frame`` is called for every inbound business frame (``pong`` and
-    ``ping`` are handled locally). It may be a plain function or a coroutine
-    function; exceptions in it are logged and never kill the connection.
+    ``on_frame`` is called for every inbound business frame (``pong``,
+    ``ping`` and ``hb_ack`` are handled locally). It may be a plain function or
+    a coroutine function; exceptions in it are logged and never kill the
+    connection.
     """
 
     def __init__(
@@ -89,8 +103,9 @@ class RelayClient:
         on_frame: FrameCallback = None,
         *,
         instance: Optional[str] = None,
-        ping_interval: float = PING_INTERVAL_S,
+        ping_interval: Optional[float] = PING_INTERVAL_S,
         pong_timeout: float = PONG_TIMEOUT_S,
+        hb_max_missed: int = HB_MAX_MISSED,
         queue_maxsize: int = QUEUE_MAXSIZE,
         ws_ping_interval: float = WS_PING_INTERVAL_S,
         ws_ping_timeout: float = WS_PING_TIMEOUT_S,
@@ -108,6 +123,7 @@ class RelayClient:
         self.on_frame = on_frame
         self.ping_interval = ping_interval
         self.pong_timeout = pong_timeout
+        self.hb_max_missed = max(1, int(hb_max_missed))
         self.ws_ping_interval = ws_ping_interval
         self.ws_ping_timeout = ws_ping_timeout
         self.send_timeout = send_timeout
@@ -119,6 +135,11 @@ class RelayClient:
         self._close_code: Optional[int] = None
         self._tx_lock = asyncio.Lock()
         self._pong = asyncio.Event()
+        # End-to-end heartbeat state; reset on every connect.
+        self._hb_counter = 0
+        self._hb_missed = 0
+        self._hb_outstanding: Optional[str] = None
+        self._hb_ack = asyncio.Event()
         self._closed = False
         self._fatal = False
         self._connected = False
@@ -242,6 +263,13 @@ class RelayClient:
                 self._ws = ws
                 self._connected = True
                 self._backoff = BACKOFF_INITIAL_S
+                # A new connection starts a new heartbeat conversation: the
+                # old ids mean nothing to this socket, and stale misses would
+                # kill the phase before the first beat.
+                self._hb_counter = 0
+                self._hb_missed = 0
+                self._hb_outstanding = None
+                self._hb_ack.clear()
                 logger.info(
                     "relay: connected %s as agent=%s",
                     self.relay_url,
@@ -430,6 +458,13 @@ class RelayClient:
             if kind == "ping":
                 await self._send_direct(ws, {"t": "pong"})
                 continue
+            if kind == "hb_ack":
+                # M7.3: consumed here, never dispatched. Only the ack of the
+                # currently outstanding beat counts; a late/duplicate ack for
+                # an older id must not mask a dead tunnel.
+                if isinstance(frame.get("id"), str) and frame.get("id") == self._hb_outstanding:
+                    self._hb_ack.set()
+                continue
             if kind == "error" and frame.get("code") == "E_AUTH":
                 self._fatal = True
                 logger.error("relay: E_AUTH received; stopping reconnect loop")
@@ -466,26 +501,67 @@ class RelayClient:
                 self._queue.task_done()
 
     async def _heartbeat(self, ws) -> None:
+        """End-to-end beat (M7.3): ``hb`` out, matching ``hb_ack`` back.
+
+        An ack can only be produced by the relay process itself, so a silent
+        tunnel (edge-answered pings, no RST) fails here in bounded time. Two
+        consecutive misses close the socket, which ends the phase exactly like
+        any other phase end and lets the run loop reconnect with backoff.
+        """
+        if self.ping_interval is None or self.ping_interval <= 0:
+            # Disabled (tests / control runs): park until the phase ends.
+            await asyncio.Event().wait()
+            return
+        # Delay before the next beat: a full interval after a success, but
+        # only the short retry delay after a miss (a `continue` to the loop
+        # top would otherwise re-impose the full interval on every retry).
+        delay = self.ping_interval
         while True:
-            await asyncio.sleep(self.ping_interval)
-            self._pong.clear()
+            await asyncio.sleep(delay)
+            delay = self.ping_interval
+            self._hb_counter += 1
+            hb_id = "hb-%d" % self._hb_counter
+            self._hb_outstanding = hb_id
+            self._hb_ack.clear()
             try:
-                await self._send_direct(ws, {"t": "ping"})
-                await asyncio.wait_for(
-                    self._pong.wait(),
-                    timeout=self.pong_timeout,
-                )
-            except asyncio.TimeoutError:
-                logger.warning("relay: pong timeout, reconnecting")
-                await ws.close()
-                return
+                await self._send_direct(ws, {"t": "hb", "id": hb_id})
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:  # noqa: BLE001 - socket died; let reader notice
-                logger.debug("relay: heartbeat send failed", exc_info=True)
+            except Exception as exc:  # noqa: BLE001 - socket died; reader may follow
+                logger.debug("relay: hb send failed", exc_info=True)
                 self._note_close_code(exc)
                 await ws.close()
                 return
+            try:
+                await asyncio.wait_for(
+                    self._hb_ack.wait(),
+                    timeout=self.pong_timeout,
+                )
+            except asyncio.TimeoutError:
+                self._hb_missed += 1
+                logger.warning(
+                    "relay: hb %s not acked (%d/%d missed)",
+                    hb_id,
+                    self._hb_missed,
+                    self.hb_max_missed,
+                )
+                self._log_event(
+                    "hb_miss", id=hb_id, missed=self._hb_missed,
+                )
+                if self._hb_missed >= self.hb_max_missed:
+                    logger.warning(
+                        "relay: tunnel is dead after %d missed heartbeats; "
+                        "reconnecting",
+                        self._hb_missed,
+                    )
+                    await ws.close()
+                    return
+                await asyncio.sleep(HB_RETRY_DELAY_S)
+                continue
+            except asyncio.CancelledError:
+                raise
+            self._hb_missed = 0
+            self._hb_outstanding = None
 
     async def _send_direct(self, ws, frame: dict) -> None:
         """Send one frame, time-bounded (a stuck socket is a dead socket)."""
