@@ -3,3 +3,4 @@ dist/
 __pycache__/
 .secrets/
 .wrangler/
+tools/soak.log
