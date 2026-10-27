@@ -1,0 +1,5 @@
+{"t":"ready","agentOnline":true}
+{"t":"start","chat":"chat-turso-mvq7dtun","seq":1,"stream_type":"message"}
+{"t":"evt","chat":"chat-turso-mvq7dtun","seq":2,"data":{"text":"hello","stream_type":"message"}}
+{"t":"end","chat":"chat-turso-mvq7dtun","seq":3,"stream_type":"message"}
+{"t":"msg","chat":"chat-turso-mvq7dtun","parts":[{"type":"text","text":"hello"}],"seq":4}

@@ -13,6 +13,7 @@ then referenced as ``msg.files[].ref``.
 
 from __future__ import annotations
 
+import base64
 import logging
 import time
 from typing import Any, Dict, List, Optional
@@ -48,6 +49,7 @@ try:  # package-relative (tests, ``python -m plugin...``)
         start_frame,
     )
     from .relay_client import RelayClient
+    from .turso_archive import TursoArchiver
     from .util import (
         ANSWER_STREAM_TYPE,
         FileTransfers,
@@ -76,6 +78,7 @@ except ImportError:  # loaded as a top-level module by the plugin loader
         start_frame,
     )
     from relay_client import RelayClient
+    from turso_archive import TursoArchiver
     from util import (
         ANSWER_STREAM_TYPE,
         FileTransfers,
@@ -152,7 +155,8 @@ class WebChannel(BaseChannel):
     def __init__(
         self, process, relay_url: str = DEFAULT_RELAY_URL,
         token: str = DEFAULT_TOKEN, on_reply_sent=None, display_config=None,
-        no_text_debounce: bool = True,
+        no_text_debounce: bool = True, turso_url: str = "",
+        turso_token: str = "",
     ):
         # ``no_text_debounce`` is accepted for BaseChannel signature parity but
         # deliberately not forwarded: every inbound ``msg`` frame is one
@@ -171,6 +175,7 @@ class WebChannel(BaseChannel):
         )
         self.relay_url = relay_url or DEFAULT_RELAY_URL
         self.token = token or DEFAULT_TOKEN
+        self._archiver = TursoArchiver(turso_url or "", turso_token or "")
         self._relay: Optional[RelayClient] = None
         self._seq = SeqCounter()
         self._ring = RingBuffer(400)
@@ -199,6 +204,8 @@ class WebChannel(BaseChannel):
             process=process,
             relay_url=getattr(config, "relay_url", "") or DEFAULT_RELAY_URL,
             token=getattr(config, "token", "") or DEFAULT_TOKEN,
+            turso_url=getattr(config, "turso_url", "") or "",
+            turso_token=getattr(config, "turso_token", "") or "",
             on_reply_sent=on_reply_sent,
             display_config=display_config,
             no_text_debounce=no_text_debounce,
@@ -243,6 +250,8 @@ class WebChannel(BaseChannel):
             on_frame=self._on_relay_frame,
         )
         await self._relay.start()
+        self._archiver.agent_id = self._agent_id()
+        await self._archiver.start()
         logger.info(
             "webchannel started: relay=%s agent=%s",
             self.relay_url,
@@ -250,6 +259,7 @@ class WebChannel(BaseChannel):
         )
 
     async def stop(self) -> None:
+        await self._archiver.stop()
         relay, self._relay = self._relay, None
         if relay is not None:
             await relay.stop()
@@ -413,7 +423,34 @@ class WebChannel(BaseChannel):
         if text.strip():
             content_parts.append(TextContent(type=ContentType.TEXT, text=text))
         files = frame.get("files")
+        # Attachment metadata for the archive (names/mime/size only, never
+        # the bytes), collected before the entries are resolved/consumed.
+        files_meta: List[Dict[str, Any]] = []
         if isinstance(files, list):
+            for entry in files:
+                if not isinstance(entry, dict):
+                    continue
+                name = entry.get("name")
+                if not name:
+                    continue
+                size: Optional[int] = None
+                raw = entry.get("data")
+                if isinstance(raw, str) and raw:
+                    try:
+                        size = len(base64.b64decode(raw))
+                    except Exception:  # noqa: BLE001 - metadata is best effort
+                        size = None
+                else:
+                    declared = entry.get("size")
+                    if isinstance(declared, int) and not isinstance(
+                        declared, bool,
+                    ):
+                        size = declared
+                files_meta.append({
+                    "name": str(name),
+                    "mime": str(entry.get("mime") or ""),
+                    "size": size,
+                })
             for entry in files:
                 part = await self._resolve_file_entry(chat, entry)
                 if part is not None:
@@ -439,6 +476,9 @@ class WebChannel(BaseChannel):
             )
             return
         enqueue(native)
+        self._archiver.archive_user(
+            chat, text, files_meta, int(time.time() * 1000),
+        )
 
     async def _resolve_file_entry(
         self, chat: str, entry: Any,
@@ -860,6 +900,9 @@ class WebChannel(BaseChannel):
                         chat, seq, [{"type": "text", "text": trailing}],
                     ),
                 )
+                self._archiver.archive_assistant(
+                    chat, trailing, int(time.time() * 1000),
+                )
         self._active_streams.discard(key)
         self._differ.reset(key)
 
@@ -868,10 +911,15 @@ class WebChannel(BaseChannel):
     ) -> None:
         chat = self._chat_for(to_handle, meta)
         body = text if isinstance(text, str) else str(text)
-        if body.strip() and not self._stream_is_active(chat):
+        counts = bool(body.strip()) and not self._stream_is_active(chat)
+        if counts:
             self._text_msg_sent.add(chat)
         parts: List[Dict[str, Any]] = [{"type": "text", "text": body}]
         await self._emit(chat, lambda seq: msg_frame(chat, seq, parts))
+        if counts:
+            self._archiver.archive_assistant(
+                chat, body, int(time.time() * 1000),
+            )
 
     async def send_content_parts(
         self, to_handle: str, parts: List[Any],
@@ -881,12 +929,23 @@ class WebChannel(BaseChannel):
             return
         chat = self._chat_for(to_handle, meta)
         serialized = [_part_to_dict(part) for part in parts]
-        if not self._stream_is_active(chat) and any(
+        counts = not self._stream_is_active(chat) and any(
             part.get("type") == "text" and (part.get("text") or "").strip()
             for part in serialized
-        ):
+        )
+        if counts:
             self._text_msg_sent.add(chat)
         await self._emit(chat, lambda seq: msg_frame(chat, seq, serialized))
+        if counts:
+            joined = "".join(
+                part.get("text") or ""
+                for part in serialized
+                if part.get("type") == "text"
+            )
+            if joined.strip():
+                self._archiver.archive_assistant(
+                    chat, joined, int(time.time() * 1000),
+                )
 
     async def send_approval_notification(
         self, *, session_id: str, user_id: str, request_id: str,

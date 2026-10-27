@@ -12,7 +12,7 @@ class WebChannelPlugin:
     """Registers the self-hosted web channel with QwenPaw."""
 
     def register(self, api: PluginApi):
-        """Register the WebChannel with its two config fields."""
+        """Register the WebChannel with its config fields."""
         try:  # package-relative when loaded as part of the plugin package
             from .channel import WebChannel
         except ImportError:  # loaded as a top-level module by the loader
@@ -41,6 +41,22 @@ class WebChannelPlugin:
                     "required": True,
                     "placeholder": "dev-agent-token",
                     "default": "dev-agent-token",
+                },
+                {
+                    "name": "turso_url",
+                    "label": "Turso DB URL",
+                    "type": "text",
+                    "required": False,
+                    "placeholder": "libsql://webchannel-chats-<org>.turso.io",
+                    "default": "",
+                },
+                {
+                    "name": "turso_token",
+                    "label": "Turso DB Token",
+                    "type": "password",
+                    "required": False,
+                    "placeholder": "",
+                    "default": "",
                 },
             ],
         )
