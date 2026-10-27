@@ -1735,7 +1735,10 @@ export default function App() {
     const first = list.find((m) => m.role === 'user' && m.text.trim());
     if (!first) return 'New chat';
     const text = first.text.trim().replace(/\s+/g, ' ');
-    return text.length > 34 ? `${text.slice(0, 34)}…` : text;
+    // Count code points, not UTF-16 units: a plain slice() can cut a surrogate
+    // pair in half and render the title as a lone replacement glyph.
+    const chars = Array.from(text);
+    return chars.length > 34 ? `${chars.slice(0, 34).join('')}…` : text;
   };
 
   const titleOf = (id: string): string => {

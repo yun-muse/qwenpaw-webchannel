@@ -2,6 +2,14 @@
    QwenPaw Studio — Editorial AI Workspace (Claude / Cursor / Linear Aesthetic)
    ========================================================================== */
 
+:root {
+  /* One UI stack for the whole app: no webfont is shipped, so every Latin and
+     CJK glyph must resolve to a real installed face (Noto/Source Han on Linux). */
+  --font-ui: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC',
+    'Noto Sans CJK SC', 'Source Han Sans SC', sans-serif;
+}
+
 :root,
 :root[data-theme='light'] {
   color-scheme: light;
@@ -144,7 +152,7 @@ body,
 
 body {
   margin: 0;
-  font: 15px/1.68 'Inter', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  font: 15px/1.68 var(--font-ui);
   color: var(--text);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
@@ -361,6 +369,10 @@ button:disabled {
   position: relative;
   display: flex;
   flex-direction: column;
+  /* Never shrink: `.chat-list` is the scroller. With the default flex-shrink:1 a
+     long list squeezes every row below one line and `overflow:hidden` then slices
+     the glyphs (descenders cut -> p reads as n, y as v). */
+  flex: 0 0 auto;
   padding: 8px 10px;
   border-radius: 9px;
   text-align: left;
@@ -386,17 +398,21 @@ button:disabled {
   align-items: center;
   gap: 8px;
   width: 100%;
+  /* ellipsis only works on the text box, never on a flex container */
+  flex: 0 0 auto;
+  min-width: 0;
   padding: 0;
+  font-family: var(--font-ui);
   font-size: 13px;
   font-weight: 450;
+  line-height: 1.5;
   color: var(--text-secondary);
   text-align: left;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .chat-title-text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
