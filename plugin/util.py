@@ -687,3 +687,80 @@ def plan_model_switch(
     if (provider, model) == (active_provider, active_model):
         return ("noop", "")
     return ("put", "")
+
+
+# ---------------------------------------------------------------------------
+# M8 -- server-side chat list & workspace prompt files
+# ---------------------------------------------------------------------------
+
+PROMPT_FILES = ("SOUL.md", "AGENTS.md", "PROFILE.md", "MEMORY.md")
+
+
+def extract_web_chats(specs, channel="web", sender_id="web-user"):
+    """Extract ``[{"chat", "title", "updated_at"}]`` from ``GET /api/chats``."""
+    if not isinstance(specs, list):
+        return []
+    prefix = f"{channel}:{sender_id}:"
+    items = []
+    for spec in specs:
+        if not isinstance(spec, dict):
+            continue
+        if spec.get("channel") != channel:
+            continue
+        session_id = spec.get("session_id")
+        if not (isinstance(session_id, str) and session_id.startswith(prefix)):
+            continue
+        chat = session_id.split(":", 2)[2]
+        if not chat:
+            continue
+        title = str(spec.get("name") or spec.get("title") or "").strip()
+        updated_at = spec.get("updated_at") or spec.get("created_at") or ""
+        items.append({
+            "chat": chat,
+            "title": title,
+            "updated_at": str(updated_at) if updated_at else "",
+        })
+    return items
+
+
+def extract_skill_items(payload):
+    """Extract ``[{"id", "name", "description"}]`` from ``/api/skills`` payload."""
+    raw = None
+    if isinstance(payload, list):
+        raw = payload
+    elif isinstance(payload, dict):
+        for key in ("skills", "items"):
+            val = payload.get(key)
+            if isinstance(val, list):
+                raw = val
+                break
+    if not isinstance(raw, list):
+        return []
+
+    items = []
+    seen = set()
+    for entry in raw:
+        if isinstance(entry, str):
+            sid = entry.strip()
+            if sid and sid not in seen:
+                seen.add(sid)
+                items.append({"id": sid, "name": sid, "description": ""})
+            continue
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("enabled") is False:
+            continue
+        sid = str(entry.get("id") or entry.get("name") or "").strip()
+        if not sid or sid in seen:
+            continue
+        seen.add(sid)
+        name = str(entry.get("name") or entry.get("label") or sid).strip() or sid
+        desc = str(entry.get("description") or entry.get("desc") or "").strip()
+        items.append({
+            "id": sid,
+            "name": name,
+            "description": desc,
+        })
+    return items
+
+

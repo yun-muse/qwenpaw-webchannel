@@ -20,6 +20,30 @@ const nextSeq = (chat) => {
 /** chat -> in-flight stream state */
 const streams = new Map();
 
+let activeModel = { provider: 'openai', model: 'gpt-4o' };
+const mockModels = [
+  { provider: 'openai', model: 'gpt-4o' },
+  { provider: 'openai', model: 'o3-mini' },
+  { provider: 'anthropic', model: 'claude-3-7-sonnet' },
+  { provider: 'local', model: 'qwen3-32b' },
+];
+const mockChats = new Map([
+  ['default', { chat: 'default', title: 'Welcome to QwenPaw Web', updated_at: new Date().toISOString() }],
+  ['demo-research', { chat: 'demo-research', title: 'Architecture & Relay Notes', updated_at: new Date(Date.now() - 3600_000).toISOString() }],
+]);
+const mockSkills = [
+  { id: 'web_search', name: 'Web Search', description: 'Search the live web and summarize citations' },
+  { id: 'python_exec', name: 'Python Sandbox', description: 'Run isolated Python snippets and inspect outputs' },
+  { id: 'file_reader', name: 'Workspace Reader', description: 'Read and analyze files in the agent workspace' },
+  { id: 'memory_recall', name: 'Memory Recall', description: 'Query long-term notes from MEMORY.md' },
+];
+const mockPrompts = {
+  'SOUL.md': '# Soul\nYou are QwenPaw, a thoughtful and concise AI pair programmer.\n',
+  'AGENTS.md': '# Agent Guidelines\n- Prefer clear, incremental solutions.\n- Verify changes with automated tests.\n',
+  'PROFILE.md': '# User Profile\n- Prefers concise technical answers with code examples.\n',
+  'MEMORY.md': '# Long-Term Memory\n- Project uses WebChannel v2 protocol over WebSocket relay.\n',
+};
+
 function send(frame) {
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     console.warn('[mock] drop (socket not open):', JSON.stringify(frame));
@@ -94,6 +118,13 @@ function onFrame(raw) {
   if (frame.t === 'msg' && typeof frame.chat === 'string') {
     if (typeof frame.text !== 'string') return;
     console.log(`[mock] ← msg chat=${frame.chat} text=${JSON.stringify(frame.text)}`);
+    if (!mockChats.has(frame.chat)) {
+      mockChats.set(frame.chat, {
+        chat: frame.chat,
+        title: frame.text.slice(0, 32) || frame.chat,
+        updated_at: new Date().toISOString(),
+      });
+    }
     streamReply(frame.chat, frame.text);
     return;
   }
@@ -103,10 +134,64 @@ function onFrame(raw) {
   }
   if (frame.t === 'peer') {
     console.log(`[mock] peer clients=${frame.clients}`);
+    send({ t: 'status', agent_name: 'QwenPaw Mock Agent', provider: activeModel.provider, model: activeModel.model });
     return;
   }
   if (frame.t === 'ready') {
     console.log(`[mock] relay ready agentOnline=${frame.agentOnline}`);
+    send({ t: 'status', agent_name: 'QwenPaw Mock Agent', provider: activeModel.provider, model: activeModel.model });
+    return;
+  }
+  if (frame.t === 'models') {
+    send({
+      t: 'models',
+      items: mockModels.map((m) => ({
+        provider: m.provider,
+        model: m.model,
+        active: m.provider === activeModel.provider && m.model === activeModel.model,
+      })),
+    });
+    return;
+  }
+  if (frame.t === 'set_model') {
+    if (typeof frame.provider === 'string' && typeof frame.model === 'string') {
+      activeModel = { provider: frame.provider, model: frame.model };
+      send({ t: 'model_changed', provider: activeModel.provider, model: activeModel.model });
+      send({ t: 'status', agent_name: 'QwenPaw Mock Agent', provider: activeModel.provider, model: activeModel.model });
+    }
+    return;
+  }
+  if (frame.t === 'chats') {
+    send({ t: 'chats', items: Array.from(mockChats.values()) });
+    return;
+  }
+  if (frame.t === 'del_chat' && typeof frame.chat === 'string') {
+    mockChats.delete(frame.chat);
+    send({ t: 'chat_deleted', chat: frame.chat });
+    return;
+  }
+  if (frame.t === 'rename_chat' && typeof frame.chat === 'string') {
+    const title = String(frame.title || '').trim();
+    const existing = mockChats.get(frame.chat) || { chat: frame.chat, updated_at: new Date().toISOString() };
+    mockChats.set(frame.chat, { ...existing, title, updated_at: new Date().toISOString() });
+    send({ t: 'chat_renamed', chat: frame.chat, title });
+    return;
+  }
+  if (frame.t === 'skills') {
+    send({ t: 'skills', items: mockSkills });
+    return;
+  }
+  if (frame.t === 'get_prompts') {
+    send({ t: 'prompts', files: { ...mockPrompts } });
+    return;
+  }
+  if (frame.t === 'set_prompt' && typeof frame.file === 'string' && typeof frame.content === 'string') {
+    if (Object.prototype.hasOwnProperty.call(mockPrompts, frame.file)) {
+      mockPrompts[frame.file] = frame.content;
+      send({ t: 'prompt_saved', file: frame.file });
+    } else {
+      send({ t: 'error', code: 'E_PROMPT', detail: 'invalid prompt file or content' });
+    }
     return;
   }
   // resume/hist/approve/deny are M2; unknown frames are ignored.

@@ -3,9 +3,33 @@
 
 import logging
 
-from qwenpaw.plugins.api import PluginApi
+try:
+    from qwenpaw.plugins.api import PluginApi
+except ImportError:  # standalone test environment without host package
+    class PluginApi:  # type: ignore[no-redef]
+        pass
 
 logger = logging.getLogger(__name__)
+
+
+def _patch_skill_whitelist() -> None:
+    """Allow skills filtered for built-in 'console' channel on 'web' channel."""
+    try:
+        import qwenpaw.agents.skill_system.registry as skill_reg
+
+        orig = getattr(skill_reg, "resolve_effective_skills", None)
+        if callable(orig) and not getattr(skill_reg, "_webchannel_patched", False):
+            def _wrapped_resolve(
+                workspace_dir, channel_name="console", *args, **kwargs
+            ):
+                if channel_name == "web":
+                    channel_name = "console"
+                return orig(workspace_dir, channel_name, *args, **kwargs)
+
+            skill_reg.resolve_effective_skills = _wrapped_resolve
+            skill_reg._webchannel_patched = True
+    except Exception:  # noqa: BLE001
+        logger.debug("webchannel: skill whitelist patch skipped", exc_info=True)
 
 
 class WebChannelPlugin:
@@ -13,6 +37,7 @@ class WebChannelPlugin:
 
     def register(self, api: PluginApi):
         """Register the WebChannel with its config fields."""
+        _patch_skill_whitelist()
         try:  # package-relative when loaded as part of the plugin package
             from .channel import WebChannel
         except ImportError:  # loaded as a top-level module by the loader
