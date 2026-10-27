@@ -32,6 +32,12 @@ export interface Frame {
   code?: string;
   /** HTTP status carried by some errors (M9 `E_EFFORT`). */
   status?: number;
+  /** `export_begin`: whole-document byte length, chunk count, sha256 (M12). */
+  bytes?: number;
+  chunks?: number;
+  sha256?: string;
+  /** `export_chunk`: 0-based chunk index; the payload rides in `data`. */
+  i?: number;
   [key: string]: unknown;
 }
 

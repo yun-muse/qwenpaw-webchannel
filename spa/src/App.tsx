@@ -20,6 +20,7 @@ import {
   Compass,
   Copy,
   Cpu,
+  Download,
   Edit3,
   FileText,
   GitCompare,
@@ -74,6 +75,13 @@ const UPLOAD_TIMEOUT_MS = 60_000;
 
 /** Raw size above which an inline v1 frame cannot fit: skip the base64 probe. */
 const INLINE_PROBE_BYTES = 180 * 1024;
+
+/** M12 — the whole Markdown document is capped at 10 MB, like an upload. */
+const MAX_EXPORT_BYTES = 10 * 1024 * 1024;
+/** M12 — no chunk can ever be larger than 96 KB, so this many is the max. */
+const MAX_EXPORT_CHUNKS = Math.ceil(MAX_EXPORT_BYTES / CHUNK_BYTES);
+/** M12 — give up when no complete export arrives (10 MB ≈ 4–5 s of chunks). */
+const EXPORT_TIMEOUT_MS = 120_000;
 
 /** Client token for the hosted relay, kept across tabs and restarts (M11). */
 const TOKEN_KEY = 'webchannel.token';
@@ -372,6 +380,17 @@ interface Upload {
   timer: ReturnType<typeof setTimeout> | null;
 }
 
+/** One in-flight `export` request; chunks are keyed by their 0-based index. */
+interface ExportJob {
+  id: string;
+  title: string;
+  bytes: number;
+  chunks: number;
+  sha256: string;
+  parts: Map<number, string>;
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
 interface ChatRuntime {
   activeId: number | null;
   endedId: number | null;
@@ -382,6 +401,7 @@ interface ChatRuntime {
 
 let nextId = 1;
 let uploadCounter = 1;
+let exportCounter = 1;
 
 function newChatId(): string {
   return `chat-${Date.now().toString(36)}`;
@@ -487,6 +507,50 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+/** Decode one `export_chunk` payload; null when it is not valid base64. */
+function bytesOfBase64(data: string): Uint8Array | null {
+  try {
+    const binary = atob(data);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `<title>-<YYYY-MM-DD>.md` — illegal file-name characters are replaced and
+ * the title is truncated by code point (never in the middle of a surrogate
+ * pair), per M12.
+ */
+function exportFileName(title: string, date: Date): string {
+  const cleaned = title
+    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ')
+    .replace(/[<>:"/\\|?*]/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const base =
+    Array.from(cleaned).slice(0, 50).join('').replace(/[. ]+$/, '') || 'chat';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${base}-${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}.md`;
+}
+
+/** Hand one Blob to the browser's download machinery. */
+function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.rel = 'noopener';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function uploadPercent(file: AttachmentChunked): number {
@@ -1181,6 +1245,8 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [nearBottom, setNearBottom] = useState(true);
   const [draggingFile, setDraggingFile] = useState(false);
+  // M12: one export at a time; the button shows "导出中…" while it runs.
+  const [exporting, setExporting] = useState(false);
 
   // Persona / Prompt Drawer state
   const [promptDrawerOpen, setPromptDrawerOpen] = useState(false);
@@ -1201,6 +1267,8 @@ export default function App() {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const answeredApprovals = useRef<Set<string>>(new Set());
   const uploadRef = useRef<Upload | null>(null);
+  // M12: the export being collected (chunks arrive as control frames).
+  const exportRef = useRef<ExportJob | null>(null);
   const modelsRequested = useRef(false);
   const modelWrapRef = useRef<HTMLDivElement | null>(null);
   const nearBottomRef = useRef(true);
@@ -1307,6 +1375,73 @@ export default function App() {
       requestUsage(chat);
     }, USAGE_REFRESH_MS);
     usageTimers.current.set(chat, timer);
+  };
+
+  // ---- M12: conversation export (chunked control frames) ----
+  const failExport = (job: ExportJob, message: string) => {
+    if (job.timer) {
+      clearTimeout(job.timer);
+      job.timer = null;
+    }
+    if (exportRef.current === job) {
+      exportRef.current = null;
+      setExporting(false);
+    }
+    showToastBriefly(message);
+  };
+
+  /** Verify the collected chunks against `export_begin`, then save the Blob. */
+  const finishExport = async (job: ExportJob) => {
+    if (!(job.chunks > 0) || !(job.bytes > 0) || !job.sha256) {
+      failExport(job, '导出失败：插件返回的文档信息不完整');
+      return;
+    }
+    const ordered: Uint8Array[] = [];
+    let total = 0;
+    for (let i = 0; i < job.chunks; i += 1) {
+      const raw = job.parts.get(i);
+      if (raw == null) {
+        failExport(job, '导出失败：分块缺失，请重试');
+        return;
+      }
+      const chunk = bytesOfBase64(raw);
+      if (!chunk) {
+        failExport(job, '导出失败：分块无法解码，请重试');
+        return;
+      }
+      ordered.push(chunk);
+      total += chunk.length;
+    }
+    if (total !== job.bytes) {
+      failExport(job, '导出校验失败：字节数不符，已丢弃');
+      return;
+    }
+    const buffer = new ArrayBuffer(total);
+    const merged = new Uint8Array(buffer);
+    let offset = 0;
+    for (const chunk of ordered) {
+      merged.set(chunk, offset);
+      offset += chunk.length;
+    }
+    let digest = '';
+    try {
+      digest = hexOf(await crypto.subtle.digest('SHA-256', buffer));
+    } catch {
+      failExport(job, '导出失败：无法计算校验值');
+      return;
+    }
+    if (digest !== job.sha256.toLowerCase()) {
+      failExport(job, '导出校验失败：内容不完整，已丢弃');
+      return;
+    }
+    if (job.timer) {
+      clearTimeout(job.timer);
+      job.timer = null;
+    }
+    saveBlob(
+      new Blob([buffer], { type: 'text/markdown;charset=utf-8' }),
+      exportFileName(job.title, new Date()),
+    );
   };
 
   const requestHist = (chat: string) => {
@@ -1499,6 +1634,8 @@ export default function App() {
       effortRetryTimers.current.clear();
       for (const timer of usageTimers.current.values()) clearTimeout(timer);
       usageTimers.current.clear();
+      const exportJob = exportRef.current;
+      if (exportJob?.timer) clearTimeout(exportJob.timer);
     },
     [],
   );
@@ -1824,6 +1961,67 @@ export default function App() {
           break;
         }
 
+        case 'export_begin': {
+          const job = exportRef.current;
+          if (!job || asString(frame.id) !== job.id) break;
+          const bytes = typeof frame.bytes === 'number' ? frame.bytes : 0;
+          const chunks = typeof frame.chunks === 'number' ? frame.chunks : 0;
+          const sha = asString(frame.sha256);
+          if (
+            !Number.isInteger(bytes) ||
+            !Number.isInteger(chunks) ||
+            bytes <= 0 ||
+            chunks <= 0 ||
+            chunks > MAX_EXPORT_CHUNKS ||
+            !sha
+          ) {
+            failExport(job, '导出失败：插件返回的文档信息无效');
+            break;
+          }
+          if (bytes > MAX_EXPORT_BYTES) {
+            failExport(job, '导出失败：文档超过 10MB');
+            break;
+          }
+          job.bytes = bytes;
+          job.chunks = chunks;
+          job.sha256 = sha;
+          job.parts.clear();
+          break;
+        }
+
+        case 'export_chunk': {
+          const job = exportRef.current;
+          if (!job || asString(frame.id) !== job.id) break;
+          const index = frame.i;
+          const payload = frame.data;
+          if (
+            typeof index !== 'number' ||
+            !Number.isInteger(index) ||
+            index < 0 ||
+            index >= job.chunks ||
+            typeof payload !== 'string'
+          ) {
+            break;
+          }
+          job.parts.set(index, payload);
+          break;
+        }
+
+        case 'export_end': {
+          const job = exportRef.current;
+          if (!job || asString(frame.id) !== job.id) break;
+          // Detach before the async verification so a duplicated end frame
+          // cannot start a second save.
+          exportRef.current = null;
+          setExporting(false);
+          if (job.timer) {
+            clearTimeout(job.timer);
+            job.timer = null;
+          }
+          void finishExport(job);
+          break;
+        }
+
         case 'resync': {
           flushNow();
           const rt = runtimeOf(chat);
@@ -1966,6 +2164,19 @@ export default function App() {
         case 'error': {
           const code = asString(frame.code) || 'E_UNKNOWN';
           const detail = asString(frame.detail);
+          // M12: an export failure is request-scoped — it must not fall
+          // through to the generic toast and must not touch the socket.
+          if (
+            (code === 'E_EXPORT' || code === 'E_TOOBIG') &&
+            exportRef.current &&
+            asString(frame.id) === exportRef.current.id
+          ) {
+            failExport(
+              exportRef.current,
+              `导出失败：${code}${detail ? ` — ${detail}` : ''}`,
+            );
+            break;
+          }
           const reqId = asString(frame.req_id);
           if (reqId) {
             updateChat(chat, (prev) =>
@@ -2114,6 +2325,36 @@ export default function App() {
   const titleOf = (id: string): string => {
     const custom = chatNames[id];
     return custom && custom.trim() ? custom : derivedTitle(id);
+  };
+
+  /** Ask the plugin for the visible chat's Markdown export (M12). */
+  const startExport = () => {
+    if (exportRef.current) return;
+    const client = clientRef.current;
+    if (!client) {
+      showToastBriefly('未连接 — 无法导出');
+      return;
+    }
+    const chat = activeChat;
+    const nonce = Math.random().toString(36).slice(2, 6);
+    const job: ExportJob = {
+      id: `export-${Date.now().toString(36)}-${exportCounter++}-${nonce}`,
+      title: titleOf(chat),
+      bytes: 0,
+      chunks: 0,
+      sha256: '',
+      parts: new Map(),
+      timer: null,
+    };
+    exportRef.current = job;
+    setExporting(true);
+    job.timer = setTimeout(
+      () => failExport(job, '导出超时：插件未返回完整文档'),
+      EXPORT_TIMEOUT_MS,
+    );
+    if (!client.send({ t: 'export', chat, id: job.id })) {
+      failExport(job, '未连接 — 无法导出');
+    }
   };
 
   const query = search.trim().toLowerCase();
@@ -2946,6 +3187,17 @@ export default function App() {
                 <span className="agent-name">{agentName || 'Agent'}</span>
               </span>
             </div>
+
+            <button
+              className="icon-btn"
+              onClick={startExport}
+              disabled={exporting}
+              title="导出当前会话为 Markdown（含思考过程与工具调用）"
+              aria-label="导出当前会话"
+            >
+              <Download size={13} />
+              <span>{exporting ? '导出中…' : '导出'}</span>
+            </button>
 
             <button
               className="icon-btn"

@@ -8,7 +8,9 @@ payload QwenPaw's manager expects, and turns streaming hooks / send calls into
 (``chat/stop``, ``chats``, ``console/upload``, ``approval/*``). Protocol v2 adds
 chunked uploads -- ``file_begin`` / ``file_chunk`` / ``file_end`` answered with
 ``file_ready`` / ``file_error`` -- whose files are staged for ten minutes and
-then referenced as ``msg.files[].ref``.
+then referenced as ``msg.files[].ref``. Protocol v6 adds ``export``, answered
+with a paced ``export_begin`` / ``export_chunk`` / ``export_end`` stream that
+carries one Markdown transcript.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ import asyncio
 import base64
 import logging
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -69,6 +72,9 @@ try:  # package-relative (tests, ``python -m plugin...``)
         end_frame,
         error_frame,
         evt_frame,
+        export_begin_frame,
+        export_chunk_frame,
+        export_end_frame,
         file_error_frame,
         file_ready_frame,
         hist_frame,
@@ -88,12 +94,15 @@ try:  # package-relative (tests, ``python -m plugin...``)
     from .turso_archive import TursoArchiver
     from .util import (
         ANSWER_STREAM_TYPE,
+        MAX_EXPORT_BYTES,
         PROMPT_FILES,
         FileTransfers,
         SessionUsageStore,
         active_llm_detail,
         active_llm_of,
         approval_owner_ok,
+        build_export_markdown,
+        chunk_utf8,
         decode_file_entry,
         effort_budget,
         effort_view_fields,
@@ -105,6 +114,7 @@ try:  # package-relative (tests, ``python -m plugin...``)
         model_items,
         pack_history,
         plan_model_switch,
+        sha256_hex,
         trailing_msg_text,
     )
 except ImportError:  # loaded as a top-level module by the plugin loader
@@ -121,6 +131,9 @@ except ImportError:  # loaded as a top-level module by the plugin loader
         end_frame,
         error_frame,
         evt_frame,
+        export_begin_frame,
+        export_chunk_frame,
+        export_end_frame,
         file_error_frame,
         file_ready_frame,
         hist_frame,
@@ -140,12 +153,15 @@ except ImportError:  # loaded as a top-level module by the plugin loader
     from turso_archive import TursoArchiver
     from util import (
         ANSWER_STREAM_TYPE,
+        MAX_EXPORT_BYTES,
         PROMPT_FILES,
         FileTransfers,
         SessionUsageStore,
         active_llm_detail,
         active_llm_of,
         approval_owner_ok,
+        build_export_markdown,
+        chunk_utf8,
         decode_file_entry,
         effort_budget,
         effort_view_fields,
@@ -157,6 +173,7 @@ except ImportError:  # loaded as a top-level module by the plugin loader
         model_items,
         pack_history,
         plan_model_switch,
+        sha256_hex,
         trailing_msg_text,
     )
 
@@ -172,6 +189,9 @@ SENDER_ID = "web-user"
 # Uploads (A4) can be up to the relay's 256 KB frame budget; give the local
 # API room to write them to the console media dir.
 _UPLOAD_TIMEOUT_S = 60.0
+# Exports are pushed back to the browser in 96 KB chunks; the hosted relay
+# allows 30 frames/s per tenant, so leave ~40 ms between chunks (M12).
+_EXPORT_CHUNK_PACE_S = 0.04
 
 # Short human-readable ``file_error.msg`` bodies, keyed by protocol code.
 _FILE_ERROR_MSG = {
@@ -500,6 +520,8 @@ class WebChannel(BaseChannel):
             await self._handle_resume(frame)
         elif kind == "hist":
             await self._handle_hist(frame)
+        elif kind == "export":
+            await self._handle_export(frame)
         elif kind in ("approve", "deny"):
             await self._handle_approval(kind, frame)
         elif kind == "stop":
@@ -1401,6 +1423,133 @@ class WebChannel(BaseChannel):
                 "webchannel: get_usage failed for chat=%s", chat, exc_info=True,
             )
         await self._send_control(usage_frame(chat, req_id=req_id, **fields))
+
+    # -- M12: conversation export (Markdown) -----------------------------
+
+    async def _chat_title(self, chat: str) -> str:
+        """Title of this chat's ``ChatSpec``, or *chat* when there is none.
+
+        The chat list is the only place the display title lives (``name`` is
+        QwenPaw's field, ``title`` the older alias). A failed lookup never
+        fails an export: the chat id is a usable title.
+        """
+        session_id = self.resolve_session_id(SENDER_ID, {"chat_id": chat})
+        status, payload = await self._api_json(
+            "GET", "/api/chats", params={"channel": self.channel},
+        )
+        if 200 <= status < 300 and isinstance(payload, list):
+            for spec in payload:
+                if not isinstance(spec, dict):
+                    continue
+                if spec.get("channel") != self.channel:
+                    continue
+                if spec.get("session_id") != session_id:
+                    continue
+                for field in ("name", "title"):
+                    value = spec.get(field)
+                    if isinstance(value, str) and value.strip():
+                        return value
+        return chat
+
+    async def _export_error(
+        self, chat: str, export_id: Optional[str], detail: str,
+    ) -> None:
+        """Send ``error{code:"E_EXPORT"}`` for a rejected export."""
+        frame = error_frame("E_EXPORT", detail)
+        frame["chat"] = chat
+        if isinstance(export_id, str) and export_id:
+            frame["id"] = export_id
+        await self._send_control(frame)
+
+    async def _handle_export(self, frame: Dict[str, Any]) -> None:
+        """Reply to ``{t:"export", chat, id}`` with a Markdown export (M12).
+
+        The document is built from the raw ``GET /api/chats/{id}`` response,
+        so message type, role, timestamp, reasoning, tool calls and
+        attachment metadata are all preserved. It is sent as paced control
+        frames (``export_begin`` / ``export_chunk`` / ``export_end``) with no
+        ``seq``: it is not ring-buffered and never replayed on ``resume``. The
+        whole document is assembled and size-checked before the first frame,
+        so an over-limit export can never arrive half-written.
+        """
+        chat = str(frame.get("chat") or "default")
+        export_id = frame.get("id")
+        if not (isinstance(export_id, str) and export_id):
+            logger.warning(
+                "webchannel: export without a usable id for chat=%s ignored",
+                chat,
+            )
+            await self._export_error(chat, None, "missing export id")
+            return
+
+        try:
+            chat_id = await self._resolve_chat_id(chat)
+            if not chat_id:
+                await self._export_error(
+                    chat, export_id,
+                    "no QwenPaw chat exists for this session yet",
+                )
+                return
+
+            history = await self._get_history(chat_id)
+            if history is None:
+                await self._export_error(
+                    chat, export_id, "session history unavailable",
+                )
+                return
+
+            title = await self._chat_title(chat)
+            exported_at = datetime.now().astimezone().replace(
+                microsecond=0,
+            ).isoformat()
+            document = build_export_markdown(
+                history, chat, title, exported_at,
+            )
+            data = document.encode("utf-8")
+            if len(data) > MAX_EXPORT_BYTES:
+                logger.warning(
+                    "webchannel: export for chat=%s id=%s is too large "
+                    "(%d bytes)",
+                    chat, export_id, len(data),
+                )
+                await self._send_control({
+                    **error_frame(
+                        "E_TOOBIG", "export exceeds the 10 MB limit",
+                    ),
+                    "chat": chat,
+                    "id": export_id,
+                })
+                return
+
+            chunks = chunk_utf8(data)
+            digest = sha256_hex(data)
+            logger.info(
+                "webchannel: chat=%s export id=%s: %d bytes, %d chunks",
+                chat, export_id, len(data), len(chunks),
+            )
+            await self._send_control(export_begin_frame(
+                chat, export_id, len(data), len(chunks), digest,
+            ))
+            for index, chunk in enumerate(chunks):
+                if index:
+                    await asyncio.sleep(_EXPORT_CHUNK_PACE_S)
+                if self._relay is None:
+                    logger.warning(
+                        "webchannel: relay went away during export id=%s",
+                        export_id,
+                    )
+                    return
+                await self._send_control(export_chunk_frame(
+                    chat, export_id, index,
+                    base64.b64encode(chunk).decode("ascii"),
+                ))
+            await self._send_control(export_end_frame(chat, export_id))
+        except Exception:  # noqa: BLE001 - a control frame never fails a chat
+            logger.warning(
+                "webchannel: export failed for chat=%s id=%s",
+                chat, export_id, exc_info=True,
+            )
+            await self._export_error(chat, export_id, "export failed")
 
     # -- M8: server-side chat list / delete / rename & workspace prompts --
 

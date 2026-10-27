@@ -1,4 +1,4 @@
-"""WebChannel frame builders/parser -- protocol/frames.md v1 (+ v2 files).
+"""WebChannel frame builders/parser -- protocol/frames.md v1 (+ v2 files, v6 export).
 
 Pure stdlib only. Frame builders return plain dicts ready for
 ``json.dumps``; the relay forwards them verbatim.
@@ -56,6 +56,9 @@ __all__ = [
     "end_frame",
     "error_frame",
     "evt_frame",
+    "export_begin_frame",
+    "export_chunk_frame",
+    "export_end_frame",
     "extract_skill_items",
     "extract_web_chats",
     "file_error_frame",
@@ -215,6 +218,52 @@ def file_error_frame(chat, transfer_id, code, msg="", seq=None):
     if seq is not None:
         frame["seq"] = seq
     return frame
+
+
+# ---------------------------------------------------------------------------
+# M12 -- conversation export (protocol/frames.md section 12)
+#
+# ``export_begin`` / ``export_chunk`` / ``export_end`` are control frames:
+# no ``seq``, never ring-buffered, never replayed on ``resume``.
+# ---------------------------------------------------------------------------
+
+
+def export_begin_frame(chat, export_id, size, chunks, sha256):
+    """Export snapshot: ``{t:"export_begin", chat, id, bytes, chunks, sha256}``.
+
+    *size* is the exact UTF-8 byte length of the whole Markdown document,
+    *chunks* the number of ``export_chunk`` frames that follow and *sha256*
+    its lower-case hex digest. Sent only after the document is complete and
+    inside the 10 MB limit, so a failed export never emits a partial stream.
+    """
+    return {
+        "t": "export_begin",
+        "chat": chat,
+        "id": export_id,
+        "bytes": size,
+        "chunks": chunks,
+        "sha256": sha256,
+    }
+
+
+def export_chunk_frame(chat, export_id, index, data):
+    """One export chunk: ``{t:"export_chunk", chat, id, i, data}``.
+
+    *data* is base64 of at most ``CHUNK_RAW_BYTES`` raw bytes; chunks are a
+    pure byte-stream split and never cut a UTF-8 code point.
+    """
+    return {
+        "t": "export_chunk",
+        "chat": chat,
+        "id": export_id,
+        "i": index,
+        "data": data,
+    }
+
+
+def export_end_frame(chat, export_id):
+    """Export finished: ``{t:"export_end", chat, id}`` (client verifies + saves)."""
+    return {"t": "export_end", "chat": chat, "id": export_id}
 
 
 def error_frame(code, detail=""):

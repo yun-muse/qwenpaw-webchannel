@@ -655,6 +655,13 @@ button:disabled {
   color: var(--text);
 }
 
+/* M12: the export button keeps its disabled look while a document streams. */
+.icon-btn:disabled:hover {
+  background: var(--card);
+  border-color: var(--line);
+  color: var(--text-secondary);
+}
+
 .status {
   display: inline-flex;
   align-items: center;

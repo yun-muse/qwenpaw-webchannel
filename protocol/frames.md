@@ -66,11 +66,15 @@ superseded generation) is not acked.
 | `msg` | `chat`, `seq?`, `parts[]` | complete message, tool result or attachment reference |
 | `approval` | `chat`, `req_id`, `tool`, `severity`, `summary` | approval request |
 | `resync` | `chat`, `reason?` | ring buffer miss; client must reload history |
+| `hist` | `chat`, `messages:[{role, text}]`, `more?`, `seq?` | reply to a `hist` request; `more:true` means another `hist` frame follows |
 | `models` | `items:[{provider, model, active}]` | **v3** reply to a `models` request; exactly one item has `active:true` when the agent's current (effective) model is known |
 | `model_changed` | `provider`, `model` | **v3** a `set_model` succeeded; this pair is now the agent's active model |
 | `status` | `agent_name`, `provider?`, `model?` | **v3** identity push, sent when the agent attaches and whenever a client joins/leaves; the header displays it |
 | `effort` | `chat`, `level`, `effective`, `budget_tokens?`, `supported?`, `kind?`, `model_key?` | **v4** session thinking state: reply to `get_effort` / `set_effort`; control frame |
 | `usage` | `chat`, `id?`, `input_total?`, `output_total?`, `context_tokens?`, `context_limit?` | **v5** session token usage: reply to `get_usage`; every numeric field is optional (absent = unknown); control frame |
+| `export_begin` | `chat`, `id`, `bytes`, `chunks`, `sha256` | **v6** export snapshot: whole-document UTF-8 byte length, chunk count, lower-case hex digest; control frame |
+| `export_chunk` | `chat`, `id`, `i`, `data` | **v6** one export chunk; `i` is 0-based, `data` is base64 of ≤96 KB raw bytes; control frame |
+| `export_end` | `chat`, `id` | **v6** all export chunks sent; the client verifies and saves; control frame |
 | `file_ready` | `chat`, `id`, `seq?` | **v2** chunked upload verified and staged; `files[]` may now use `{"ref": id}` |
 | `file_error` | `chat`, `id`, `code`, `msg?`, `seq?` | **v2** chunked upload failed; `code` ∈ `E_CHECKSUM` / `E_TOOBIG` / `E_STATE` |
 | `pong` | — | reserved; the relay answers `ping` locally in v1 |
@@ -85,8 +89,9 @@ model's thinking and MUST NOT be concatenated into it. A reply is streaming unti
 segment's `end` — an `end` for `reasoning` closes that segment only. Missing `stream_type` means
 `message` (older containers).
 
-`models`, `model_changed`, `status` and `effort` are **control frames**: they carry no `seq`,
-belong to no chat's stream, and are never ring-buffered or replayed on `resume` (§9.4, §10.3).
+`models`, `model_changed`, `status`, `effort`, `usage` and the `export_*` frames are **control
+frames**: they carry no `seq`, belong to no chat's stream, and are never ring-buffered or replayed
+on `resume` (§9.4, §10.3, §11.3, §12.4).
 
 ### 2.4 browser → container
 
@@ -96,12 +101,13 @@ belong to no chat's stream, and are never ring-buffered or replayed on `resume` 
 | `stop` | `chat` | cancel the current generation |
 | `approve` / `deny` | `chat`, `req_id` | resolve an approval |
 | `resume` | `chat`, `last_seq` | replay frames with `seq > last_seq` |
-| `hist` | `chat`, `before?`, `limit?` | request history (agent answers with `msg`/`resync` frames) |
+| `hist` | `chat`, `before?`, `limit?` | request history (agent answers with `hist` frame(s)) |
 | `models` | — | **v3** request the agent's switchable model list |
 | `set_model` | `provider`, `model` | **v3** switch the agent's active model |
 | `get_effort` | `chat` | **v4** request that chat's session thinking setting |
 | `set_effort` | `chat`, `level` | **v4** set that chat's thinking level (`default` clears the override) |
 | `get_usage` | `chat`, `id?` | **v5** request that chat's cumulative token usage and current context approximation |
+| `export` | `chat`, `id` | **v6** request a Markdown export of that chat; answered with `export_begin` / `export_chunk` / `export_end` |
 | `file_begin` | `chat`, `id`, `name`, `mime`, `size`, `chunks`, `sha256` | **v2** start a chunked upload; `chunks` is how many `file_chunk` frames follow |
 | `file_chunk` | `chat`, `id`, `i`, `data` | **v2** one chunk; `i` is 0-based, `data` is base64 of ≤96 KB raw bytes |
 | `file_end` | `chat`, `id` | **v2** client finished sending; agent answers `file_ready` or `file_error` |
@@ -195,11 +201,12 @@ Error frame: `{"t":"error","code":"...","id":"<offending frame id, if any>"}`.
 |---|---|---|
 | `E_AUTH` | bad/expired agent token or client credential | container stops reconnecting and logs; browser redirects to login |
 | `E_BUSY` | a run is already active for this chat | client shows a notice; do not resend |
-| `E_TOOBIG` | frame exceeds 256 KB | send smaller message / reject file (v1); use a chunked v2 upload (§8) for larger files |
+| `E_TOOBIG` | frame exceeds 256 KB, or an export exceeds 10 MB (§12) | send smaller message / reject file (v1); use a chunked v2 upload (§8) for larger files |
 | `E_BADFRAME` | not JSON, not an object, missing/non-string `t`, binary message | drop frame; sender may fix and retry |
 | `E_RESYNC` | resume buffer miss | client reloads history |
 | `E_MODEL` | model list unavailable, unknown provider/model, or the app rejected the switch | client shows the error; the connection is unaffected |
 | `E_EFFORT` | thinking setting unavailable, unknown level, unsupported by the current model, or the app rejected the write | client restores the last confirmed level (except a 404: the chat has no server record yet); the connection is unaffected |
+| `E_EXPORT` | export requested for a chat with no server record, or its history could not be read or rendered | client shows the error; the connection is unaffected |
 
 `E_AUTH` is enforced at the HTTP upgrade (401 before the socket opens), so it is normally not seen
 as a frame — a browser only observes a bare `close`. Because there is no close reason to read, a
@@ -474,4 +481,86 @@ ring-buffered and not replayed on `resume`. A reconnecting client re-requests `g
 visible chat. The SPA asks for it when a chat is opened/switched, after each assistant turn completes
 (debounced until the app has had time to persist that turn's metadata), after `model_changed`, and on
 every transition to `live`.
+
+## 12. Protocol v6 — conversation export (Markdown)
+
+Lets the browser download one conversation as a single Markdown document. The relay needs **no
+changes**: these are ordinary frames it forwards verbatim. The plugin builds the document from the
+same raw `ChatHistory` the app serves (`GET /api/chats/{ChatSpec.id}`), so message type, role,
+timestamp, reasoning, tool calls and attachment metadata are preserved; it is never derived from
+Turso or from a lossy `{role, text}` projection.
+
+### 12.1 Wire format
+
+Client → agent:
+
+```json
+{"t":"export","chat":"…","id":"export-1"}
+```
+
+Agent → client:
+
+```json
+{"t":"export_begin","chat":"…","id":"export-1","bytes":456789,"chunks":5,
+ "sha256":"<64 lowercase hex chars>"}
+{"t":"export_chunk","chat":"…","id":"export-1","i":0,"data":"<base64 of ≤96 KB raw bytes>"}
+{"t":"export_chunk","chat":"…","id":"export-1","i":1,"data":"…"}
+{"t":"export_end","chat":"…","id":"export-1"}
+{"t":"error","code":"E_EXPORT","chat":"…","id":"export-1","detail":"…"}
+```
+
+- `id` is the client's correlation id and is echoed on every reply. The agent→client stream is
+  broadcast to every tab, so a client MUST ignore frames carrying another `id`.
+- `bytes` is the exact UTF-8 byte length of the whole document, `chunks` the number of
+  `export_chunk` frames that follow, and `sha256` its lower-case hex digest.
+- Chunks are a **pure byte-stream split** of the document, not aligned to messages: `i` is 0-based
+  and `data` is base64 of at most 96 KB raw bytes (`CHUNK_RAW_BYTES`, the same budget as §8). A
+  boundary never splits a UTF-8 code point, so every chunk decodes on its own.
+- `export_begin` is sent only after the whole document exists and its size has been checked. A
+  rejected export never sends a partial stream: `E_EXPORT` (no server-side chat, unreadable history,
+  render failure) or `E_TOOBIG` (over 10 MB) arrives instead and nothing else follows.
+- The client verifies the reassembled byte length and sha256 against `export_begin`; a mismatch is
+  discarded and reported to the user, never saved.
+- Interrupted exports are not resumed: reconnect and request a fresh `export` with a new `id`.
+
+### 12.2 Document rules
+
+The header names the chat title (`ChatSpec.name`/`title`, else the chat id), the export time
+(ISO-8601), the number of exported messages and one basis statement: *基于 QwenPaw 会话历史导出；
+上下文若已被后端压缩，早期轮次以历史接口返回为准；思考过程以折叠形式附后（若包含）；附件仅记录
+文件名等元信息，不含附件内容。*
+
+Every `Message` keeps its type:
+
+- `MESSAGE` — a `### <role> · <metadata.timestamp>` heading followed by its text and any
+  `[附件: name]` lines.
+- `REASONING` — a collapsible `<details><summary>思考过程</summary>…</details>` block.
+- `PLUGIN_CALL` / `PLUGIN_CALL_OUTPUT` — compact blocks: the tool name on one line, arguments/output
+  in a fenced code block.
+- Attachments are metadata only: the bare `filename` (or the last path segment of a URL, or
+  `内嵌附件` for a data URL). Absolute hosted paths and payload bytes never appear.
+
+Message text and reasoning are never truncated. Tool output is the one oversized field and is cut at
+8000 characters with a trailing `…（输出过长，已截断；原始 N 个字符）` note. Titles are collapsed to
+one line (control characters become spaces) and truncated by code point at 120, so a title cannot
+inject headings or break the document. An empty conversation exports its header alone.
+
+### 12.3 Limits and pacing
+
+- Whole document ≤ **10 MB**, the same ceiling as a chunked upload. The check happens before
+  `export_begin`; going over is `E_TOOBIG`.
+- One `export_chunk` carries at most 96 KB raw bytes (~128 KB base64), well inside the 256 KB frame
+  limit.
+- The agent paces chunks ~40 ms apart (≈25 frames/s), leaving room for streaming and heartbeat
+  traffic in the shared 30 frames/s tenant bucket (§5).
+- A successful export produces exactly `export_begin`, `chunks` × `export_chunk`, `export_end`.
+  Errors use the generic `error` frame with `code:"E_EXPORT"` (or `E_TOOBIG`), always carrying
+  `chat` and echoing `id`.
+
+### 12.4 Control frames
+
+`export_begin` / `export_chunk` / `export_end` are **control frames**: they carry no `seq`, are not
+ring-buffered and are not replayed on `resume`. A reconnecting client requests the export again
+rather than expecting chunks in the replay. They must never go through the `seq` path — one export
+would otherwise evict most of the 400-frame ring buffer.
 

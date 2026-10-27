@@ -12,6 +12,7 @@ import math
 import os
 import threading
 from collections import deque
+from urllib.parse import urlsplit
 
 # Protocol §2.4 ``hist`` frames carry at most the last 50 messages unless the
 # client asks for another count.
@@ -1274,5 +1275,377 @@ class SessionUsageStore:
                 self._cache.pop(path, None)
         while len(self._cache) > self._MAX_ENTRIES:
             self._cache.pop(next(iter(self._cache)))
+
+
+# ---------------------------------------------------------------------------
+# M12 -- conversation export (Markdown snapshot)
+# ---------------------------------------------------------------------------
+
+# One export may be up to the same 10 MB ceiling as a chunked upload; the
+# plugin checks the finished document before the first frame leaves.
+MAX_EXPORT_BYTES = MAX_FILE_BYTES
+# Titles are single-line and capped by code point, so a hostile chat name
+# cannot inject document structure or flood the header.
+EXPORT_TITLE_MAX_CHARS = 120
+# Tool output is the one field that may be megabytes long; the transcript
+# stays readable by cutting it. Message text and reasoning are never cut.
+EXPORT_TOOL_OUTPUT_MAX_CHARS = 8000
+# One line stating what the document is (and is not) based on.
+EXPORT_BASIS = (
+    "基于 QwenPaw 会话历史导出；上下文若已被后端压缩，早期轮次以历史接口返回为准；"
+    "思考过程以折叠形式附后（若包含）；附件仅记录文件名等元信息，不含附件内容。"
+)
+
+_EXPORT_ROLE_LABELS = {
+    "user": "用户",
+    "assistant": "助手",
+    "system": "系统",
+    "tool": "工具",
+}
+_ATTACHMENT_TYPES = ("file", "image", "audio", "video", "attachment")
+_ATTACHMENT_URL_FIELDS = ("file_url", "image_url", "video_url", "audio_url")
+
+
+def _one_line(value):
+    """Collapse *value* to one line without control characters.
+
+    Newlines, tabs, NULs and the Unicode line separators all become spaces;
+    runs of whitespace collapse. Used for anything that is spliced into a
+    heading or an attachment line (titles, timestamps, file names).
+    """
+    if not isinstance(value, str):
+        return ""
+    chars = []
+    for char in value:
+        code = ord(char)
+        if code < 0x20 or 0x7F <= code <= 0x9F or char in ("\u2028", "\u2029"):
+            chars.append(" ")
+        else:
+            chars.append(char)
+    return " ".join("".join(chars).split())
+
+
+def safe_export_title(value, fallback=""):
+    """Single-line title for the document header, or *fallback*.
+
+    Control characters (including CR/LF) are replaced before the title is
+    truncated by Unicode code point, so a title can neither break the Markdown
+    structure nor end in the middle of a surrogate pair.
+    """
+    text = _one_line(value)
+    if not text:
+        text = _one_line(fallback)
+    if not text:
+        return ""
+    if len(text) > EXPORT_TITLE_MAX_CHARS:
+        return text[:EXPORT_TITLE_MAX_CHARS] + "…"
+    return text
+
+
+def _export_label(value, limit=200):
+    """One safe, bounded label for a file/attachment line."""
+    text = _one_line(value).replace("[", "(").replace("]", ")")
+    if len(text) > limit:
+        return text[:limit] + "…"
+    return text
+
+
+def _part_type(part):
+    """Lower-case content-part discriminator (enum-safe)."""
+    raw = part.get("type")
+    raw = getattr(raw, "value", raw)
+    text = str(raw or "").strip()
+    if "." in text:
+        text = text.rsplit(".", 1)[-1]
+    return text.lower()
+
+
+def _message_type(message):
+    """Upper-case ``Message.type`` (``MESSAGE`` unless absent)."""
+    raw = message.get("type")
+    raw = getattr(raw, "value", raw)
+    if raw is None:
+        return "MESSAGE"
+    text = str(raw).strip()
+    if "." in text:
+        text = text.rsplit(".", 1)[-1]
+    return text.upper() or "MESSAGE"
+
+
+def _message_role(message):
+    raw = message.get("role")
+    raw = getattr(raw, "value", raw)
+    return _one_line(str(raw or "")).lower()
+
+
+def _message_timestamp(message):
+    metadata = message.get("metadata")
+    if not isinstance(metadata, dict):
+        return ""
+    return _one_line(metadata.get("timestamp"))
+
+
+def _fenced(text, lang=""):
+    """Fence *text* with a backtick run longer than anything inside it."""
+    fence = "```"
+    while fence in text:
+        fence += "`"
+    return "%s%s\n%s\n%s" % (fence, lang, text, fence)
+
+
+def _tool_name(data):
+    name = _one_line(data.get("name")).replace("`", "'")
+    return (name or "工具")[:80]
+
+
+def _json_text(value):
+    """String form of a tool argument/output value."""
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return ""
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _render_tool_call(data):
+    body = _json_text(data.get("arguments")) or "{}"
+    return "**工具调用** `%s`\n\n%s" % (
+        _tool_name(data), _fenced(body, "json"),
+    )
+
+
+def _render_tool_output(data):
+    body = _json_text(data.get("output"))
+    original = len(body)
+    truncated = original > EXPORT_TOOL_OUTPUT_MAX_CHARS
+    if truncated:
+        body = body[:EXPORT_TOOL_OUTPUT_MAX_CHARS]
+    block = "**工具结果** `%s`\n\n%s" % (
+        _tool_name(data), _fenced(body or "（无输出）"),
+    )
+    if truncated:
+        block += "\n\n…（输出过长，已截断；原始 %d 个字符）" % original
+    return block
+
+
+def _folded_reasoning(text):
+    """Collapsible thinking block; Markdown inside a raw HTML block."""
+    return "<details>\n<summary>思考过程</summary>\n\n%s\n\n</details>" % text
+
+
+def _is_attachment(part):
+    if _part_type(part) in _ATTACHMENT_TYPES:
+        return True
+    filename = part.get("filename")
+    if isinstance(filename, str) and filename.strip():
+        return True
+    for field in _ATTACHMENT_URL_FIELDS:
+        if isinstance(part.get(field), str) and part.get(field):
+            return True
+    return False
+
+
+def _attachment_name(part):
+    """Bare file name of an attachment part (never a hosted absolute path)."""
+    for field in ("filename", "name"):
+        value = part.get(field)
+        if isinstance(value, str) and value.strip():
+            # A "filename" that is really a path still loses its directories.
+            name = value.strip().replace("\\", "/").rsplit("/", 1)[-1]
+            return _export_label(name)
+    for field in _ATTACHMENT_URL_FIELDS + ("data",):
+        value = part.get(field)
+        if not (isinstance(value, str) and value):
+            continue
+        if value.startswith("data:"):
+            return "内嵌附件"
+        try:
+            path = urlsplit(value).path
+        except ValueError:
+            path = value
+        name = path.rstrip("/").replace("\\", "/").rsplit("/", 1)[-1]
+        if name:
+            return _export_label(name)
+    return "附件"
+
+
+def _content_blocks(message, message_type):
+    """Markdown blocks of one Message's content list, in order."""
+    content = message.get("content")
+    if isinstance(content, str):
+        content = [{"type": "text", "text": content}]
+    if not isinstance(content, list):
+        return []
+
+    blocks = []
+    for part in content:
+        if isinstance(part, str):
+            if part.strip():
+                blocks.append(part)
+            continue
+        if not isinstance(part, dict):
+            continue
+
+        part_type = _part_type(part)
+        data = part.get("data")
+
+        if part_type == "text":
+            text = part.get("text")
+            if isinstance(text, str) and text.strip():
+                blocks.append(text)
+        elif part_type == "thinking":
+            text = part.get("thinking")
+            if isinstance(text, str) and text.strip():
+                blocks.append(_folded_reasoning(text))
+        elif part_type == "data" and isinstance(data, dict):
+            if message_type == "PLUGIN_CALL_OUTPUT" or (
+                "output" in data and "arguments" not in data
+            ):
+                blocks.append(_render_tool_output(data))
+            elif message_type == "PLUGIN_CALL" or "arguments" in data:
+                blocks.append(_render_tool_call(data))
+        elif part_type in ("function_call", "tool_call", "tool_use"):
+            blocks.append(_render_tool_call(part))
+        elif part_type in (
+            "function_call_output", "tool_result", "tool_output",
+        ):
+            blocks.append(_render_tool_output(part))
+        elif _is_attachment(part):
+            blocks.append("[附件: %s]" % _attachment_name(part))
+        else:
+            text = part.get("text")
+            if isinstance(text, str) and text.strip():
+                blocks.append(text)
+    return blocks
+
+
+def _reasoning_text(message):
+    """Concatenated thinking text of a REASONING message."""
+    content = message.get("content")
+    if isinstance(content, str):
+        return content.strip()
+    if not isinstance(content, list):
+        return ""
+    texts = []
+    for part in content:
+        if isinstance(part, str):
+            if part.strip():
+                texts.append(part)
+            continue
+        if not isinstance(part, dict):
+            continue
+        part_type = _part_type(part)
+        if part_type not in ("text", "thinking"):
+            continue
+        text = part.get("text") if part_type == "text" else part.get("thinking")
+        if isinstance(text, str) and text.strip():
+            texts.append(text)
+    return "\n\n".join(texts)
+
+
+def _render_message(message):
+    """One message as Markdown, or "" when it carries nothing to export."""
+    message_type = _message_type(message)
+
+    if message_type == "REASONING":
+        text = _reasoning_text(message)
+        return _folded_reasoning(text) if text else ""
+
+    blocks = _content_blocks(message, message_type)
+    if not blocks:
+        return ""
+    if message_type in ("PLUGIN_CALL", "PLUGIN_CALL_OUTPUT"):
+        return "\n\n".join(blocks)
+
+    role = _message_role(message)
+    heading = "### %s" % _EXPORT_ROLE_LABELS.get(role, "消息")
+    timestamp = _message_timestamp(message)
+    if timestamp:
+        heading += " · %s" % timestamp
+    return "%s\n\n%s" % (heading, "\n\n".join(blocks))
+
+
+def build_export_markdown(history, chat, title, exported_at):
+    """Render a ``ChatHistory`` response as the export Markdown document.
+
+    The header names the chat, the export time, the number of rendered
+    messages and the one-line basis statement. Messages keep their original
+    order and type: ``MESSAGE`` becomes a role heading with body text,
+    ``REASONING`` a ``<details>`` block, ``PLUGIN_CALL`` /
+    ``PLUGIN_CALL_OUTPUT`` compact tool blocks, and attachments an
+    ``[附件: name]`` metadata line. An empty conversation yields the header
+    only.
+    """
+    raw_messages = history.get("messages") if isinstance(history, dict) else None
+    if not isinstance(raw_messages, list):
+        raw_messages = []
+
+    blocks = []
+    for message in raw_messages:
+        if not isinstance(message, dict):
+            continue
+        block = _render_message(message)
+        if block:
+            blocks.append(block)
+
+    title_text = (
+        safe_export_title(title)
+        or safe_export_title(chat)
+        or "会话"
+    )
+    header = "\n".join((
+        "# %s" % title_text,
+        "",
+        "- 导出时间：%s" % (_one_line(exported_at) or "未知"),
+        "- 消息条数：%d" % len(blocks),
+        "- 导出口径：%s" % EXPORT_BASIS,
+    ))
+    return "\n\n".join([header, *blocks]) + "\n"
+
+
+def chunk_utf8(data, size=CHUNK_RAW_BYTES):
+    """Split *data* into ``size``-byte chunks without splitting a code point.
+
+    This is a pure byte-stream split (not aligned to messages). When a cut
+    would land inside a multi-byte UTF-8 sequence, the boundary backs up to
+    the start of that code point, so every chunk decodes on its own and the
+    concatenation is byte-identical to *data*.
+    """
+    if isinstance(data, str):
+        data = data.encode("utf-8")
+    if not isinstance(data, (bytes, bytearray)):
+        return []
+    data = bytes(data)
+    if not (_is_int(size) and size > 0):
+        size = CHUNK_RAW_BYTES
+    if not data:
+        return []
+
+    chunks = []
+    start = 0
+    total = len(data)
+    while start < total:
+        end = min(start + size, total)
+        if end < total:
+            # 0b10xxxxxx is a continuation byte: move back to the code point.
+            while end > start and (data[end] & 0xC0) == 0x80:
+                end -= 1
+            if end == start:
+                # A single sequence longer than *size* (impossible at 96 KB);
+                # four bytes always cover one UTF-8 code point.
+                end = min(start + 4, total)
+        chunks.append(data[start:end])
+        start = end
+    return chunks
+
+
+def sha256_hex(data):
+    """Lower-case hex sha256 of *data* (``str`` inputs are UTF-8 encoded)."""
+    if isinstance(data, str):
+        data = data.encode("utf-8")
+    return hashlib.sha256(bytes(data)).hexdigest()
 
 
