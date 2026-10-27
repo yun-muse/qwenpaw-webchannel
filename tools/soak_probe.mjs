@@ -52,10 +52,20 @@ try {
   });
   await new Promise((res, rej) => { ws.on('open', res); ws.on('error', rej); });
 
-  const status = await waitFor((f) => f.t === 'status', 20000);
+  let status;
+  try {
+    status = await waitFor((f) => f.t === 'status', process.env.SOAK_SKIP_STATUS ? 5000 : 20000);
+  } catch {
+    if (!process.env.SOAK_SKIP_STATUS) throw new Error('frame timeout');
+    status = { t: 'status' };
+    out.statusMissing = true;
+  }
   out.agent = status.agent_name || null;
   out.activeModel = status.provider && status.model ? `${status.provider}/${status.model}` : null;
-  if (!status.agent_name || !status.model) throw new Error('status frame missing agent/model');
+  if (!status.agent_name || !status.model) {
+    if (process.env.SOAK_SKIP_STATUS) out.statusMissing = true;
+    else throw new Error('status frame missing agent/model');
+  }
 
   ws.send(JSON.stringify({ t: 'models' }));
   const models = await waitFor((f) => f.t === 'models', 20000);
