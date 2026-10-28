@@ -83,6 +83,11 @@ const MAX_EXPORT_CHUNKS = Math.ceil(MAX_EXPORT_BYTES / CHUNK_BYTES);
 /** M12 — give up when no complete export arrives (10 MB ≈ 4–5 s of chunks). */
 const EXPORT_TIMEOUT_MS = 120_000;
 
+/** M13 — wait this long after the last keystroke before asking the plugin. */
+const SEARCH_DEBOUNCE_MS = 300;
+/** M13 — give up when the archive does not answer (plugin + Turso timeout). */
+const SEARCH_TIMEOUT_MS = 15_000;
+
 /** Client token for the hosted relay, kept across tabs and restarts (M11). */
 const TOKEN_KEY = 'webchannel.token';
 /** Expiry of TOKEN_KEY (Unix seconds, as answered by `POST /api/login`). */
@@ -391,6 +396,26 @@ interface ExportJob {
   timer: ReturnType<typeof setTimeout> | null;
 }
 
+/** One archived message that matched a search (M13). */
+interface SearchHit {
+  chat: string;
+  title: string;
+  role: string;
+  snippet: string;
+  /** Match offset/length inside `snippet`, in UTF-16 code units (JS slices). */
+  matchStart: number;
+  matchLen: number;
+  ts: number | null;
+}
+
+/** One in-flight `search` request; a newer query supersedes it. */
+interface SearchJob {
+  id: string;
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
+type SearchState = 'idle' | 'loading' | 'done' | 'unavailable';
+
 interface ChatRuntime {
   activeId: number | null;
   endedId: number | null;
@@ -402,6 +427,7 @@ interface ChatRuntime {
 let nextId = 1;
 let uploadCounter = 1;
 let exportCounter = 1;
+let searchCounter = 1;
 
 function newChatId(): string {
   return `chat-${Date.now().toString(36)}`;
@@ -654,6 +680,57 @@ function historyMessages(raw: unknown): HistoryMessage[] {
     out.push({ role, text: typeof record.text === 'string' ? record.text : '' });
   }
   return out;
+}
+
+/** Parse one `search_results` payload; malformed rows are dropped (M13). */
+function searchHitsOf(raw: unknown): SearchHit[] {
+  if (!Array.isArray(raw)) return [];
+  const out: SearchHit[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const record = entry as {
+      chat?: unknown;
+      title?: unknown;
+      role?: unknown;
+      snippet?: unknown;
+      match_start?: unknown;
+      match_len?: unknown;
+      ts?: unknown;
+    };
+    const chat = asString(record.chat);
+    if (!chat) continue;
+    const matchStart =
+      typeof record.match_start === 'number' && Number.isInteger(record.match_start)
+        ? record.match_start
+        : -1;
+    const matchLen =
+      typeof record.match_len === 'number' && Number.isInteger(record.match_len)
+        ? record.match_len
+        : 0;
+    out.push({
+      chat,
+      title: asString(record.title),
+      role: asString(record.role),
+      snippet: asString(record.snippet),
+      matchStart,
+      matchLen,
+      ts: typeof record.ts === 'number' && Number.isFinite(record.ts) ? record.ts : null,
+    });
+  }
+  return out;
+}
+
+/** Split a hit snippet on its match; slices are UTF-16 units, like the plugin. */
+function snippetParts(hit: SearchHit): { before: string; match: string; after: string } {
+  const { snippet, matchStart, matchLen } = hit;
+  if (matchStart < 0 || matchLen <= 0 || matchStart + matchLen > snippet.length) {
+    return { before: snippet, match: '', after: '' };
+  }
+  return {
+    before: snippet.slice(0, matchStart),
+    match: snippet.slice(matchStart, matchStart + matchLen),
+    after: snippet.slice(matchStart + matchLen),
+  };
 }
 
 function renderMarkdown(text: string): string {
@@ -1238,6 +1315,10 @@ export default function App() {
   // M11: last `usage` frame per chat (control frame; re-requested on demand).
   const [usageByChat, setUsageByChat] = useState<Record<string, ChatUsage>>({});
   const [search, setSearch] = useState('');
+  // M13: server-side full-text hits for the search box (the local title
+  // filter below keeps working on its own).
+  const [hits, setHits] = useState<SearchHit[]>([]);
+  const [searchState, setSearchState] = useState<SearchState>('idle');
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [helpOpen, setHelpOpen] = useState(false);
@@ -1269,6 +1350,8 @@ export default function App() {
   const uploadRef = useRef<Upload | null>(null);
   // M12: the export being collected (chunks arrive as control frames).
   const exportRef = useRef<ExportJob | null>(null);
+  // M13: the archive search in flight (debounce is local to its effect).
+  const searchRef = useRef<SearchJob | null>(null);
   const modelsRequested = useRef(false);
   const modelWrapRef = useRef<HTMLDivElement | null>(null);
   const nearBottomRef = useRef(true);
@@ -1627,6 +1710,50 @@ export default function App() {
     storageSet(EFFORT_KEY, JSON.stringify(effortLevels));
   }, [effortLevels]);
 
+  useEffect(() => {
+    // M13: every keystroke invalidates the previous search — its timer, its
+    // request id and the hits it produced. A non-empty query is then debounced
+    // and sent once; `searchRef` is the only thing onFrame trusts.
+    const q = search.trim();
+    const previous = searchRef.current;
+    if (previous) {
+      if (previous.timer) clearTimeout(previous.timer);
+      searchRef.current = null;
+    }
+    setHits([]);
+    setSearchState('idle');
+    if (!q) return;
+
+    const debounce = setTimeout(() => {
+      const client = clientRef.current;
+      if (!client) {
+        setSearchState('unavailable');
+        return;
+      }
+      const id = `search-${Date.now().toString(36)}-${searchCounter++}-${Math.random()
+        .toString(36)
+        .slice(2, 6)}`;
+      const job: SearchJob = { id, timer: null };
+      searchRef.current = job;
+      setSearchState('loading');
+      job.timer = setTimeout(() => {
+        if (searchRef.current !== job) return;
+        searchRef.current = null;
+        setSearchState('unavailable');
+      }, SEARCH_TIMEOUT_MS);
+      if (!client.send({ t: 'search', id, q })) {
+        if (searchRef.current === job) {
+          if (job.timer) clearTimeout(job.timer);
+          job.timer = null;
+          searchRef.current = null;
+        }
+        setSearchState('unavailable');
+      }
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => clearTimeout(debounce);
+  }, [search]);
+
   useEffect(
     () => () => {
       if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -1636,6 +1763,9 @@ export default function App() {
       usageTimers.current.clear();
       const exportJob = exportRef.current;
       if (exportJob?.timer) clearTimeout(exportJob.timer);
+      const searchJob = searchRef.current;
+      if (searchJob?.timer) clearTimeout(searchJob.timer);
+      searchRef.current = null;
     },
     [],
   );
@@ -2083,6 +2213,21 @@ export default function App() {
           break;
         }
 
+        case 'search_results': {
+          // Only the request we are still waiting for may fill the hits area;
+          // a late reply for a superseded query is dropped.
+          const job = searchRef.current;
+          if (!job || asString(frame.id) !== job.id) break;
+          if (job.timer) {
+            clearTimeout(job.timer);
+            job.timer = null;
+          }
+          searchRef.current = null;
+          setHits(searchHitsOf(frame.items));
+          setSearchState('done');
+          break;
+        }
+
         case 'effort': {
           const level = asEffortLevel(frame.level);
           if (!level) break;
@@ -2164,6 +2309,19 @@ export default function App() {
         case 'error': {
           const code = asString(frame.code) || 'E_UNKNOWN';
           const detail = asString(frame.detail);
+          // M13: a search failure is request-scoped too — it belongs in the
+          // hits area, not in the generic toast.
+          if (code === 'E_SEARCH') {
+            const job = searchRef.current;
+            if (job && asString(frame.id) === job.id) {
+              if (job.timer) clearTimeout(job.timer);
+              job.timer = null;
+              searchRef.current = null;
+              setHits([]);
+              setSearchState('unavailable');
+            }
+            break;
+          }
           // M12: an export failure is request-scoped — it must not fall
           // through to the generic toast and must not touch the socket.
           if (
@@ -2540,6 +2698,20 @@ export default function App() {
     setComposerError(null);
     setAttachment(null);
     maybeRequestHist(id);
+  };
+
+  /** Hit title: local rename → archived title → the chat id itself. */
+  const hitTitle = (hit: SearchHit): string => {
+    const custom = chatNames[hit.chat];
+    if (custom && custom.trim()) return custom;
+    if (hit.title.trim()) return hit.title;
+    return hit.chat;
+  };
+
+  /** Open a hit's chat, adopting it from the archive when it is not local. */
+  const openSearchHit = (hit: SearchHit) => {
+    if (!chatIds.includes(hit.chat)) ensureChat(hit.chat);
+    selectChat(hit.chat);
   };
 
   const newChat = () => {
@@ -3030,8 +3202,8 @@ export default function App() {
             className="chat-search"
             type="search"
             value={search}
-            placeholder="搜索会话…"
-            aria-label="搜索会话"
+            placeholder="搜索会话或正文…"
+            aria-label="搜索会话与正文"
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
@@ -3110,6 +3282,46 @@ export default function App() {
             </div>
           ))}
         </nav>
+
+        {query ? (
+          <section className="search-hits" aria-label="正文命中">
+            <div className="search-hits-note">搜索范围为已归档的历史，未归档的对话搜不到</div>
+            {searchState === 'loading' ? <div className="search-hits-status">搜索中…</div> : null}
+            {searchState === 'unavailable' ? (
+              <div className="search-hits-status">搜索暂不可用（归档未配置或服务异常）</div>
+            ) : null}
+            {searchState === 'done' && hits.length === 0 ? (
+              <div className="search-hits-status">无正文命中</div>
+            ) : null}
+            {hits.map((hit, index) => {
+              const parts = snippetParts(hit);
+              const archivedOnly = !chatIds.includes(hit.chat);
+              return (
+                <button
+                  key={`${hit.chat}-${hit.ts ?? 0}-${index}`}
+                  type="button"
+                  className="search-hit"
+                  onClick={() => openSearchHit(hit)}
+                  title={hitTitle(hit)}
+                >
+                  <span className="search-hit-title">
+                    <span className="search-hit-title-text">{hitTitle(hit)}</span>
+                    {archivedOnly ? <span className="search-hit-badge">仅归档</span> : null}
+                  </span>
+                  <span className="search-hit-meta">
+                    {hit.role === 'user' ? '我' : '助手'}
+                    {hit.ts != null ? ` · ${clockOf(hit.ts)}` : ''}
+                  </span>
+                  <span className="search-hit-snippet">
+                    {parts.before}
+                    {parts.match ? <mark>{parts.match}</mark> : null}
+                    {parts.after}
+                  </span>
+                </button>
+              );
+            })}
+          </section>
+        ) : null}
 
         <div className="sidebar-foot">
           {!LOGIN_REQUIRED ? (

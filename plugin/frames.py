@@ -1,4 +1,4 @@
-"""WebChannel frame builders/parser -- protocol/frames.md v1 (+ v2 files, v6 export).
+"""WebChannel frame builders/parser -- protocol/frames.md v1 (+ v2 files, v6 export, v7 search).
 
 Pure stdlib only. Frame builders return plain dicts ready for
 ``json.dumps``; the relay forwards them verbatim.
@@ -71,6 +71,7 @@ __all__ = [
     "prompt_saved_frame",
     "prompts_frame",
     "resync_frame",
+    "search_results_frame",
     "skills_frame",
     "start_frame",
     "status_frame",
@@ -408,6 +409,24 @@ def usage_frame(
         if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
             frame[key] = value
     return frame
+
+
+def search_results_frame(req_id, query, items, total):
+    """Archive search reply: ``{t:"search_results", id, q, items, total}`` (M13).
+
+    ``id`` echoes the requesting ``search`` frame's envelope id (the same
+    correlation field the export/effort replies use), ``q`` the normalised
+    query the hits were found for, ``items`` the page of hits and ``total``
+    the overall match count. Like the other control frames this one carries
+    no ``seq`` (see protocol/frames.md §13).
+    """
+    return {
+        "t": "search_results",
+        "id": req_id,
+        "q": query,
+        "items": items,
+        "total": total,
+    }
 
 
 def parse_inbound(raw):

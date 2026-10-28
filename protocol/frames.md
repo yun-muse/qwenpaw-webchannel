@@ -75,6 +75,7 @@ superseded generation) is not acked.
 | `export_begin` | `chat`, `id`, `bytes`, `chunks`, `sha256` | **v6** export snapshot: whole-document UTF-8 byte length, chunk count, lower-case hex digest; control frame |
 | `export_chunk` | `chat`, `id`, `i`, `data` | **v6** one export chunk; `i` is 0-based, `data` is base64 of ≤96 KB raw bytes; control frame |
 | `export_end` | `chat`, `id` | **v6** all export chunks sent; the client verifies and saves; control frame |
+| `search_results` | `id`, `q`, `items:[{chat, title, role, snippet, match_start, match_len, ts}]`, `total` | **v7** archive full-text search reply to `search`; control frame |
 | `file_ready` | `chat`, `id`, `seq?` | **v2** chunked upload verified and staged; `files[]` may now use `{"ref": id}` |
 | `file_error` | `chat`, `id`, `code`, `msg?`, `seq?` | **v2** chunked upload failed; `code` ∈ `E_CHECKSUM` / `E_TOOBIG` / `E_STATE` |
 | `pong` | — | reserved; the relay answers `ping` locally in v1 |
@@ -89,9 +90,9 @@ model's thinking and MUST NOT be concatenated into it. A reply is streaming unti
 segment's `end` — an `end` for `reasoning` closes that segment only. Missing `stream_type` means
 `message` (older containers).
 
-`models`, `model_changed`, `status`, `effort`, `usage` and the `export_*` frames are **control
-frames**: they carry no `seq`, belong to no chat's stream, and are never ring-buffered or replayed
-on `resume` (§9.4, §10.3, §11.3, §12.4).
+`models`, `model_changed`, `status`, `effort`, `usage`, the `export_*` frames and `search_results`
+are **control frames**: they carry no `seq`, belong to no chat's stream, and are never ring-buffered
+or replayed on `resume` (§9.4, §10.3, §11.3, §12.4, §13.4).
 
 ### 2.4 browser → container
 
@@ -108,6 +109,7 @@ on `resume` (§9.4, §10.3, §11.3, §12.4).
 | `set_effort` | `chat`, `level` | **v4** set that chat's thinking level (`default` clears the override) |
 | `get_usage` | `chat`, `id?` | **v5** request that chat's cumulative token usage and current context approximation |
 | `export` | `chat`, `id` | **v6** request a Markdown export of that chat; answered with `export_begin` / `export_chunk` / `export_end` |
+| `search` | `id`, `q`, `limit?` | **v7** full-text search over the archive; answered with `search_results` or `error{code:"E_SEARCH"}` |
 | `file_begin` | `chat`, `id`, `name`, `mime`, `size`, `chunks`, `sha256` | **v2** start a chunked upload; `chunks` is how many `file_chunk` frames follow |
 | `file_chunk` | `chat`, `id`, `i`, `data` | **v2** one chunk; `i` is 0-based, `data` is base64 of ≤96 KB raw bytes |
 | `file_end` | `chat`, `id` | **v2** client finished sending; agent answers `file_ready` or `file_error` |
@@ -207,6 +209,7 @@ Error frame: `{"t":"error","code":"...","id":"<offending frame id, if any>"}`.
 | `E_MODEL` | model list unavailable, unknown provider/model, or the app rejected the switch | client shows the error; the connection is unaffected |
 | `E_EFFORT` | thinking setting unavailable, unknown level, unsupported by the current model, or the app rejected the write | client restores the last confirmed level (except a 404: the chat has no server record yet); the connection is unaffected |
 | `E_EXPORT` | export requested for a chat with no server record, or its history could not be read or rendered | client shows the error; the connection is unaffected |
+| `E_SEARCH` | search with an empty query, an archive that is not configured, or a Turso request that failed | client shows "search unavailable"; the connection is unaffected |
 
 `E_AUTH` is enforced at the HTTP upgrade (401 before the socket opens), so it is normally not seen
 as a frame — a browser only observes a bare `close`. Because there is no close reason to read, a
@@ -563,4 +566,70 @@ inject headings or break the document. An empty conversation exports its header 
 ring-buffered and are not replayed on `resume`. A reconnecting client requests the export again
 rather than expecting chunks in the replay. They must never go through the `seq` path — one export
 would otherwise evict most of the 400-frame ring buffer.
+
+## 13. Protocol v7 — archive full-text search
+
+Lets the browser search the **archived** history of every conversation by message body. The relay
+needs **no changes**: these are ordinary frames it forwards verbatim. The plugin answers from its
+Turso archive (`messages` joined with `chats`, parameterised `LIKE`), so it finds turns that are no
+longer in the live session store, and it never touches the archive schema.
+
+### 13.1 Wire format
+
+Client → agent:
+
+```json
+{"t":"search","id":"search-1","q":"上下文","limit":20}
+```
+
+Agent → client:
+
+```json
+{"t":"search_results","id":"search-1","q":"上下文","total":3,
+ "items":[{"chat":"chat-abc","title":"旧会话","role":"user",
+           "snippet":"…这里的上下文…","match_start":3,"match_len":3,
+           "ts":1700000000000}]}
+{"t":"error","code":"E_SEARCH","id":"search-1","reason":"disabled",
+ "detail":"archive not configured"}
+```
+
+- `id` is the client's correlation id and is required: a `search` without a non-empty string `id`
+  is dropped with a log line, because there is nothing to correlate a reply with.
+- `q` is trimmed, its internal whitespace collapsed and the result cut to 100 characters. A query
+  that normalises to empty is `E_SEARCH` / `bad_query`.
+- `limit` is optional. A non-integer value means 50; an integer is clamped to **1..50**.
+- `q` in the reply is the normalised query the hits were found for, not necessarily the exact
+  request string.
+- `items[]` carries at most one page (newest first) and **never** the message body: `snippet` is
+  the match plus up to 40 code points of context on each side.
+- `match_start` / `match_len` locate the hit **inside `snippet`**, in **UTF-16 code units** — i.e.
+  exactly what JavaScript's `String.prototype.slice` indexes. They are `-1` / `0` when the hit
+  cannot be located in the snippet (the LIKE and the in-memory scan disagree about whitespace).
+- `ts` is the archived message time in Unix milliseconds; `title` falls back to the chat id when
+  the archive has no title for it.
+- `total` is the number of rows the predicate matches overall, not `items.length`; it lets the
+  client say "showing N of M" without a second request.
+- Search is scoped to the requesting agent when the plugin knows its id.
+
+### 13.2 Error reasons
+
+| `reason` | meaning |
+|---|---|
+| `bad_query` | `q` is missing, not a string, or empty after normalisation |
+| `disabled` | `turso_url` / `turso_token` is not configured on the plugin |
+| `unavailable` | the Turso request failed, a pipeline result was an error, or the response was malformed |
+
+The `error` frame always carries `id` and `reason` and never `chat`: a search spans every
+conversation. HTTP is attempted exactly once — the read path does not retry.
+
+### 13.3 Coverage
+
+Only archived turns are searchable. Archiving is best-effort (bounded queue, retries, then a drop),
+so **a missing hit is not proof the conversation never said it** — the UI states this next to the
+results. Messages that have not been archived yet are invisible until their turn is flushed.
+
+### 13.4 Control frames
+
+`search_results` is a **control frame**: it carries no `seq`, is not ring-buffered and is not
+replayed on `resume`. Reconnect and re-issue the `search` with a new `id` instead.
 

@@ -10,7 +10,8 @@ chunked uploads -- ``file_begin`` / ``file_chunk`` / ``file_end`` answered with
 ``file_ready`` / ``file_error`` -- whose files are staged for ten minutes and
 then referenced as ``msg.files[].ref``. Protocol v6 adds ``export``, answered
 with a paced ``export_begin`` / ``export_chunk`` / ``export_end`` stream that
-carries one Markdown transcript.
+carries one Markdown transcript. Protocol v7 adds ``search``, answered with
+``search_results`` built from the Turso archive.
 """
 
 from __future__ import annotations
@@ -84,6 +85,7 @@ try:  # package-relative (tests, ``python -m plugin...``)
         prompt_saved_frame,
         prompts_frame,
         resync_frame,
+        search_results_frame,
         skills_frame,
         start_frame,
         status_frame,
@@ -92,6 +94,7 @@ try:  # package-relative (tests, ``python -m plugin...``)
     from .relay_client import RelayClient
     from .filelog import FileLog
     from .turso_archive import TursoArchiver
+    from .turso_search import TursoSearcher, normalize_query
     from .util import (
         ANSWER_STREAM_TYPE,
         MAX_EXPORT_BYTES,
@@ -143,6 +146,7 @@ except ImportError:  # loaded as a top-level module by the plugin loader
         prompt_saved_frame,
         prompts_frame,
         resync_frame,
+        search_results_frame,
         skills_frame,
         start_frame,
         status_frame,
@@ -151,6 +155,7 @@ except ImportError:  # loaded as a top-level module by the plugin loader
     from relay_client import RelayClient
     from filelog import FileLog
     from turso_archive import TursoArchiver
+    from turso_search import TursoSearcher, normalize_query
     from util import (
         ANSWER_STREAM_TYPE,
         MAX_EXPORT_BYTES,
@@ -192,6 +197,9 @@ _UPLOAD_TIMEOUT_S = 60.0
 # Exports are pushed back to the browser in 96 KB chunks; the hosted relay
 # allows 30 frames/s per tenant, so leave ~40 ms between chunks (M12).
 _EXPORT_CHUNK_PACE_S = 0.04
+# A search page is at most 50 hits. Snippets are ~90 characters, so the reply
+# is a small control frame that needs no size check (M13).
+_SEARCH_LIMIT_MAX = 50
 
 # Short human-readable ``file_error.msg`` bodies, keyed by protocol code.
 _FILE_ERROR_MSG = {
@@ -266,6 +274,8 @@ class WebChannel(BaseChannel):
         self.relay_url = relay_url or DEFAULT_RELAY_URL
         self.token = token or DEFAULT_TOKEN
         self._archiver = TursoArchiver(turso_url or "", turso_token or "")
+        # Read-only side of the same archive: full-text search (M13).
+        self._searcher = TursoSearcher(turso_url or "", turso_token or "")
         self._relay: Optional[RelayClient] = None
         self._seq = SeqCounter()
         self._ring = RingBuffer(400)
@@ -522,6 +532,8 @@ class WebChannel(BaseChannel):
             await self._handle_hist(frame)
         elif kind == "export":
             await self._handle_export(frame)
+        elif kind == "search":
+            await self._handle_search(frame)
         elif kind in ("approve", "deny"):
             await self._handle_approval(kind, frame)
         elif kind == "stop":
@@ -1550,6 +1562,68 @@ class WebChannel(BaseChannel):
                 chat, export_id, exc_info=True,
             )
             await self._export_error(chat, export_id, "export failed")
+
+    # -- M13: full-text search over the archive --------------------------
+
+    async def _search_error(
+        self, req_id: str, reason: str, detail: str,
+    ) -> None:
+        """Send ``error{code:"E_SEARCH"}`` for a rejected/failed search.
+
+        The SPA correlates the reply by the request's envelope ``id`` and
+        branches on ``reason``, so both are always present. Unlike the export
+        error this frame has no ``chat``: a search spans every conversation.
+        """
+        frame = error_frame("E_SEARCH", detail)
+        frame["id"] = req_id
+        frame["reason"] = reason
+        await self._send_control(frame)
+
+    async def _handle_search(self, frame: Dict[str, Any]) -> None:
+        """Reply to ``{t:"search", id, q, limit?}`` with archived hits (M13).
+
+        The query runs against the Turso archive (``messages JOIN chats``)
+        with a parameterised LIKE, so it finds turns that are no longer in
+        the live session store. The reply is a ``search_results`` control
+        frame: no ``seq``, not ring-buffered, never replayed on ``resume``.
+        Only snippets cross the wire -- never a message body.
+        """
+        req_id = frame.get("id")
+        if not (isinstance(req_id, str) and req_id):
+            # Nothing to correlate a reply with; a broadcast error would
+            # surface in every tab's toast for a request we cannot identify.
+            logger.warning("webchannel: search without a usable id ignored")
+            return
+
+        q = normalize_query(frame.get("q"))
+        if not q:
+            await self._search_error(req_id, "bad_query", "empty search query")
+            return
+        if not self._searcher.enabled:
+            await self._search_error(req_id, "disabled", "archive not configured")
+            return
+
+        limit = frame.get("limit")
+        if isinstance(limit, int) and not isinstance(limit, bool):
+            limit = max(1, min(_SEARCH_LIMIT_MAX, limit))
+        else:
+            limit = _SEARCH_LIMIT_MAX
+
+        try:
+            items, total = await self._searcher.search(
+                q, limit, agent_id=self._agent_id(),
+            )
+        except Exception:  # noqa: BLE001 - reported as E_SEARCH, never raised
+            logger.warning(
+                "webchannel: search failed for id=%s q=%r", req_id, q,
+                exc_info=True,
+            )
+            await self._search_error(req_id, "unavailable", "search unavailable")
+            return
+
+        await self._send_control(
+            search_results_frame(req_id, q, items, total),
+        )
 
     # -- M8: server-side chat list / delete / rename & workspace prompts --
 

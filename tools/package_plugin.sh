@@ -34,6 +34,7 @@ FILES=(
   relay_client.py
   filelog.py
   turso_archive.py
+  turso_search.py
   README.md
 )
 
