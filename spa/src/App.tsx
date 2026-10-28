@@ -30,6 +30,7 @@ import {
   Menu,
   MessageSquare,
   Moon,
+  MoreHorizontal,
   Paperclip,
   Plus,
   RefreshCw,
@@ -1300,6 +1301,8 @@ export default function App() {
   const [currentModel, setCurrentModel] = useState<ModelRef | null>(null);
   const [modelBusy, setModelBusy] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // M14: the narrow-screen overflow menu in the top bar (secondary actions).
+  const [moreOpen, setMoreOpen] = useState(false);
 
   // Skills & Inline Palette Mode ('cmd' | 'model' | 'skill')
   const [skills, setSkills] = useState<SkillItem[]>(DEFAULT_SKILLS);
@@ -1354,6 +1357,7 @@ export default function App() {
   const searchRef = useRef<SearchJob | null>(null);
   const modelsRequested = useRef(false);
   const modelWrapRef = useRef<HTMLDivElement | null>(null);
+  const moreWrapRef = useRef<HTMLDivElement | null>(null);
   const nearBottomRef = useRef(true);
   const lastChatRef = useRef<string>(session.active);
   // M9: onFrame runs outside React's render closure, so the effort state it
@@ -1821,6 +1825,25 @@ export default function App() {
       document.removeEventListener('keydown', onKey);
     };
   }, [pickerOpen]);
+
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onDown = (event: MouseEvent) => {
+      const wrap = moreWrapRef.current;
+      if (wrap && event.target instanceof Node && !wrap.contains(event.target)) {
+        setMoreOpen(false);
+      }
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMoreOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [moreOpen]);
 
   useEffect(() => {
     if (!helpOpen) return;
@@ -3177,6 +3200,14 @@ export default function App() {
         </div>
       ) : null}
 
+      {sidebarOpen ? (
+        <div
+          className="sidebar-mask"
+          aria-hidden="true"
+          onClick={() => setSidebarOpen(false)}
+        />
+      ) : null}
+
       <aside className="sidebar">
         <div className="brand-row">
           <div className="brand">
@@ -3186,6 +3217,14 @@ export default function App() {
             <span>QwenPaw</span>
           </div>
           <span className="brand-badge">Studio</span>
+          <button
+            className="sidebar-close"
+            type="button"
+            onClick={() => setSidebarOpen(false)}
+            aria-label="关闭会话列表"
+          >
+            <X size={16} />
+          </button>
         </div>
 
         <button className="new-chat" onClick={newChat}>
@@ -3372,7 +3411,7 @@ export default function App() {
       </aside>
 
       <main className="main">
-        <header className="top">
+        <header className={`top${usageText ? ' has-usage' : ''}`}>
           <div className="top-left">
             <button
               className="hamburger"
@@ -3383,7 +3422,9 @@ export default function App() {
               <Menu size={18} />
             </button>
             <div className="top-titles">
-              <div className="top-title">{titleOf(activeChat)}</div>
+              <div className="top-title" title={titleOf(activeChat)}>
+                {titleOf(activeChat)}
+              </div>
               {usageText ? (
                 <div className="usage-line" title={USAGE_TITLE}>
                   {usageText}
@@ -3393,48 +3434,106 @@ export default function App() {
           </div>
 
           <div className="top-right">
-            <div className="identity">
-              <span className="agent-pill" title={`当前工作区 Agent: ${agentName || 'default'}`}>
-                <Sparkles size={12} />
-                <span className="agent-name">{agentName || 'Agent'}</span>
-              </span>
+            <div className="top-secondary">
+              <div className="identity">
+                <span className="agent-pill" title={`当前工作区 Agent: ${agentName || 'default'}`}>
+                  <Sparkles size={12} />
+                  <span className="agent-name">{agentName || 'Agent'}</span>
+                </span>
+              </div>
+
+              <button
+                className="icon-btn"
+                onClick={startExport}
+                disabled={exporting}
+                title="导出当前会话为 Markdown（含思考过程与工具调用）"
+                aria-label="导出当前会话"
+              >
+                <Download size={13} />
+                <span>{exporting ? '导出中…' : '导出'}</span>
+              </button>
+
+              <button
+                className="icon-btn"
+                onClick={openPromptDrawer}
+                title="在线配置 SOUL.md 与 AGENTS.md 人设提示词"
+              >
+                <Sliders size={13} />
+                <span>人设</span>
+              </button>
+
+              <button
+                className="icon-btn"
+                onClick={toggleTheme}
+                title={theme === 'dark' ? '切换到 Claude 暖陶纸本浅色' : '切换到 Cursor 曜石翡翠暗黑'}
+                aria-label="切换主题"
+              >
+                {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
+                <span>{theme === 'dark' ? '暖陶浅色' : '曜石暗黑'}</span>
+              </button>
             </div>
 
-            <button
-              className="icon-btn"
-              onClick={startExport}
-              disabled={exporting}
-              title="导出当前会话为 Markdown（含思考过程与工具调用）"
-              aria-label="导出当前会话"
+            <div
+              className="status"
+              title={`${STATE_LABEL[state]} · ${agentOnline ? 'Agent 在线' : 'Agent 离线'}`}
+              aria-label={`${STATE_LABEL[state]}，${agentOnline ? 'Agent 在线' : 'Agent 离线'}`}
             >
-              <Download size={13} />
-              <span>{exporting ? '导出中…' : '导出'}</span>
-            </button>
-
-            <button
-              className="icon-btn"
-              onClick={openPromptDrawer}
-              title="在线配置 SOUL.md 与 AGENTS.md 人设提示词"
-            >
-              <Sliders size={13} />
-              <span>人设</span>
-            </button>
-
-            <button
-              className="icon-btn"
-              onClick={toggleTheme}
-              title={theme === 'dark' ? '切换到 Claude 暖陶纸本浅色' : '切换到 Cursor 曜石翡翠暗黑'}
-              aria-label="切换主题"
-            >
-              {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
-              <span>{theme === 'dark' ? '暖陶浅色' : '曜石暗黑'}</span>
-            </button>
-
-            <div className="status">
               <i className={`dot state-${state}`} />
               <span className="status-label">{STATE_LABEL[state]}</span>
               <i className={`dot agent-${agentOnline ? 'on' : 'off'}`} />
               <span className="status-label">{agentOnline ? 'Agent 在线' : 'Agent 离线'}</span>
+            </div>
+
+            <div className="top-more-wrap" ref={moreWrapRef}>
+              <button
+                className="icon-btn top-more-btn"
+                onClick={() => setMoreOpen((open) => !open)}
+                title="更多操作"
+                aria-label="更多操作"
+                aria-haspopup="menu"
+                aria-expanded={moreOpen}
+              >
+                <MoreHorizontal size={16} />
+                <span>更多</span>
+              </button>
+              {moreOpen ? (
+                <div className="top-menu" role="menu" aria-label="更多操作">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={exporting}
+                    onClick={() => {
+                      setMoreOpen(false);
+                      startExport();
+                    }}
+                  >
+                    <Download size={14} />
+                    <span>{exporting ? '导出中…' : '导出 Markdown'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMoreOpen(false);
+                      openPromptDrawer();
+                    }}
+                  >
+                    <Sliders size={14} />
+                    <span>人设与提示词</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMoreOpen(false);
+                      toggleTheme();
+                    }}
+                  >
+                    {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
+                    <span>{theme === 'dark' ? '暖陶浅色' : '曜石暗黑'}</span>
+                  </button>
+                </div>
+              ) : null}
             </div>
           </div>
         </header>

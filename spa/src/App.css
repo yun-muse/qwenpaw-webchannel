@@ -234,6 +234,15 @@ button:disabled {
   user-select: none;
 }
 
+/* M14: the drawer's scrim and explicit close control are mobile-only. */
+.sidebar-mask {
+  display: none;
+}
+
+.sidebar-close {
+  display: none;
+}
+
 .brand-row {
   display: flex;
   align-items: center;
@@ -665,6 +674,51 @@ button:disabled {
   align-items: center;
   gap: 8px;
   flex: 0 0 auto;
+}
+
+/* M14: desktop keeps the inline actions; the overflow menu is narrow-screen only. */
+.top-secondary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.top-more-wrap {
+  display: none;
+  position: relative;
+}
+
+.top-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 40;
+  min-width: 196px;
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.top-menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  text-align: left;
+}
+
+.top-menu button:hover {
+  background: var(--panel);
+  color: var(--text);
 }
 
 .top-title {
@@ -2400,23 +2454,91 @@ button:disabled {
 /* ---------- Mobile & Responsive ---------- */
 
 @media (max-width: 720px) {
+  /* ===== M14: one-hand layout =============================================
+     Top bar: hamburger + title + status + overflow menu. The usage line moves
+     to a full-width second row so it can never be ellipsized to zero width. */
+  .top {
+    padding: 6px 12px;
+    gap: 8px;
+  }
+
+  .top.has-usage {
+    padding-bottom: 28px;
+  }
+
+  .top-left {
+    gap: 8px;
+  }
+
+  .top-right {
+    gap: 6px;
+  }
+
   .hamburger {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
     color: var(--muted);
   }
 
+  .top-secondary,
+  .identity {
+    display: none;
+  }
+
+  .top-more-wrap {
+    display: block;
+  }
+
+  .top-more-btn {
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border-radius: 10px;
+  }
+
+  .top-more-btn > span {
+    display: none;
+  }
+
+  .top-menu button {
+    min-height: 48px;
+    font-size: 13.5px;
+  }
+
+  .status {
+    padding: 4px 8px;
+    gap: 4px;
+  }
+
+  .status-label {
+    display: none;
+  }
+
+  .usage-line {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: 6px;
+    width: auto;
+    font-size: 11.5px;
+    line-height: 1.2;
+  }
+
+  /* ===== Drawer: scrim + close button + no title/action collision ======== */
   .sidebar {
     position: fixed;
     top: 0;
     bottom: 0;
     left: 0;
     z-index: 50;
-    width: min(80vw, 290px);
+    width: min(82vw, 300px);
+    padding: 12px 10px 10px;
+    gap: 8px;
     box-shadow: var(--shadow-lg);
     transform: translateX(-102%);
     transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
@@ -2426,28 +2548,221 @@ button:disabled {
     transform: translateX(0);
   }
 
+  .sidebar-mask {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 48;
+    background: rgba(0, 0, 0, 0.42);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+  }
+
+  .brand-row {
+    gap: 8px;
+  }
+
+  .brand {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .sidebar-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--card);
+    color: var(--muted);
+  }
+
+  .new-chat {
+    min-height: 48px;
+  }
+
+  .chat-search {
+    height: 44px;
+  }
+
+  .chat-act {
+    width: 44px;
+    height: 44px;
+  }
+
+  .chat-item {
+    min-height: 56px;
+    justify-content: center;
+    padding: 6px 8px;
+  }
+
+  .chat-title {
+    min-height: 44px;
+    padding-right: 92px;
+  }
+
   .chat-actions {
     opacity: 1;
+    right: 2px;
+    gap: 0;
+  }
+
+  .help-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  .endpoint-switch {
+    min-height: 44px;
+  }
+
+  .sidebar-foot {
+    gap: 8px;
+    flex-wrap: wrap;
   }
 
   .starter-grid {
     grid-template-columns: 1fr;
   }
 
-  .top {
-    padding: 8px 12px;
+  /* ===== Composer: tools row, then effort + send row ===================== */
+  .composer {
+    padding: 6px 12px 12px;
   }
 
-  .status-label {
+  .composer-card {
+    padding: 10px 12px 8px;
+    border-radius: 16px;
+  }
+
+  .composer-toolbar {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-top: 8px;
+  }
+
+  .composer-tools-left {
+    display: contents;
+  }
+
+  .attach,
+  .tool-pill {
+    height: 44px;
+    padding: 0 12px;
+    font-size: 13px;
+  }
+
+  .model-wrap {
+    flex: 1 1 120px;
+    min-width: 0;
+  }
+
+  .model-button {
+    width: 100%;
+    max-width: none;
+    height: 44px;
+    font-size: 12.5px;
+  }
+
+  .model-picker {
+    left: auto;
+    right: 0;
+    width: min(calc(100vw - 48px), 330px);
+    min-width: 0;
+  }
+
+  .effort-wrap {
+    flex: 1 1 auto;
+    justify-content: center;
+    min-width: 0;
+    height: 48px;
+    padding: 0 3px;
+    gap: 0;
+  }
+
+  .effort-label {
     display: none;
+  }
+
+  .effort-group {
+    gap: 0;
+    padding: 1px;
+  }
+
+  .effort-opt {
+    height: 44px;
+    min-width: 44px;
+    padding: 0 4px;
+    border-radius: 6px;
+    font-size: 12px;
+  }
+
+  .composer-tools-right {
+    margin-left: auto;
+  }
+
+  .send,
+  .stop {
+    height: 44px;
+    min-width: 72px;
+    padding: 0 12px;
+    font-size: 13px;
+  }
+
+  .composer-row textarea {
+    font-size: 16px; /* iOS Safari zooms in on focused fields below 16px */
+  }
+
+  /* ===== Message actions: always visible and thumb-sized ================= */
+  .row.user .bubble-foot {
+    opacity: 1;
+  }
+
+  .bubble-foot {
+    gap: 8px;
+  }
+
+  .copy-btn,
+  .msg-act-btn {
+    min-height: 44px;
+    padding: 0 12px;
+    border-radius: 9px;
+    font-size: 12px;
+  }
+
+  .thinking summary {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  .scroll-bottom {
+    right: 16px;
+    bottom: 12px;
+    width: 44px;
+    height: 44px;
+  }
+
+  .model-row,
+  .palette-row {
+    min-height: 44px;
+  }
+
+  /* ===== Content: wide blocks scroll inside the bubble =================== */
+  .md,
+  .reply,
+  .assistant-col,
+  .bubble {
+    min-width: 0;
+    max-width: 100%;
   }
 
   .messages {
     padding: 18px 14px 10px;
-  }
-
-  .composer {
-    padding: 6px 12px 12px;
   }
 
   .hint {

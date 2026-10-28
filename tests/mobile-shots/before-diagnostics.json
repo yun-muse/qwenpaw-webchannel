@@ -1,0 +1,1373 @@
+{
+  "label": "before",
+  "baseUrl": "https://qwenpaw-webchannel-spa.pages.dev/",
+  "startedAt": "2026-10-28T05:37:12.037Z",
+  "steps": {
+    "cloudGate": true,
+    "login": "ok",
+    "connection": "dot state-live",
+    "hamburgerHitBefore": {
+      "cls": {},
+      "tag": "svg"
+    },
+    "chat": "M9验证，请用一句话解释什么是熵。",
+    "modelPickerOpenedByTap": true,
+    "hamburgerTapBlockedBy": {
+      "cls": "agent-pill",
+      "tag": "SPAN"
+    },
+    "hamburgerTapError": "locator.click: Timeout 3000ms exceeded."
+  },
+  "measures": {
+    "chat": {
+      "viewport": {
+        "w": 390,
+        "h": 844,
+        "dpr": 3
+      },
+      "page": {
+        "docScrollWidth": 390,
+        "bodyScrollWidth": 390,
+        "horizontalOverflow": false,
+        "scrollX": 0
+      },
+      "top": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 390,
+          "h": 55.8,
+          "right": 390,
+          "bottom": 55.8
+        },
+        "text": "M9验证，请用一句话解释什么是熵。本会话 ↑64.5k ↓964 · 上下文 ≈1%（13.3k/1M）work导出人设曜石暗黑已连接Agent 在线",
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "0 1 auto",
+        "minWidth": "auto",
+        "position": "sticky",
+        "transform": "none",
+        "zIndex": "20"
+      },
+      "topLeft": {
+        "rect": {
+          "x": 12,
+          "y": 8,
+          "w": 0,
+          "h": 38.8,
+          "right": 12,
+          "bottom": 46.8
+        },
+        "text": "M9验证，请用一句话解释什么是熵。本会话 ↑64.5k ↓964 · 上下文 ≈1%（13.3k/1M）",
+        "scrollWidth": 30,
+        "clientWidth": 0,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "1 1 auto",
+        "minWidth": "0px",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "topRight": {
+        "rect": {
+          "x": 24,
+          "y": 12.4,
+          "w": 357.7,
+          "h": 30,
+          "right": 381.7,
+          "bottom": 42.4
+        },
+        "text": "work导出人设曜石暗黑已连接Agent 在线",
+        "scrollWidth": 358,
+        "clientWidth": 358,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "0 0 auto",
+        "minWidth": "auto",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "topTitles": {
+        "rect": {
+          "x": 52,
+          "y": 8,
+          "w": 0,
+          "h": 38.8,
+          "right": 52,
+          "bottom": 46.8
+        },
+        "text": "M9验证，请用一句话解释什么是熵。本会话 ↑64.5k ↓964 · 上下文 ≈1%（13.3k/1M）",
+        "scrollWidth": 0,
+        "clientWidth": 0,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "1 1 auto",
+        "minWidth": "0px",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "topTitle": {
+        "rect": {
+          "x": 52,
+          "y": 8,
+          "w": 0,
+          "h": 23.5,
+          "right": 52,
+          "bottom": 31.5
+        },
+        "text": "M9验证，请用一句话解释什么是熵。",
+        "scrollWidth": 231,
+        "clientWidth": 0,
+        "display": "block",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "hidden",
+        "overflowX": "hidden",
+        "overflowY": "hidden",
+        "whiteSpace": "nowrap",
+        "textOverflow": "ellipsis",
+        "flex": "0 1 auto",
+        "minWidth": "0px",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "usage": {
+        "rect": {
+          "x": 52,
+          "y": 32.5,
+          "w": 0,
+          "h": 14.3,
+          "right": 52,
+          "bottom": 46.8
+        },
+        "text": "本会话 ↑64.5k ↓964 · 上下文 ≈1%（13.3k/1M）",
+        "scrollWidth": 248,
+        "clientWidth": 0,
+        "display": "block",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "hidden",
+        "overflowX": "hidden",
+        "overflowY": "hidden",
+        "whiteSpace": "nowrap",
+        "textOverflow": "ellipsis",
+        "flex": "0 1 auto",
+        "minWidth": "auto",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "usageVisiblePx": 0,
+      "usageClipped": true,
+      "usageAboveFold": true,
+      "topLeftVsRightOverlap": 0,
+      "hamburger": {
+        "rect": {
+          "x": 12,
+          "y": 11.4,
+          "w": 30,
+          "h": 32,
+          "right": 42,
+          "bottom": 43.4
+        },
+        "text": "",
+        "scrollWidth": 30,
+        "clientWidth": 30,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "0 1 auto",
+        "minWidth": "auto",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "hamburgerHit": {
+        "cls": "agent-pill",
+        "tag": "SPAN"
+      },
+      "hamburgerTapTarget": {
+        "w": 30,
+        "h": 32
+      },
+      "composerCard": {
+        "rect": {
+          "x": 12,
+          "y": 665,
+          "w": 366,
+          "h": 167,
+          "right": 378,
+          "bottom": 832
+        },
+        "text": "附件技能sensenova / deepseek-flash思考等级默认低中高最大发送",
+        "scrollWidth": 364,
+        "clientWidth": 364,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "0 1 auto",
+        "minWidth": "0px",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "toolbar": {
+        "rect": {
+          "x": 27,
+          "y": 712,
+          "w": 336,
+          "h": 109,
+          "right": 363,
+          "bottom": 821
+        },
+        "text": "附件技能sensenova / deepseek-flash思考等级默认低中高最大发送",
+        "scrollWidth": 336,
+        "clientWidth": 336,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "0 1 auto",
+        "minWidth": "auto",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "toolbarControls": [
+        {
+          "cls": "attach",
+          "x": 27,
+          "y": 719,
+          "w": 64,
+          "h": 30,
+          "right": 91,
+          "bottom": 749
+        },
+        {
+          "cls": "tool-pill",
+          "x": 97,
+          "y": 719,
+          "w": 64,
+          "h": 30,
+          "right": 161,
+          "bottom": 749
+        },
+        {
+          "cls": "model-wrap",
+          "x": 27,
+          "y": 755,
+          "w": 217.1,
+          "h": 30,
+          "right": 244.1,
+          "bottom": 785
+        },
+        {
+          "cls": "model-button",
+          "x": 27,
+          "y": 755,
+          "w": 217.1,
+          "h": 30,
+          "right": 244.1,
+          "bottom": 785
+        },
+        {
+          "cls": "effort-wrap",
+          "x": 27,
+          "y": 791,
+          "w": 228.5,
+          "h": 30,
+          "right": 255.5,
+          "bottom": 821
+        },
+        {
+          "cls": "effort-opt active",
+          "x": 93,
+          "y": 795,
+          "w": 37,
+          "h": 22,
+          "right": 130,
+          "bottom": 817
+        },
+        {
+          "cls": "effort-opt",
+          "x": 131,
+          "y": 795,
+          "w": 25.5,
+          "h": 22,
+          "right": 156.5,
+          "bottom": 817
+        },
+        {
+          "cls": "effort-opt",
+          "x": 157.5,
+          "y": 795,
+          "w": 25.5,
+          "h": 22,
+          "right": 183,
+          "bottom": 817
+        },
+        {
+          "cls": "effort-opt",
+          "x": 184,
+          "y": 795,
+          "w": 25.5,
+          "h": 22,
+          "right": 209.5,
+          "bottom": 817
+        },
+        {
+          "cls": "effort-opt",
+          "x": 210.5,
+          "y": 795,
+          "w": 37,
+          "h": 22,
+          "right": 247.5,
+          "bottom": 817
+        },
+        {
+          "cls": "send",
+          "x": 292,
+          "y": 754,
+          "w": 71,
+          "h": 32,
+          "right": 363,
+          "bottom": 786
+        }
+      ],
+      "toolbarOverlaps": [],
+      "send": {
+        "rect": {
+          "x": 292,
+          "y": 754,
+          "w": 71,
+          "h": 32,
+          "right": 363,
+          "bottom": 786
+        },
+        "text": "发送",
+        "scrollWidth": 71,
+        "clientWidth": 71,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "0.42",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "0 1 auto",
+        "minWidth": "auto",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "effortOpts": [
+        {
+          "text": "默认",
+          "x": 93,
+          "y": 795,
+          "w": 37,
+          "h": 22,
+          "right": 130,
+          "bottom": 817
+        },
+        {
+          "text": "低",
+          "x": 131,
+          "y": 795,
+          "w": 25.5,
+          "h": 22,
+          "right": 156.5,
+          "bottom": 817
+        },
+        {
+          "text": "中",
+          "x": 157.5,
+          "y": 795,
+          "w": 25.5,
+          "h": 22,
+          "right": 183,
+          "bottom": 817
+        },
+        {
+          "text": "高",
+          "x": 184,
+          "y": 795,
+          "w": 25.5,
+          "h": 22,
+          "right": 209.5,
+          "bottom": 817
+        },
+        {
+          "text": "最大",
+          "x": 210.5,
+          "y": 795,
+          "w": 37,
+          "h": 22,
+          "right": 247.5,
+          "bottom": 817
+        }
+      ],
+      "messageActions": {
+        "userFooter": {
+          "rect": {
+            "x": 111.8,
+            "y": 116,
+            "w": 247.2,
+            "h": 24.1,
+            "right": 359,
+            "bottom": 140.1
+          },
+          "text": "复制编辑",
+          "scrollWidth": 247,
+          "clientWidth": 247,
+          "display": "flex",
+          "visibility": "visible",
+          "opacity": "0",
+          "overflow": "visible",
+          "overflowX": "visible",
+          "overflowY": "visible",
+          "whiteSpace": "normal",
+          "textOverflow": "clip",
+          "flex": "0 1 auto",
+          "minWidth": "0px",
+          "position": "static",
+          "transform": "none",
+          "zIndex": "auto"
+        },
+        "assistantButtons": [
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 1353.8,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 173.9,
+            "bottom": 1377.9
+          },
+          {
+            "text": "重新生成",
+            "x": 179.9,
+            "y": 1353.8,
+            "w": 81,
+            "h": 24.1,
+            "right": 260.9,
+            "bottom": 1377.9
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 1522.3,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 173.9,
+            "bottom": 1546.4
+          },
+          {
+            "text": "重新生成",
+            "x": 179.9,
+            "y": 1522.3,
+            "w": 81,
+            "h": 24.1,
+            "right": 260.9,
+            "bottom": 1546.4
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 2108.4,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 173.9,
+            "bottom": 2132.5
+          },
+          {
+            "text": "重新生成",
+            "x": 179.9,
+            "y": 2108.4,
+            "w": 81,
+            "h": 24.1,
+            "right": 260.9,
+            "bottom": 2132.5
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 2276.9,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 173.9,
+            "bottom": 2301
+          },
+          {
+            "text": "重新生成",
+            "x": 179.9,
+            "y": 2276.9,
+            "w": 81,
+            "h": 24.1,
+            "right": 260.9,
+            "bottom": 2301
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 3210.1,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 173.9,
+            "bottom": 3234.2
+          },
+          {
+            "text": "重新生成",
+            "x": 179.9,
+            "y": 3210.1,
+            "w": 81,
+            "h": 24.1,
+            "right": 260.9,
+            "bottom": 3234.2
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 3298.8,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 173.9,
+            "bottom": 3322.9
+          },
+          {
+            "text": "重新生成",
+            "x": 179.9,
+            "y": 3298.8,
+            "w": 81,
+            "h": 24.1,
+            "right": 260.9,
+            "bottom": 3322.9
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 3492.8,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 173.9,
+            "bottom": 3516.9
+          },
+          {
+            "text": "重新生成",
+            "x": 179.9,
+            "y": 3492.8,
+            "w": 81,
+            "h": 24.1,
+            "right": 260.9,
+            "bottom": 3516.9
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 3581.5,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 173.9,
+            "bottom": 3605.6
+          },
+          {
+            "text": "重新生成",
+            "x": 179.9,
+            "y": 3581.5,
+            "w": 81,
+            "h": 24.1,
+            "right": 260.9,
+            "bottom": 3605.6
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 3775.4,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 173.9,
+            "bottom": 3799.5
+          },
+          {
+            "text": "重新生成",
+            "x": 179.9,
+            "y": 3775.4,
+            "w": 81,
+            "h": 24.1,
+            "right": 260.9,
+            "bottom": 3799.5
+          }
+        ]
+      },
+      "codeBlocks": [],
+      "tables": [],
+      "tapTargetsBelow44": [
+        {
+          "cls": "hamburger",
+          "text": "",
+          "w": 30,
+          "h": 32
+        },
+        {
+          "cls": "icon-btn",
+          "text": "导出",
+          "w": 64,
+          "h": 30
+        },
+        {
+          "cls": "icon-btn",
+          "text": "人设",
+          "w": 64,
+          "h": 30
+        },
+        {
+          "cls": "icon-btn",
+          "text": "曜石暗黑",
+          "w": 88,
+          "h": 30
+        },
+        {
+          "cls": "copy-btn",
+          "text": "复制",
+          "w": 58,
+          "h": 24.1
+        },
+        {
+          "cls": "msg-act-btn",
+          "text": "编辑",
+          "w": 58,
+          "h": 24.1
+        },
+        {
+          "cls": "scroll-bottom",
+          "text": "",
+          "w": 34,
+          "h": 34
+        },
+        {
+          "cls": "attach",
+          "text": "附件",
+          "w": 64,
+          "h": 30
+        },
+        {
+          "cls": "tool-pill",
+          "text": "技能",
+          "w": 64,
+          "h": 30
+        },
+        {
+          "cls": "model-button",
+          "text": "sensenova / deepseek-flash",
+          "w": 217.1,
+          "h": 30
+        },
+        {
+          "cls": "effort-opt active",
+          "text": "默认",
+          "w": 37,
+          "h": 22
+        },
+        {
+          "cls": "effort-opt",
+          "text": "低",
+          "w": 25.5,
+          "h": 22
+        },
+        {
+          "cls": "effort-opt",
+          "text": "中",
+          "w": 25.5,
+          "h": 22
+        },
+        {
+          "cls": "effort-opt",
+          "text": "高",
+          "w": 25.5,
+          "h": 22
+        },
+        {
+          "cls": "effort-opt",
+          "text": "最大",
+          "w": 37,
+          "h": 22
+        },
+        {
+          "cls": "send",
+          "text": "发送",
+          "w": 71,
+          "h": 32
+        }
+      ],
+      "messagesScroll": {
+        "scrollTop": 0,
+        "scrollHeight": 3754,
+        "clientHeight": 603
+      }
+    },
+    "sidebar": {
+      "transform": "matrix(1, 0, 0, 1, 0, 0)",
+      "width": 290,
+      "left": 0,
+      "mask": false,
+      "bodyOverflowX": "visible",
+      "tapTargetsBelow44": [
+        {
+          "cls": "new-chat",
+          "text": "新建会话/new",
+          "w": 265,
+          "h": 41.8
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "M7.2 复验，请回复“修复版在线”",
+          "w": 243,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Reply with exactly: soakmvql2e13",
+          "w": 243,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Reply with exactly: soakmvql4ze1",
+          "w": 243,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Reply with exactly: soakmvqm8peu",
+          "w": 243,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Reply with exactly: soakmvqnbaew",
+          "w": 243,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "恢复确认，请回复“已恢复”。",
+          "w": 243,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Reply with exactly: soakmvqqj0c9",
+          "w": 243,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Reply with exactly: soakmvqrlnsk",
+          "w": 243,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Reply with exactly: soakmvqro8pw",
+          "w": 243,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Reply with exactly: soakmvqso79u",
+          "w": 243,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "合并版验证，请回复“合并版在线”。",
+          "w": 243,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "[请调用 web_fetch 工具抓取并深入阅读相关网页内容] https://",
+          "w": 243,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Reply with exactly: soakmvqutd65",
+          "w": 243,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "M9验证，请用一句话解释什么是熵。",
+          "w": 243,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Reply with exactly: soakmvqvvx69",
+          "w": 243,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "[请启用费曼第一性原理模式：1.首句直给核心本质；2.先讲Why再讲How并给出",
+          "w": 243,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Reply with exactly: soakmvqwyh7z",
+          "w": 243,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Reply with exactly: soakmvqy12gr",
+          "w": 243,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Reply with exactly: soakmvqz3n13",
+          "w": 243,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Reply with exactly: soakmvr06avd",
+          "w": 243,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Reply with exactly: soakmvr18shx",
+          "w": 243,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Reply with exactly: soakmvr2beb0",
+          "w": 243,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Reply with exactly: soakmvr3e035",
+          "w": 243,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "endpoint-switch",
+          "text": "云端 CF 节点",
+          "w": 97.5,
+          "h": 28.5
+        },
+        {
+          "cls": "help-btn",
+          "text": "",
+          "w": 26,
+          "h": 26
+        },
+        {
+          "cls": "help-btn",
+          "text": "",
+          "w": 26,
+          "h": 26
+        },
+        {
+          "cls": "help-btn",
+          "text": "",
+          "w": 26,
+          "h": 26
+        },
+        {
+          "cls": "hamburger",
+          "text": "",
+          "w": 30,
+          "h": 32
+        },
+        {
+          "cls": "icon-btn",
+          "text": "导出",
+          "w": 64,
+          "h": 30
+        },
+        {
+          "cls": "icon-btn",
+          "text": "人设",
+          "w": 64,
+          "h": 30
+        },
+        {
+          "cls": "icon-btn",
+          "text": "曜石暗黑",
+          "w": 88,
+          "h": 30
+        },
+        {
+          "cls": "copy-btn",
+          "text": "复制",
+          "w": 58,
+          "h": 24.1
+        },
+        {
+          "cls": "msg-act-btn",
+          "text": "编辑",
+          "w": 58,
+          "h": 24.1
+        },
+        {
+          "cls": "scroll-bottom",
+          "text": "",
+          "w": 34,
+          "h": 34
+        },
+        {
+          "cls": "attach",
+          "text": "附件",
+          "w": 64,
+          "h": 30
+        },
+        {
+          "cls": "tool-pill",
+          "text": "技能",
+          "w": 64,
+          "h": 30
+        },
+        {
+          "cls": "model-button",
+          "text": "sensenova / deepseek-flash",
+          "w": 217.1,
+          "h": 30
+        },
+        {
+          "cls": "effort-opt active",
+          "text": "默认",
+          "w": 37,
+          "h": 22
+        },
+        {
+          "cls": "effort-opt",
+          "text": "低",
+          "w": 25.5,
+          "h": 22
+        },
+        {
+          "cls": "effort-opt",
+          "text": "中",
+          "w": 25.5,
+          "h": 22
+        },
+        {
+          "cls": "effort-opt",
+          "text": "高",
+          "w": 25.5,
+          "h": 22
+        },
+        {
+          "cls": "effort-opt",
+          "text": "最大",
+          "w": 37,
+          "h": 22
+        },
+        {
+          "cls": "send",
+          "text": "发送",
+          "w": 71,
+          "h": 32
+        }
+      ]
+    },
+    "modelPicker": {
+      "rect": {
+        "x": 27,
+        "y": 427,
+        "w": 294.21875,
+        "h": 320,
+        "right": 321.21875,
+        "bottom": 747
+      },
+      "viewport": {
+        "w": 390,
+        "h": 844
+      },
+      "offscreenRight": false,
+      "offscreenLeft": false,
+      "offscreenTop": false,
+      "scrollHeight": 1338,
+      "clientHeight": 318
+    }
+  },
+  "screenshots": {
+    "chat": "/home/hatch/workspace/qwenpaw-webchannel/tests/mobile-shots/before-chat.png",
+    "topbar": "/home/hatch/workspace/qwenpaw-webchannel/tests/mobile-shots/before-topbar.png",
+    "sidebar": "/home/hatch/workspace/qwenpaw-webchannel/tests/mobile-shots/before-sidebar.png",
+    "modelPicker": "/home/hatch/workspace/qwenpaw-webchannel/tests/mobile-shots/before-model-picker.png",
+    "composer": "/home/hatch/workspace/qwenpaw-webchannel/tests/mobile-shots/before-composer.png",
+    "messageActions": "/home/hatch/workspace/qwenpaw-webchannel/tests/mobile-shots/before-message-actions.png"
+  },
+  "checks": {
+    "hamburgerTappable": false,
+    "usagePresent": true,
+    "usageText": "本会话 ↑64.5k ↓964 · 上下文 ≈1%（13.3k/1M）",
+    "usageVisible": false,
+    "usageFullText": false,
+    "usageHasPercent": true,
+    "noPageOverflow": true,
+    "noToolbarOverlap": true,
+    "toolbarFits": true,
+    "allTapTargets44": false,
+    "sidebarMasked": false,
+    "sidebarTapTargets44": false,
+    "moreMenuFits": false,
+    "sidebarOffCanvas": true,
+    "userActionsReachable": false,
+    "codeBlocksScroll": true
+  },
+  "checkList": [
+    "FAIL hamburgerTappable",
+    "PASS usagePresent",
+    "FAIL usageVisible",
+    "FAIL usageFullText",
+    "PASS usageHasPercent",
+    "PASS noPageOverflow",
+    "PASS noToolbarOverlap",
+    "PASS toolbarFits",
+    "FAIL allTapTargets44",
+    "FAIL sidebarMasked",
+    "FAIL sidebarTapTargets44",
+    "FAIL moreMenuFits",
+    "PASS sidebarOffCanvas",
+    "FAIL userActionsReachable",
+    "PASS codeBlocksScroll"
+  ],
+  "pageErrors": [],
+  "authErrors": []
+}
