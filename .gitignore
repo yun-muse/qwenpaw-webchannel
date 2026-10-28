@@ -4,3 +4,9 @@ __pycache__/
 .secrets/
 .wrangler/
 tools/soak.log
+
+# Local build-time config (spa/.env.example documents copying to .env.local).
+# Examples are templates with placeholders only and stay tracked.
+.env
+.env.*
+!.env.example

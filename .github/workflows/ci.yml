@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  plugin:
+    name: plugin tests (python 3.12)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugin
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # The suites are plain assert scripts (no pytest). `channel`, `relay_client`,
+      # `turso_archive` and `turso_search` import httpx / websockets; in QwenPaw
+      # those are core dependencies (plugin/README.md), so CI installs them here
+      # with the same ranges the plugin declares.
+      - name: Install test dependencies
+        run: pip install "httpx>=0.27.0" "websockets>=15.0.1,<16"
+
+      # Run every suite even if one fails, then fail the job once at the end so
+      # the log shows all failures rather than only the first.
+      - name: Run plugin suites
+        run: |
+          status=0
+          for suite in tests/test_*.py; do
+            echo "::group::$suite"
+            python -u "$suite" || status=1
+            echo "::endgroup::"
+          done
+          exit "$status"
+
+  spa:
+    name: spa (build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: spa
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: spa/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # `build` is `tsc --noEmit && vite build` (spa/package.json), so this also
+      # type-checks src/. vite.config.ts shells out to `git rev-parse`; checkout
+      # provides that, and the config already falls back to "unknown".
+      - name: Build
+        run: npm run build
+
+  relay-cf:
+    name: relay-cf (typecheck)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: relay-cf
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: relay-cf/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # relay-cf/package.json has no build/typecheck script, so use tsc directly.
+      # tsconfig.json is already noEmit + include: ["src/**/*.ts"].
+      - name: Typecheck
+        run: npx tsc --noEmit

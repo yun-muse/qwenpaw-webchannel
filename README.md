@@ -1,5 +1,7 @@
 # QwenPaw WebChannel · 自建 Web 前端通道
 
+[![CI](https://github.com/yun-muse/qwenpaw-webchannel/actions/workflows/ci.yml/badge.svg)](https://github.com/yun-muse/qwenpaw-webchannel/actions/workflows/ci.yml)
+
 让运行在容器里的 QwenPaw agent 拥有一个可安装到手机的 Web 前端：浏览器只连 relay，插件从容器**主动外连**，不需要开放任何入站端口，也不需要改动 QwenPaw 本体。
 
 **在线实例**：[SPA](https://qwenpaw-webchannel-spa.pages.dev) · [Relay 健康检查](https://qwenpaw-webchannel-relay.yxliwangsheng.workers.dev/health)
