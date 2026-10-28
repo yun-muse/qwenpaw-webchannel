@@ -148,7 +148,7 @@ SPA 只存 token 和过期时间，**从不存密码**（`src/App.tsx::rememberA
 **每轮回执**（`MessageView` 的 `.bubble-foot`）：
 
 - 第一项就是 `≈本轮 ↑<input> ↓<output>`，`≈` 只在 QwenPaw 标记为估算时出现；没有 `turn` 的轮次什么都不显示（不是 0）。
-- tooltip 给出精确 token、合计和 `耗时 <s>s（含工具调用）`。
+- tooltip 给出精确 token 和合计（不显示耗时：帧里只有插件派生的整数，源时间戳没有真实区间）。
 - 移动端回执独占一行，位于复制/重新生成按钮上方。
 
 数据来源是 `hist.messages[].turn` 和 `usage.last_turn`；两者的 `id` 是同一个去重键。SPA 在打开/切换会话、每轮结束后（延迟 1.2 s 等后端落盘）、`model_changed` 之后和每次进入 `live` 时重新请求 `get_usage`。

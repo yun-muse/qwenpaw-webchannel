@@ -37,6 +37,8 @@
   --danger: #dc2626;
   --danger-bg: #fef2f2;
   --ok: #059669;
+  --ok-bg: #ecfdf5;
+  --ok-line: #a7f3d0;
   --warn: #d97706;
   --radius: 16px;
 
@@ -102,6 +104,8 @@
   --danger: #f87171;
   --danger-bg: #2a1518;
   --ok: #34d399;
+  --ok-bg: #10231b;
+  --ok-line: #1d4d3a;
   --warn: #fbbf24;
 
   --header-bg: rgba(10, 11, 14, 0.82);
@@ -865,6 +869,27 @@ button:disabled {
   font-weight: 600;
   color: var(--danger);
   text-decoration: underline;
+}
+
+/* M17: the same status line also reports export progress and success. */
+.toast-info {
+  border-color: var(--line-strong);
+  background: var(--panel);
+  color: var(--text-secondary);
+}
+
+.toast-info button {
+  color: var(--text-secondary);
+}
+
+.toast-ok {
+  border-color: var(--ok-line);
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.toast-ok button {
+  color: var(--ok);
 }
 
 /* ---------- Thread & Welcome Hero ---------- */

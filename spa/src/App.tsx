@@ -419,6 +419,18 @@ interface SearchJob {
 
 type SearchState = 'idle' | 'loading' | 'done' | 'unavailable';
 
+/**
+ * The status line under the header. `danger` is the historical look; `info`
+ * (progress) and `ok` (success) exist so an export's progress/success notice
+ * never masquerades as an error (M17).
+ */
+type ToastTone = 'info' | 'ok' | 'danger';
+
+interface ToastNotice {
+  text: string;
+  tone: ToastTone;
+}
+
 interface ChatRuntime {
   activeId: number | null;
   endedId: number | null;
@@ -470,13 +482,20 @@ interface ChatUsage {
   contextLimit?: number;
 }
 
-/** One turn's token receipt (`hist.messages[].turn` / `usage.last_turn`, M15). */
+/**
+ * One turn's token receipt (`hist.messages[].turn` / `usage.last_turn`, M15).
+ *
+ * `duration_ms` is deliberately not modelled: the frame carries only the
+ * plugin's derived integer, never the turn's start/end timestamps, so the SPA
+ * cannot tell a measured span from a record whose timestamps are identical
+ * (the 0.0s receipts seen in production). No real span in the SPA's data means
+ * no duration is shown (M17).
+ */
 interface TurnUsage {
   id: string;
   input?: number;
   output?: number;
   total?: number;
-  duration_ms?: number;
   estimated?: boolean;
 }
 
@@ -501,7 +520,7 @@ function turnUsageOf(raw: unknown): TurnUsage | undefined {
   if (typeof id !== 'string' || !id) return undefined;
 
   const turn: TurnUsage = { id };
-  for (const key of ['input', 'output', 'total', 'duration_ms'] as const) {
+  for (const key of ['input', 'output', 'total'] as const) {
     const value = record[key];
     if (value == null) continue;
     if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
@@ -515,16 +534,13 @@ function turnUsageOf(raw: unknown): TurnUsage | undefined {
   return turn;
 }
 
-/** Tooltip for one receipt: exact numbers, total, duration and the ≈ note. */
+/** Tooltip for one receipt: exact numbers, total and the ≈ note. */
 function turnTitle(turn: TurnUsage): string {
   const parts: string[] = [];
   if (turn.input != null) parts.push(`输入 ${turn.input}`);
   if (turn.output != null) parts.push(`输出 ${turn.output}`);
   if (turn.total != null) parts.push(`合计 ${turn.total}`);
   let text = `本轮用量${turn.estimated ? '（估算）' : ''}：${parts.join(' · ')}`;
-  if (turn.duration_ms != null) {
-    text += ` · 耗时 ${(turn.duration_ms / 1000).toFixed(1)}s（含工具调用）`;
-  }
   if (turn.estimated) text += ' · 该轮 token 数为估算值';
   return text;
 }
@@ -1413,7 +1429,7 @@ export default function App() {
   const [input, setInput] = useState('');
   const [attachment, setAttachment] = useState<Attachment | null>(null);
   const [composerError, setComposerError] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<ToastNotice | null>(null);
   const [state, setState] = useState<ConnState>('idle');
   const [agentOnline, setAgentOnline] = useState(false);
 
@@ -1525,13 +1541,13 @@ export default function App() {
   };
 
   // ---- M9: thinking effort (per chat, server is authoritative) ----
-  const showToastBriefly = (message: string) => {
-    setToast(message);
+  const showToastBriefly = (message: string, tone: ToastTone = 'danger') => {
+    setToast({ text: message, tone });
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => {
       toastTimer.current = null;
       // Only dismiss our own notice, never a newer one.
-      setToast((current) => (current === message ? null : current));
+      setToast((current) => (current?.text === message ? null : current));
     }, 4000);
   };
 
@@ -1682,10 +1698,10 @@ export default function App() {
       clearTimeout(job.timer);
       job.timer = null;
     }
-    saveBlob(
-      new Blob([buffer], { type: 'text/markdown;charset=utf-8' }),
-      exportFileName(job.title, new Date()),
-    );
+    const filename = exportFileName(job.title, new Date());
+    saveBlob(new Blob([buffer], { type: 'text/markdown;charset=utf-8' }), filename);
+    // M17: verification passed and the browser download has started.
+    showToastBriefly(`已导出：${filename}`, 'ok');
   };
 
   const requestHist = (chat: string) => {
@@ -2571,7 +2587,7 @@ export default function App() {
             // and the local selection is still the best thing to show.
             break;
           }
-          setToast(detail ? `${code} — ${detail}` : code);
+          setToast({ text: detail ? `${code} — ${detail}` : code, tone: 'danger' });
           break;
         }
 
@@ -2713,7 +2729,12 @@ export default function App() {
     );
     if (!client.send({ t: 'export', chat, id: job.id })) {
       failExport(job, '未连接 — 无法导出');
+      return;
     }
+    // M17: the desktop button also flips to "导出中…", but on narrow screens
+    // that button is hidden behind the (already closed) overflow menu, so the
+    // status line is the only progress signal.
+    showToastBriefly('正在导出当前会话…', 'info');
   };
 
   const query = search.trim().toLowerCase();
@@ -2792,7 +2813,7 @@ export default function App() {
       return;
     }
     if (!clientRef.current?.send({ t: 'set_model', provider: item.provider, model: item.model })) {
-      setToast('未连接：模型未切换');
+      setToast({ text: '未连接：模型未切换', tone: 'danger' });
       return;
     }
     setModelBusy(true);
@@ -3135,7 +3156,7 @@ export default function App() {
     if (!approval || approval.status !== 'pending' || !client) return;
     if (answeredApprovals.current.has(approval.reqId)) return;
     if (!client.send({ t: action, chat, req_id: approval.reqId })) {
-      setToast('未连接 — 审批指令未发送。');
+      setToast({ text: '未连接 — 审批指令未发送。', tone: 'danger' });
       return;
     }
     answeredApprovals.current.add(approval.reqId);
@@ -3712,8 +3733,8 @@ export default function App() {
         </header>
 
         {toast ? (
-          <div className="toast" role="status">
-            <span>{toast}</span>
+          <div className={`toast toast-${toast.tone}`} role="status">
+            <span>{toast.text}</span>
             <button onClick={() => setToast(null)}>关闭</button>
           </div>
         ) : null}
@@ -4174,7 +4195,7 @@ export default function App() {
               • 在输入框敲 <strong><code>@</code></strong>（或点击左下角「技能」按钮）即可呼出技能列表（包含容器内已启用的技能与内置工作流技能）。<br />
               • 敲 <strong><code>/model</code></strong> 回车即可直接在输入框正上方用键盘方向键切换模型。<br />
               • 输入框上方是上下文计量条：<strong>上下文 ≈</strong> 取最近一轮最后一次模型调用的输入（工具调用轮次不再累加），百分比只在已知模型上下文上限时显示；右侧 <strong>↑输入 / ↓输出</strong> 为本会话累计，点按可展开完整数字。<br />
-              • 每条助手回答的底部有 <strong>本轮 ↑… ↓…</strong> 小字，悬停可看精确 token、合计与耗时（含工具调用）；估算轮次带 ≈。
+              • 每条助手回答的底部有 <strong>本轮 ↑… ↓…</strong> 小字，悬停可看精确 token 与合计；估算轮次带 ≈。
             </p>
             <p className="help-build">{formatBuildLabel()}</p>
           </div>
