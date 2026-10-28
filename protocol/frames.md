@@ -66,12 +66,12 @@ superseded generation) is not acked.
 | `msg` | `chat`, `seq?`, `parts[]` | complete message, tool result or attachment reference |
 | `approval` | `chat`, `req_id`, `tool`, `severity`, `summary` | approval request |
 | `resync` | `chat`, `reason?` | ring buffer miss; client must reload history |
-| `hist` | `chat`, `messages:[{role, text}]`, `more?`, `seq?` | reply to a `hist` request; `more:true` means another `hist` frame follows |
+| `hist` | `chat`, `messages:[{role, text, turn?}]`, `more?`, `seq?` | reply to a `hist` request; `more:true` means another `hist` frame follows; `turn` is the **v8** optional per-turn usage receipt (§11.2) |
 | `models` | `items:[{provider, model, active}]` | **v3** reply to a `models` request; exactly one item has `active:true` when the agent's current (effective) model is known |
 | `model_changed` | `provider`, `model` | **v3** a `set_model` succeeded; this pair is now the agent's active model |
 | `status` | `agent_name`, `provider?`, `model?` | **v3** identity push, sent when the agent attaches and whenever a client joins/leaves; the header displays it |
 | `effort` | `chat`, `level`, `effective`, `budget_tokens?`, `supported?`, `kind?`, `model_key?` | **v4** session thinking state: reply to `get_effort` / `set_effort`; control frame |
-| `usage` | `chat`, `id?`, `input_total?`, `output_total?`, `context_tokens?`, `context_limit?` | **v5** session token usage: reply to `get_usage`; every numeric field is optional (absent = unknown); control frame |
+| `usage` | `chat`, `id?`, `input_total?`, `output_total?`, `context_tokens?`, `context_limit?`, `last_turn?` | **v5**/**v8** session token usage: reply to `get_usage`; every numeric field is optional (absent = unknown); `last_turn` is the newest turn's receipt (§11.2); control frame |
 | `export_begin` | `chat`, `id`, `bytes`, `chunks`, `sha256` | **v6** export snapshot: whole-document UTF-8 byte length, chunk count, lower-case hex digest; control frame |
 | `export_chunk` | `chat`, `id`, `i`, `data` | **v6** one export chunk; `i` is 0-based, `data` is base64 of ≤96 KB raw bytes; control frame |
 | `export_end` | `chat`, `id` | **v6** all export chunks sent; the client verifies and saves; control frame |
@@ -424,11 +424,13 @@ Agent → client:
 ring-buffered and not replayed on `resume`. A reconnecting client re-requests `get_effort` for the
 visible chat.
 
-## 11. Protocol v5 — per-session token usage
+## 11. Protocol v5/v8 — per-session token usage and per-turn receipts
 
-Lets the browser show one compact usage line for the visible conversation. The relay needs **no
-changes**: these are ordinary frames it forwards verbatim. The plugin keeps no counter of its own —
-it reads the per-turn usage QwenPaw already persists on the session's messages.
+Lets the browser show a context meter above the composer and one tiny receipt
+under the assistant bubble that closed each turn. The relay needs **no
+changes**: these are ordinary frames it forwards verbatim. The plugin keeps no
+counter of its own — it reads the per-turn usage QwenPaw already persists on
+the session's messages.
 
 ### 11.1 Wire format
 
@@ -442,7 +444,8 @@ Agent → client:
 
 ```json
 {"t":"usage","chat":"…","id":"usage-get","input_total":12345,"output_total":6789,
- "context_tokens":68000,"context_limit":200000}
+ "context_tokens":68000,"context_limit":200000,
+ "last_turn":{"id":"<Msg.id>","input":1234,"output":567,"total":1801,"duration_ms":12350}}
 {"t":"usage","chat":"…"}
 ```
 
@@ -452,10 +455,15 @@ Agent → client:
 - `id` echoes the request's envelope `id` when it had one.
 - `chat` is always present. The agent **always answers** — the second frame above is the documented
   "no usage data" result (new chat, no persisted turn yet, unreadable/absent session file). There is
-  no `E_*` error for usage; a client must treat an empty frame as "hide the line" rather than keep
+  no `E_*` error for usage; a client must treat an empty frame as "hide the meter" rather than keep
   another chat's numbers.
 - `context_limit` is the active model's `effective_max_input_length` and may appear without any token
   fields.
+- `last_turn` (**v8**) is the receipt of the session's **newest** assistant reply, in the same shape
+  as `hist`'s `turn` (below). It is present only when that reply recorded usable usage; a still
+  streaming, failed, cancelled or legacy reply yields no `last_turn` at all. Clients must **not**
+  reuse an older turn's numbers for the new bubble and should deduplicate by `id` against the turn
+  they already show.
 
 ### 11.2 Data basis
 
@@ -464,18 +472,49 @@ Agent → client:
   persisted in `workspace/sessions/web/*.json` (the same data `agent_stats` aggregates). The plugin
   matches the file to the chat's `session_id` (`web:web-user:<chat>`) and caches parses by file
   mtime/size. Missing, malformed or non-numeric fields are skipped; they are never zero-filled.
-- `context_tokens` — **approximation**, `basis=last_turn_prompt`: the `prompt_tokens` of the latest
-  assistant message that recorded a positive prompt size. It describes how large the model input was
-  on the last turn, not a live tokenizer count, so a turn with several tool calls may read slightly
-  low. A turn recorded with a 0/missing prompt is skipped in favour of the previous usable one.
+- `context_tokens` — **approximation**, `basis=last_turn_prompt`: the latest recorded turn's context
+  estimate, in priority order `usage.last_prompt_tokens`, then
+  `qwenpaw_turn_usage.context_usage.estimated_tokens`, then `usage.prompt_tokens`. Only a positive
+  value is usable; a turn with none is skipped in favour of the previous usable one.
+  `prompt_tokens` accumulates **every model call of the turn**, so a turn with several tool calls
+  would overstate the context (often by a multiple); `last_prompt_tokens` is the last call's prompt
+  and is therefore the primary numerator. This is still an approximation, not a live tokenizer
+  count, which is why every client render marks it with `≈`.
 - `context_limit` — `GET /api/models/active?scope=effective&agent_id=<id>` →
   `effective_max_input_length`. The window belongs to the model, so clients refresh after
   `model_changed`.
 
-The SPA renders `本会话 ↑<input> ↓<output> · 上下文 ≈<pct>%（<context>/<limit>）`, with `≈` marking
-the approximation. Without `context_limit` it shows `上下文 ≈<context>` (no percentage); without
-`context_tokens` the whole context part is omitted; without either input or output the session part
-is omitted. Numbers use a compact `k`/`M` format.
+#### `turn` receipts (v8)
+
+`hist` carries one optional `turn` on the assistant **text** message that closes a persisted
+`Msg`; `usage.last_turn` carries the same object for the newest reply:
+
+```json
+{"id":"<Msg.id>","input":1234,"output":567,"total":1801,"duration_ms":12350,"estimated":true}
+```
+
+- `id` — the persisted `Msg.id` (QwenPaw's `metadata.original_id` on history messages). It is the
+  deduplication key between `hist` and `last_turn`.
+- `input` / `output` — that turn's `prompt_tokens` / `completion_tokens`; `total` — the recorded
+  `total_tokens`, or `input + output` when both are known.
+- `duration_ms` — wall-clock time between the turn's `timestamp` (created) and `finished_at`
+  (REPLY_END). It includes tool calls and approval waits. Omitted when either timestamp is missing,
+  unparsable, tz-mismatched or the delta is negative.
+- `estimated` — present and `true` only when QwenPaw marked the turn's usage as an estimate; absent
+  means "not estimated", not `false`.
+- **A message without `turn` means "no usable usage for this turn", never 0.** Reasons include a
+  turn that recorded no usage, a group with conflicting usage, no assistant text segment, or a
+  history window that does not contain the anchor. Fields absent inside a `turn` are unknown and
+  must not be rendered as 0. One persisted `Msg` may be split into reasoning / tool / text
+  messages; only the last text segment is an anchor, so a turn is never counted twice.
+
+The SPA renders the meter above the composer as `上下文 ≈<pct>%` with a thin bar (fill colour turns
+amber from 75% and red from 90%) and, on desktop, the session totals `↑<input> ↓<output>` on the
+same row; tapping the row opens a small panel with the exact numbers. Each assistant bubble shows
+`≈本轮 ↑<input> ↓<output>` (the `≈` only for estimated turns) with exact numbers, total and
+`耗时 <s>s（含工具调用）` in the tooltip. Without `context_limit` the meter degrades to the text
+`上下文 ≈<context>` (no percentage); with only totals it shows just `↑… ↓…`; with neither it is
+hidden. Numbers use a compact `k`/`M` format.
 
 ### 11.3 Control frames
 

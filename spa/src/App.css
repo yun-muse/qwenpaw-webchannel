@@ -731,23 +731,14 @@ button:disabled {
   color: var(--text);
 }
 
-/* M11: title + the compact per-session usage line underneath it */
+/* M14/M15: the title row is a single line again (usage moved to the metered
+   composer deck). */
 .top-titles {
   display: flex;
   flex-direction: column;
   gap: 1px;
   min-width: 0;
   flex: 1 1 auto;
-}
-
-.usage-line {
-  font-size: 11px;
-  line-height: 1.3;
-  color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-variant-numeric: tabular-nums;
 }
 
 .hamburger {
@@ -1129,6 +1120,16 @@ button:disabled {
 .bubble-time {
   font-variant-numeric: tabular-nums;
   margin-right: 4px;
+}
+
+/* M15: one receipt per turn, inline with the time on desktop (mobile: own row) */
+.bubble-usage {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  margin-right: 4px;
+  opacity: 0.9;
 }
 
 .copy-btn,
@@ -1678,6 +1679,91 @@ button:disabled {
   position: relative;
   padding: 6px 24px 16px;
   background: linear-gradient(180deg, transparent 0%, var(--bg) 25%);
+}
+
+/* ---------- M15: context meter above the composer ---------- */
+
+.context-meter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 780px;
+  margin: 0 auto 6px;
+  padding: 0 2px;
+  min-height: 20px;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: left;
+}
+
+.context-meter-interactive {
+  cursor: pointer;
+}
+
+.context-meter-track {
+  flex: 1 1 auto;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.context-meter-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  transition: width 0.25s ease;
+}
+
+.context-meter.tone-warn .context-meter-fill {
+  background: #d48806;
+}
+
+.context-meter.tone-danger .context-meter-fill {
+  background: #cf1322;
+}
+
+.context-meter-label,
+.context-meter-detail,
+.context-meter-totals {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.context-meter-label {
+  flex: 0 0 auto;
+}
+
+.context-meter-detail {
+  opacity: 0.85;
+}
+
+.context-meter-totals {
+  margin-left: auto;
+  opacity: 0.8;
+}
+
+.context-meter-panel {
+  max-width: 780px;
+  margin: 0 auto 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  line-height: 1.55;
+  font-variant-numeric: tabular-nums;
+}
+
+.context-meter-note {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
 }
 
 .composer-error {
@@ -2455,15 +2541,11 @@ button:disabled {
 
 @media (max-width: 720px) {
   /* ===== M14: one-hand layout =============================================
-     Top bar: hamburger + title + status + overflow menu. The usage line moves
-     to a full-width second row so it can never be ellipsized to zero width. */
+     Top bar: hamburger + title + status + overflow menu, one line only (M15
+     moved usage out to the meter above the composer). */
   .top {
     padding: 6px 12px;
     gap: 8px;
-  }
-
-  .top.has-usage {
-    padding-bottom: 28px;
   }
 
   .top-left {
@@ -2517,16 +2599,6 @@ button:disabled {
 
   .status-label {
     display: none;
-  }
-
-  .usage-line {
-    position: absolute;
-    left: 12px;
-    right: 12px;
-    bottom: 6px;
-    width: auto;
-    font-size: 11.5px;
-    line-height: 1.2;
   }
 
   /* ===== Drawer: scrim + close button + no title/action collision ======== */
@@ -2633,6 +2705,27 @@ button:disabled {
     padding: 6px 12px 12px;
   }
 
+  /* M15: the meter keeps only bar + ≈% on phones; tap opens the detail panel */
+  .context-meter {
+    min-height: 28px;
+    gap: 8px;
+    margin-bottom: 2px;
+  }
+
+  .context-meter-track {
+    height: 4px;
+  }
+
+  .context-meter-interactive .context-meter-detail,
+  .context-meter-interactive .context-meter-totals {
+    display: none;
+  }
+
+  .context-meter-panel {
+    padding: 10px 12px;
+    font-size: 12px;
+  }
+
   .composer-card {
     padding: 10px 12px 8px;
     border-radius: 16px;
@@ -2724,6 +2817,13 @@ button:disabled {
 
   .bubble-foot {
     gap: 8px;
+  }
+
+  /* M15: the receipt owns a full row above the thumb-sized action buttons. */
+  .bubble-usage {
+    flex: 0 0 100%;
+    order: -1;
+    margin: 0 0 2px;
   }
 
   .copy-btn,

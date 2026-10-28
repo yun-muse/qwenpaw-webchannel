@@ -298,6 +298,8 @@ interface ChatMessage {
   attachments?: string[];
   approval?: ApprovalMeta;
   ts?: number;
+  /** Per-turn token receipt from `hist` / `usage.last_turn` (M15). */
+  turn?: TurnUsage;
 }
 
 interface ModelItem {
@@ -446,13 +448,18 @@ function fmtKb(bytes: number): string {
   return `${Math.round(bytes / 1024)} KB`;
 }
 
-/** Compact token count for the usage line: 950, 12.3k, 1.2M. */
+/** Compact token count for the meter/receipt: 950, 12.3k, 1.2M. */
 function formatTokens(count: number): string {
   if (count < 1000) return String(Math.round(count));
   if (count < 1_000_000) {
     return `${(count / 1000).toFixed(1).replace(/\.0$/, '')}k`;
   }
   return `${(count / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
+}
+
+/** Full grouped number for the meter's expanded panel. */
+function formatExact(count: number): string {
+  return Math.round(count).toLocaleString('zh-CN');
 }
 
 /** Per-chat usage as reported by the plugin's `usage` control frame (M11). */
@@ -463,13 +470,63 @@ interface ChatUsage {
   contextLimit?: number;
 }
 
+/** One turn's token receipt (`hist.messages[].turn` / `usage.last_turn`, M15). */
+interface TurnUsage {
+  id: string;
+  input?: number;
+  output?: number;
+  total?: number;
+  duration_ms?: number;
+  estimated?: boolean;
+}
+
 const USAGE_TITLE =
-  '本会话累计输入/输出取自 QwenPaw 每轮 usage 元数据；上下文占用为最近一轮输入近似（≈），多轮工具调用时可能略低';
+  '本会话累计 ↑↓ 取自 QwenPaw 每轮 usage 元数据；上下文占用 ≈ 最近一轮最后一次模型调用的输入，工具调用轮次不再累加，仍可能与实时值略有偏差';
 
 function usageCount(raw: unknown): number | undefined {
   return typeof raw === 'number' && Number.isFinite(raw) && raw >= 0
     ? Math.round(raw)
     : undefined;
+}
+
+/**
+ * Parse one `turn` receipt. A receipt whose id is not a non-empty string, or
+ * that carries any present-but-invalid numeric field, is dropped whole: a
+ * half-parsed receipt would show numbers the server never sent.
+ */
+function turnUsageOf(raw: unknown): TurnUsage | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const record = raw as Record<string, unknown>;
+  const id = record.id;
+  if (typeof id !== 'string' || !id) return undefined;
+
+  const turn: TurnUsage = { id };
+  for (const key of ['input', 'output', 'total', 'duration_ms'] as const) {
+    const value = record[key];
+    if (value == null) continue;
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+      return undefined;
+    }
+    turn[key] = Math.round(value);
+  }
+  // The plugin only emits a receipt when at least one token side is known.
+  if (turn.input == null && turn.output == null) return undefined;
+  if (record.estimated === true) turn.estimated = true;
+  return turn;
+}
+
+/** Tooltip for one receipt: exact numbers, total, duration and the ≈ note. */
+function turnTitle(turn: TurnUsage): string {
+  const parts: string[] = [];
+  if (turn.input != null) parts.push(`输入 ${turn.input}`);
+  if (turn.output != null) parts.push(`输出 ${turn.output}`);
+  if (turn.total != null) parts.push(`合计 ${turn.total}`);
+  let text = `本轮用量${turn.estimated ? '（估算）' : ''}：${parts.join(' · ')}`;
+  if (turn.duration_ms != null) {
+    text += ` · 耗时 ${(turn.duration_ms / 1000).toFixed(1)}s（含工具调用）`;
+  }
+  if (turn.estimated) text += ' · 该轮 token 数为估算值';
+  return text;
 }
 
 /** Parse one `usage` frame; absent/invalid fields stay absent. */
@@ -484,32 +541,6 @@ function usageOf(frame: Frame): ChatUsage {
   if (context != null) usage.contextTokens = context;
   if (limit != null && limit > 0) usage.contextLimit = limit;
   return usage;
-}
-
-/** One compact line, e.g. `本会话 ↑12.3k ↓4.5k · 上下文 ≈34%（68k/200k）`. */
-function usageLine(usage: ChatUsage | undefined): string {
-  if (!usage) return '';
-  const parts: string[] = [];
-
-  if (usage.inputTotal != null || usage.outputTotal != null) {
-    const totals: string[] = [];
-    if (usage.inputTotal != null) totals.push(`↑${formatTokens(usage.inputTotal)}`);
-    if (usage.outputTotal != null) totals.push(`↓${formatTokens(usage.outputTotal)}`);
-    parts.push(`本会话 ${totals.join(' ')}`);
-  }
-
-  if (usage.contextTokens != null) {
-    if (usage.contextLimit != null) {
-      const percent = Math.round((usage.contextTokens / usage.contextLimit) * 100);
-      parts.push(
-        `上下文 ≈${percent}%（${formatTokens(usage.contextTokens)}/${formatTokens(usage.contextLimit)}）`,
-      );
-    } else {
-      parts.push(`上下文 ≈${formatTokens(usage.contextTokens)}`);
-    }
-  }
-
-  return parts.join(' · ');
 }
 
 function hexOf(buffer: ArrayBuffer): string {
@@ -667,6 +698,7 @@ function mergeSkillItems(raw: unknown): SkillItem[] {
 interface HistoryMessage {
   role: Role;
   text: string;
+  turn?: TurnUsage;
 }
 
 function historyMessages(raw: unknown): HistoryMessage[] {
@@ -674,11 +706,17 @@ function historyMessages(raw: unknown): HistoryMessage[] {
   const out: HistoryMessage[] = [];
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue;
-    const record = item as { role?: unknown; text?: unknown };
+    const record = item as { role?: unknown; text?: unknown; turn?: unknown };
     const role: Role | null =
       record.role === 'assistant' ? 'assistant' : record.role === 'user' ? 'user' : null;
     if (!role) continue;
-    out.push({ role, text: typeof record.text === 'string' ? record.text : '' });
+    const message: HistoryMessage = {
+      role,
+      text: typeof record.text === 'string' ? record.text : '',
+    };
+    const turn = turnUsageOf(record.turn);
+    if (turn) message.turn = turn;
+    out.push(message);
   }
   return out;
 }
@@ -1111,6 +1149,13 @@ function MessageView({
       ) : null}
       {message.streaming ? null : (
         <div className="bubble-foot">
+          {isAssistant && message.turn ? (
+            <span className="bubble-usage" title={turnTitle(message.turn)}>
+              {message.turn.estimated ? '≈' : ''}本轮
+              {message.turn.input != null ? ` ↑${formatTokens(message.turn.input)}` : ''}
+              {message.turn.output != null ? ` ↓${formatTokens(message.turn.output)}` : ''}
+            </span>
+          ) : null}
           {message.ts ? <span className="bubble-time">{clockOf(message.ts)}</span> : null}
           <button
             className={`copy-btn${copied ? ' copied' : ''}`}
@@ -1169,6 +1214,97 @@ function MessageView({
   }
 
   return <div className="row user">{bubble}</div>;
+}
+
+/**
+ * Context meter above the composer (M15). A thin bar plus `上下文 ≈N%` on
+ * mobile; the exact tokens and the session totals join it on desktop and in
+ * the tap-opened panel. Degrades to text-only rows when a part is missing and
+ * renders nothing when only `context_limit` is known.
+ */
+function ContextMeter({ usage }: { usage: ChatUsage | undefined }) {
+  const [open, setOpen] = useState(false);
+  if (!usage) return null;
+
+  const { contextTokens, contextLimit, inputTotal, outputTotal } = usage;
+  const hasTotals = inputTotal != null || outputTotal != null;
+  const totals = hasTotals ? (
+    <span className="context-meter-totals">
+      {inputTotal != null ? `↑${formatTokens(inputTotal)}` : ''}
+      {inputTotal != null && outputTotal != null ? ' ' : ''}
+      {outputTotal != null ? `↓${formatTokens(outputTotal)}` : ''}
+    </span>
+  ) : null;
+
+  if (contextTokens == null) {
+    // No context size: the session totals alone are still worth a line.
+    return hasTotals ? (
+      <div className="context-meter context-meter-plain" title={USAGE_TITLE}>
+        {totals}
+      </div>
+    ) : null;
+  }
+
+  if (contextLimit == null) {
+    // A size without a window: text only, no bar and no percentage.
+    return (
+      <div className="context-meter context-meter-plain" title={USAGE_TITLE}>
+        <span className="context-meter-label">
+          上下文 ≈{formatTokens(contextTokens)}
+        </span>
+        {totals}
+      </div>
+    );
+  }
+
+  const percent = Math.round((contextTokens / contextLimit) * 100);
+  const tone = percent >= 90 ? 'danger' : percent >= 75 ? 'warn' : 'ok';
+  const totalHint = hasTotals
+    ? `；本会话累计输入 ${inputTotal != null ? formatTokens(inputTotal) : '未知'}，输出 ${
+        outputTotal != null ? formatTokens(outputTotal) : '未知'
+      }`
+    : '';
+  return (
+    <>
+      <button
+        type="button"
+        className={`context-meter context-meter-interactive tone-${tone}`}
+        aria-expanded={open}
+        aria-label={`上下文占用约 ${percent}%，${formatTokens(contextTokens)} / ${formatTokens(
+          contextLimit,
+        )} tokens${totalHint}`}
+        title={USAGE_TITLE}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="context-meter-track">
+          <span
+            className="context-meter-fill"
+            style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}
+          />
+        </span>
+        <span className="context-meter-label">上下文 ≈{percent}%</span>
+        <span className="context-meter-detail">
+          {formatTokens(contextTokens)} / {formatTokens(contextLimit)}
+        </span>
+        {totals}
+      </button>
+      {open ? (
+        <div className="context-meter-panel">
+          <div>
+            上下文 ≈{formatExact(contextTokens)} / {formatExact(contextLimit)} tokens（最近一轮结束后刷新）
+          </div>
+          {hasTotals ? (
+            <div>
+              本会话累计
+              {inputTotal != null ? ` ↑${formatExact(inputTotal)}` : ''}
+              {outputTotal != null ? ` ↓${formatExact(outputTotal)}` : ''}
+            </div>
+          ) : null}
+          <div className="context-meter-note">{USAGE_TITLE}</div>
+        </div>
+      ) : null}
+    </>
+  );
 }
 
 function LoginGate({
@@ -1450,6 +1586,27 @@ export default function App() {
   };
 
   /**
+   * M15: a `usage` frame's `last_turn` belongs to the reply that just
+   * finished. Attach it to the newest assistant text bubble only when it has
+   * no receipt yet: the same id is already correct, and a different id
+   * belongs to an older/newer turn and must not overwrite anything. A bubble
+   * that is still streaming is a *new* turn, never the receipt's owner.
+   */
+  const attachLastTurn = (chat: string, turn: TurnUsage) => {
+    updateChat(chat, (prev) => {
+      for (let i = prev.length - 1; i >= 0; i -= 1) {
+        const message = prev[i];
+        if (message.role !== 'assistant' || message.kind !== 'text') continue;
+        if (message.streaming || message.turn) return prev;
+        const out = [...prev];
+        out[i] = { ...message, turn };
+        return out;
+      }
+      return prev;
+    });
+  };
+
+  /**
    * The closing `end` and the trailing `msg` of one turn both land here; the
    * timer collapses them and gives the app time to persist the turn's usage
    * meta into the session file before the plugin reads it (M11).
@@ -1569,9 +1726,28 @@ export default function App() {
         }
       }
       const out = [...prev];
+      // Overlapping frames re-describe messages already on screen (the live
+      // path has no receipt). Keep what is shown, but take a receipt that the
+      // incoming history now carries; M15 anchors it to one text segment.
+      for (let i = 0; i < start; i += 1) {
+        const turn = incoming[i]?.turn;
+        if (!turn) continue;
+        const index = prev.length - start + i;
+        const shown = out[index];
+        if (!shown || shown.role !== 'assistant') continue;
+        if (shown.turn && shown.turn.id === turn.id) continue;
+        out[index] = { ...shown, turn };
+      }
       for (let i = start; i < incoming.length; i += 1) {
         const item = incoming[i];
-        out.push({ id: nextId++, role: item.role, kind: 'text', text: item.text });
+        const message: ChatMessage = {
+          id: nextId++,
+          role: item.role,
+          kind: 'text',
+          text: item.text,
+        };
+        if (item.turn) message.turn = item.turn;
+        out.push(message);
       }
       return out;
     });
@@ -2233,6 +2409,8 @@ export default function App() {
 
         case 'usage': {
           setUsageByChat((prev) => ({ ...prev, [chat]: usageOf(frame) }));
+          const lastTurn = turnUsageOf(frame.last_turn);
+          if (lastTurn) attachLastTurn(chat, lastTurn);
           break;
         }
 
@@ -2463,7 +2641,7 @@ export default function App() {
   const streaming = messages.some((m) => m.streaming);
   const activeEffort = effortLevels[activeChat] ?? 'default';
   const activeEffortSupported = effortMeta[activeChat]?.supported ?? null;
-  const usageText = usageLine(usageByChat[activeChat]);
+  const activeUsage = usageByChat[activeChat];
 
   useEffect(() => {
     const el = listRef.current;
@@ -3411,7 +3589,7 @@ export default function App() {
       </aside>
 
       <main className="main">
-        <header className={`top${usageText ? ' has-usage' : ''}`}>
+        <header className="top">
           <div className="top-left">
             <button
               className="hamburger"
@@ -3425,11 +3603,6 @@ export default function App() {
               <div className="top-title" title={titleOf(activeChat)}>
                 {titleOf(activeChat)}
               </div>
-              {usageText ? (
-                <div className="usage-line" title={USAGE_TITLE}>
-                  {usageText}
-                </div>
-              ) : null}
             </div>
           </div>
 
@@ -3700,6 +3873,8 @@ export default function App() {
           ) : null}
 
           {composerError ? <div className="composer-error">{composerError}</div> : null}
+
+          <ContextMeter usage={activeUsage} />
 
           <div className="composer-card">
             {activeSkill || attachment ? (
@@ -3998,7 +4173,8 @@ export default function App() {
             <p className="help-keys">
               • 在输入框敲 <strong><code>@</code></strong>（或点击左下角「技能」按钮）即可呼出技能列表（包含容器内已启用的技能与内置工作流技能）。<br />
               • 敲 <strong><code>/model</code></strong> 回车即可直接在输入框正上方用键盘方向键切换模型。<br />
-              • 会话标题下方的用量行：<strong>↑输入 / ↓输出</strong> 为本会话累计值；<strong>上下文 ≈</strong> 为最近一轮输入近似（多轮工具调用时可能略低），百分比只在已知模型上下文上限时显示。
+              • 输入框上方是上下文计量条：<strong>上下文 ≈</strong> 取最近一轮最后一次模型调用的输入（工具调用轮次不再累加），百分比只在已知模型上下文上限时显示；右侧 <strong>↑输入 / ↓输出</strong> 为本会话累计，点按可展开完整数字。<br />
+              • 每条助手回答的底部有 <strong>本轮 ↑… ↓…</strong> 小字，悬停可看精确 token、合计与耗时（含工具调用）；估算轮次带 ≈。
             </p>
             <p className="help-build">{formatBuildLabel()}</p>
           </div>

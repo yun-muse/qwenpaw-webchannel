@@ -386,16 +386,18 @@ def skills_frame(items):
 
 def usage_frame(
     chat, req_id=None, input_total=None, output_total=None,
-    context_tokens=None, context_limit=None,
+    context_tokens=None, context_limit=None, last_turn=None,
 ):
-    """Session usage: ``{t:"usage", chat, id?, input_total?, ...}`` (M11).
+    """Session usage: ``{t:"usage", chat, id?, input_total?, ...}`` (M11/M15).
 
     Every numeric field is optional and only appears when the data source
     actually provided it -- a missing field means "unknown", never 0. The
     handler always answers, so an empty frame (``{"t":"usage","chat":...}``)
     is the documented "no data" reply. ``id`` echoes the requesting frame's
-    envelope id when it had one. Like the other control frames this one is
-    sent without ``seq`` (see protocol/frames.md §11).
+    envelope id when it had one. ``last_turn`` (M15) is the newest assistant
+    reply's receipt, in the same shape as ``hist``'s ``turn``; it is omitted
+    when the newest reply has no usable usage. Like the other control frames
+    this one is sent without ``seq`` (see protocol/frames.md §11).
     """
     frame = {"t": "usage", "chat": chat}
     if isinstance(req_id, str) and req_id:
@@ -408,6 +410,8 @@ def usage_frame(
     ):
         if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
             frame[key] = value
+    if isinstance(last_turn, dict) and last_turn:
+        frame["last_turn"] = last_turn
     return frame
 
 

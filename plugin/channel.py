@@ -1387,7 +1387,9 @@ class WebChannel(BaseChannel):
         persisted under ``<workspace>/sessions/web/*.json``. The plugin reads
         that one file (mtime/size cached) and sums the per-turn
         ``qwenpaw_turn_usage.usage`` fields; ``context_tokens`` is the latest
-        turn's prompt size, i.e. an approximation of the live context.
+        turn's best context estimate (``last_prompt_tokens`` first), i.e. an
+        approximation of the live context. ``last_turn`` carries that newest
+        turn's receipt for the just-finished bubble (M15).
         ``context_limit`` is the active model's ``effective_max_input_length``.
 
         The handler always answers -- at least ``{t:"usage", chat}`` -- so a
@@ -1410,8 +1412,8 @@ class WebChannel(BaseChannel):
             session_id = self.resolve_session_id(
                 SENDER_ID, {"chat_id": chat},
             )
-            usage = await asyncio.to_thread(
-                self._usage.usage_for,
+            usage, last_turn = await asyncio.to_thread(
+                self._usage.usage_and_last_turn_for,
                 self._workspace_dir() / "sessions",
                 session_id,
                 chat,
@@ -1426,6 +1428,8 @@ class WebChannel(BaseChannel):
                         and value >= 0
                     ):
                         fields[key] = value
+            if isinstance(last_turn, dict) and last_turn:
+                fields["last_turn"] = last_turn
 
             _provider, _model, limit = await self._fetch_active_detail()
             if limit > 0:

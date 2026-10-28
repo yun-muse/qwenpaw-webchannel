@@ -12,6 +12,7 @@ import math
 import os
 import threading
 from collections import deque
+from datetime import datetime
 from urllib.parse import urlsplit
 
 # Protocol §2.4 ``hist`` frames carry at most the last 50 messages unless the
@@ -193,13 +194,182 @@ def _part_texts(content):
             yield text
 
 
+def _iso_moment(value):
+    """Parse one ISO-8601 timestamp, or ``None`` when it is unusable."""
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _duration_ms(created_at, finished_at):
+    """Wall-clock milliseconds between two ISO timestamps, or ``None``.
+
+    QwenPaw records no duration: the only evidence is the turn's outer
+    ``metadata.timestamp`` (created) and ``metadata.finished_at`` (REPLY_END),
+    either of which may be null. A value is produced only when both parse,
+    carry the same tz-awareness and ``finished >= created``.
+    """
+    created = _iso_moment(created_at)
+    finished = _iso_moment(finished_at)
+    if created is None or finished is None:
+        return None
+    if (created.tzinfo is None) != (finished.tzinfo is None):
+        return None
+    try:
+        delta = (finished - created).total_seconds() * 1000.0
+    except (OverflowError, TypeError):
+        return None
+    if delta < 0:
+        return None
+    return int(round(delta))
+
+
+def _history_turn_usage(message):
+    """The ``qwenpaw_turn_usage`` dict of one raw ``Message``, or ``None``.
+
+    Current 2.x converters copy the original ``Msg.metadata`` into the inner
+    ``metadata.metadata``; older shapes keep the key on the outer metadata.
+    Both are accepted, inner first.
+    """
+    metadata = message.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+    inner = metadata.get("metadata")
+    if isinstance(inner, dict):
+        turn = inner.get(TURN_USAGE_META_KEY)
+        if isinstance(turn, dict):
+            return turn
+    turn = metadata.get(TURN_USAGE_META_KEY)
+    return turn if isinstance(turn, dict) else None
+
+
+def _history_original_id(message):
+    """The persisted ``Msg.id`` shared by every split segment, or ``""``."""
+    metadata = message.get("metadata")
+    if not isinstance(metadata, dict):
+        return ""
+    value = metadata.get("original_id")
+    return value if isinstance(value, str) and value else ""
+
+
+def _make_turn(turn_id, usage, duration_ms=None):
+    """One ``turn`` receipt from a usage dict, or ``None`` without tokens.
+
+    Missing fields are omitted, never zero-filled; ``estimated`` is written
+    only when the source explicitly marked the usage as an estimate.
+    """
+    prompt = _token_count(usage.get("prompt_tokens"))
+    completion = _token_count(usage.get("completion_tokens"))
+    if prompt is None and completion is None:
+        return None
+
+    turn = {"id": turn_id}
+    if prompt is not None:
+        turn["input"] = prompt
+    if completion is not None:
+        turn["output"] = completion
+    total = _token_count(usage.get("total_tokens"))
+    if total is None and prompt is not None and completion is not None:
+        total = prompt + completion
+    if total is not None:
+        turn["total"] = total
+    if (
+        isinstance(duration_ms, int)
+        and not isinstance(duration_ms, bool)
+        and duration_ms >= 0
+    ):
+        turn["duration_ms"] = duration_ms
+    if usage.get("estimated") is True:
+        turn["estimated"] = True
+    return turn
+
+
+def _attach_history_turns(entries):
+    """Attach one ``turn`` per persisted message to the *entries* projection.
+
+    Every ``Message`` split from the same persisted ``Msg`` shares one
+    ``metadata.original_id`` and repeats the same ``qwenpaw_turn_usage``. The
+    receipt belongs to the group's last assistant text segment (the answer),
+    never to reasoning/tool cards or to every split segment. A group with two
+    different usages, or without a text anchor, gets no receipt.
+    """
+    groups = {}
+    order = []
+    for entry in entries:
+        original_id = _history_original_id(entry["message"])
+        if not original_id:
+            continue
+        bucket = groups.get(original_id)
+        if bucket is None:
+            bucket = groups[original_id] = []
+            order.append(original_id)
+        bucket.append(entry)
+
+    for original_id in order:
+        members = groups[original_id]
+        usages = []
+        for entry in members:
+            turn_meta = _history_turn_usage(entry["message"])
+            if turn_meta is None:
+                continue
+            usage = turn_meta.get("usage")
+            if isinstance(usage, dict):
+                usages.append(usage)
+        if not usages or any(usage != usages[0] for usage in usages[1:]):
+            continue
+
+        anchor = None
+        for entry in members:
+            if entry["role"] != "assistant":
+                continue
+            if entry["type"] != "MESSAGE":
+                continue
+            if not entry["text"].strip():
+                continue
+            anchor = entry
+        if anchor is None:
+            continue
+
+        duration = None
+        for entry in members:
+            metadata = entry["message"].get("metadata")
+            if not isinstance(metadata, dict):
+                continue
+            duration = _duration_ms(
+                metadata.get("timestamp"), metadata.get("finished_at"),
+            )
+            if duration is not None:
+                break
+
+        turn = _make_turn(original_id, usages[0], duration)
+        if turn is not None:
+            anchor["turn"] = turn
+
+
 def history_messages(history, limit=DEFAULT_HIST_LIMIT):
-    """Extract ``[{role, text}]`` from a ``ChatHistory``-shaped dict.
+    """Extract ``[{role, text}]`` (plus optional ``turn``) from ``ChatHistory``.
 
     ``GET /api/chats/{id}`` answers ``{messages: [Message...], status}`` where
     every ``Message`` (qwenpaw.schemas) is ``{role, content: [parts]...}``.
     Text parts of one message are concatenated; messages without text (tool
     calls, empty turns) are skipped. Only the last *limit* messages are kept.
+
+    Each persisted ``Msg`` becomes one or more ``Message`` segments sharing
+    ``metadata.original_id``. Its per-turn usage is attached once, as
+    ``turn``, to the group's last assistant text segment (M15); messages
+    without an id or usage keep the plain ``{role, text}`` shape. Turns are
+    attached to the full projection first and only then truncated, so a
+    receipt survives a window that starts inside its turn.
     """
     if not isinstance(history, dict):
         return []
@@ -207,7 +377,7 @@ def history_messages(history, limit=DEFAULT_HIST_LIMIT):
     if not isinstance(raw, list):
         return []
 
-    messages = []
+    entries = []
     for message in raw:
         if not isinstance(message, dict):
             continue
@@ -216,10 +386,23 @@ def history_messages(history, limit=DEFAULT_HIST_LIMIT):
             continue
         role = message.get("role")
         role = getattr(role, "value", role)
-        messages.append({"role": str(role or ""), "text": text})
+        entries.append({
+            "role": str(role or ""),
+            "text": text,
+            "type": _message_type(message),
+            "message": message,
+        })
+
+    _attach_history_turns(entries)
 
     limit = hist_limit(limit)
-    return messages[-limit:]
+    messages = []
+    for entry in entries[-limit:]:
+        projected = {"role": entry["role"], "text": entry["text"]}
+        if "turn" in entry:
+            projected["turn"] = entry["turn"]
+        messages.append(projected)
+    return messages
 
 
 def pack_history(messages, fits):
@@ -1004,15 +1187,21 @@ def _message_dict(item):
     return None
 
 
-def message_usage(message):
-    """The per-turn ``usage`` dict recorded on one message, or ``None``."""
+def message_turn_usage(message):
+    """The whole ``qwenpaw_turn_usage`` dict recorded on one message."""
     if not isinstance(message, dict):
         return None
     metadata = message.get("metadata")
     if not isinstance(metadata, dict):
         return None
     turn = metadata.get(TURN_USAGE_META_KEY)
-    if not isinstance(turn, dict):
+    return turn if isinstance(turn, dict) else None
+
+
+def message_usage(message):
+    """The per-turn ``usage`` dict recorded on one message, or ``None``."""
+    turn = message_turn_usage(message)
+    if turn is None:
         return None
     usage = turn.get("usage")
     return usage if isinstance(usage, dict) else None
@@ -1077,6 +1266,26 @@ def session_identity(session_data):
     return ""
 
 
+def _context_token_candidate(usage, context_usage, prompt):
+    """Best context-size estimate of one turn, or ``None`` when unusable.
+
+    ``prompt_tokens`` accumulates every model call of a turn, so a turn with
+    several tool calls would overstate the context. The last call's prompt
+    (``last_prompt_tokens``) is the closest recorded size; the state estimate
+    and finally the accumulated prompt are the fallbacks. Only a positive
+    value is a usable context size.
+    """
+    last_prompt = _token_count(usage.get("last_prompt_tokens"))
+    estimated = (
+        _token_count(context_usage.get("estimated_tokens"))
+        if isinstance(context_usage, dict) else None
+    )
+    for count in (last_prompt, estimated):
+        if count is not None and count > 0:
+            return count
+    return prompt if prompt is not None and prompt > 0 else None
+
+
 def session_usage(messages):
     """Cumulative token usage of one session's messages.
 
@@ -1086,9 +1295,11 @@ def session_usage(messages):
       ``prompt_tokens`` / ``completion_tokens``. A field is present when at
       least one recorded turn carried it (a real 0 is therefore distinct from
       "unknown").
-    - ``context_tokens``: the ``prompt_tokens`` of the latest recorded turn,
-      used as the approximation of the live context (``basis=last_turn_prompt``
-      in protocol/frames.md).
+    - ``context_tokens``: the latest recorded turn's context estimate, in
+      priority order ``last_prompt_tokens``, ``context_usage.estimated_tokens``
+      and ``prompt_tokens`` (``basis=last_turn_prompt`` in
+      protocol/frames.md §11.2). The accumulated prompt is only a fallback
+      because a turn with several tool calls adds every prompt together.
 
     ``{}`` means "no usage data", never "zero".
     """
@@ -1109,19 +1320,23 @@ def session_usage(messages):
         role = getattr(role, "value", role)
         if role != "assistant":
             continue
-        usage = message_usage(message)
-        if usage is None:
+        turn = message_turn_usage(message)
+        if turn is None:
+            continue
+        usage = turn.get("usage")
+        if not isinstance(usage, dict):
             continue
 
         prompt = _token_count(usage.get("prompt_tokens"))
         completion = _token_count(usage.get("completion_tokens"))
-        if prompt is None and completion is None:
-            continue
+        candidate = _context_token_candidate(
+            usage, turn.get("context_usage"), prompt,
+        )
+        if candidate is not None:
+            context_tokens = candidate
         if prompt is not None:
             saw_prompt = True
             prompt_total += prompt
-            if prompt > 0:
-                context_tokens = prompt
         if completion is not None:
             saw_completion = True
             completion_total += completion
@@ -1134,6 +1349,41 @@ def session_usage(messages):
     if context_tokens is not None:
         result["context_tokens"] = context_tokens
     return result
+
+
+def session_last_turn(messages):
+    """Receipt for the session's newest assistant reply, or ``None``.
+
+    Only the **last** assistant message may answer: when it carries no usable
+    usage (still being written, a failed/cancelled turn, or a legacy record)
+    the result is ``None``. Falling back to an earlier message would pin the
+    previous turn's numbers onto the new bubble. The shape matches ``hist``'s
+    ``turn``; the id is the persisted ``Msg.id`` clients use for deduplication.
+    """
+    if not isinstance(messages, (list, tuple)):
+        return None
+
+    last = None
+    for item in messages:
+        message = _message_dict(item)
+        if message is None:
+            continue
+        role = message.get("role")
+        role = getattr(role, "value", role)
+        if role == "assistant":
+            last = message
+    if last is None:
+        return None
+
+    usage = message_usage(last)
+    if usage is None:
+        return None
+    turn_id = last.get("id")
+    if not isinstance(turn_id, str) or not turn_id:
+        return None
+
+    duration = _duration_ms(last.get("created_at"), last.get("finished_at"))
+    return _make_turn(turn_id, usage, duration)
 
 
 def _stem_matches(path, session_id, chat, chat_id):
@@ -1166,14 +1416,20 @@ def _stem_matches(path, session_id, chat, chat_id):
     return False
 
 
+def _copy_turn(turn):
+    """Defensive shallow copy of a cached ``turn`` receipt (or ``None``)."""
+    return dict(turn) if isinstance(turn, dict) else None
+
+
 class SessionUsageStore:
     """Read-only per-session usage, cached by file ``mtime`` + size.
 
-    ``usage_for`` scans ``<sessions_root>/web`` (plus legacy ``*.json`` files
-    directly under the root), picks the file that belongs to *session_id* and
-    returns ``session_usage`` of it. Every failure (missing directory, bad
-    JSON, unreadable file, unexpected shape) degrades to ``{}``; the caller's
-    chat path must never see an exception.
+    ``usage_for`` / ``usage_and_last_turn_for`` scan ``<sessions_root>/web``
+    (plus legacy ``*.json`` files directly under the root), pick the file that
+    belongs to *session_id* and return ``session_usage`` of it (and the newest
+    turn's receipt). Every failure (missing directory, bad JSON, unreadable
+    file, unexpected shape) degrades to ``{}`` / ``None``; the caller's chat
+    path must never see an exception.
 
     Parsing is cached per path and invalidated by ``(mtime_ns, size)``, so the
     per-turn refresh only re-reads the file that actually changed.
@@ -1188,20 +1444,34 @@ class SessionUsageStore:
 
     def usage_for(self, sessions_root, session_id, chat="", chat_id=""):
         """Usage dict for one session; ``{}`` when there is nothing usable."""
+        usage, _last_turn = self.usage_and_last_turn_for(
+            sessions_root, session_id, chat, chat_id,
+        )
+        return usage
+
+    def usage_and_last_turn_for(
+        self, sessions_root, session_id, chat="", chat_id="",
+    ):
+        """``(usage, last_turn)`` for one session, both best-effort.
+
+        ``usage`` is exactly what ``usage_for`` returns (the cumulative keys);
+        ``last_turn`` is the newest assistant reply's ``turn`` receipt or
+        ``None``. Both come from the same cached parse of one file.
+        """
         session_id = session_id if isinstance(session_id, str) else ""
         chat = chat if isinstance(chat, str) else ""
         chat_id = chat_id if isinstance(chat_id, str) else ""
         try:
             root = os.fspath(sessions_root)
         except TypeError:
-            return {}
+            return {}, None
         try:
             with self._lock:
-                return self._usage_locked(root, session_id, chat, chat_id)
+                return self._lookup_locked(root, session_id, chat, chat_id)
         except Exception:  # noqa: BLE001 - usage is best-effort, never fatal
-            return {}
+            return {}, None
 
-    def _usage_locked(self, root, session_id, chat, chat_id):
+    def _lookup_locked(self, root, session_id, chat, chat_id):
         wrapped = {
             value for value in (session_id, chat, chat_id)
             if isinstance(value, str) and value
@@ -1211,19 +1481,22 @@ class SessionUsageStore:
             entry = self._entry(path)
             if entry is None:
                 continue
-            identity, usage = entry
+            identity, usage, last_turn = entry
             if identity:
                 # A file that names a session only ever answers for that one.
                 # Depending on the store version that name is the session id,
                 # the chat id or the ChatSpec id; all three identify this chat.
                 if identity in wrapped:
-                    return dict(usage)
+                    return dict(usage), _copy_turn(last_turn)
                 continue
             if stem_match is None and _stem_matches(
                 path, session_id, chat, chat_id,
             ):
-                stem_match = usage
-        return dict(stem_match) if stem_match is not None else {}
+                stem_match = (usage, last_turn)
+        if stem_match is None:
+            return {}, None
+        usage, last_turn = stem_match
+        return dict(usage), _copy_turn(last_turn)
 
     @staticmethod
     def _paths(root):
@@ -1240,7 +1513,7 @@ class SessionUsageStore:
         return paths
 
     def _entry(self, path):
-        """``(identity, usage)`` for one file, cached by stat stamp."""
+        """``(identity, usage, last_turn)`` for one file, cached by stat stamp."""
         try:
             stat = os.stat(path)
         except OSError:
@@ -1250,7 +1523,7 @@ class SessionUsageStore:
         stamp = (stat.st_mtime_ns, stat.st_size)
         cached = self._cache.get(path)
         if cached is not None and cached[0] == stamp:
-            return cached[1], cached[2]
+            return cached[1], cached[2], cached[3]
 
         try:
             with open(path, "r", encoding="utf-8", errors="replace") as handle:
@@ -1258,15 +1531,17 @@ class SessionUsageStore:
         except (OSError, ValueError):
             # Mid-write or corrupt: remember the stamp so we do not retry it
             # until the file changes again.
-            self._cache[path] = (stamp, "", {})
-            return "", {}
+            self._cache[path] = (stamp, "", {}, None)
+            return "", {}, None
 
         identity = session_identity(data)
-        usage = session_usage(session_messages(data))
-        self._cache[path] = (stamp, identity, usage)
+        messages = session_messages(data)
+        usage = session_usage(messages)
+        last_turn = session_last_turn(messages)
+        self._cache[path] = (stamp, identity, usage, last_turn)
         if len(self._cache) > self._MAX_ENTRIES:
             self._prune()
-        return identity, usage
+        return identity, usage, last_turn
 
     def _prune(self):
         """Keep the cache bounded: drop missing files, then the oldest entries."""

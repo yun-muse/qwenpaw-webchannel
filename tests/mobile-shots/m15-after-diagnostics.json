@@ -1,0 +1,3729 @@
+{
+  "label": "m15-after",
+  "baseUrl": "http://127.0.0.1:4173/",
+  "startedAt": "2026-10-28T06:56:59.732Z",
+  "steps": {
+    "cloudGate": "local-endpoint",
+    "login": "not-required",
+    "connection": "dot state-live",
+    "hamburgerHitBefore": {
+      "cls": {},
+      "tag": "path"
+    },
+    "chat": "Please write a short paragraph about the ocean, at least three sentences long.",
+    "modelPickerOpenedByTap": true,
+    "hamburgerTapError": "",
+    "desktopTotals": {
+      "meterTotals": "↑157.8k ↓1.7k",
+      "inputTotal": 157800,
+      "outputTotal": 1700,
+      "inputSum": {
+        "total": 157500,
+        "found": 10
+      },
+      "rendered": 10
+    }
+  },
+  "measures": {
+    "chat": {
+      "viewport": {
+        "w": 390,
+        "h": 844,
+        "dpr": 3
+      },
+      "page": {
+        "docScrollWidth": 390,
+        "bodyScrollWidth": 390,
+        "horizontalOverflow": false,
+        "scrollX": 0
+      },
+      "top": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 390,
+          "h": 57,
+          "right": 390,
+          "bottom": 57
+        },
+        "text": "Please write a short paragraph about the ocean, at least three sentences long.Default导出人设曜石暗黑已连接Agent 在线更多",
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "0 1 auto",
+        "minWidth": "auto",
+        "position": "sticky",
+        "transform": "none",
+        "zIndex": "20"
+      },
+      "topLeft": {
+        "rect": {
+          "x": 12,
+          "y": 6,
+          "w": 272,
+          "h": 44,
+          "right": 284,
+          "bottom": 50
+        },
+        "text": "Please write a short paragraph about the ocean, at least three sentences long.",
+        "scrollWidth": 272,
+        "clientWidth": 272,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "1 1 auto",
+        "minWidth": "0px",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "topRight": {
+        "rect": {
+          "x": 292,
+          "y": 6,
+          "w": 86,
+          "h": 44,
+          "right": 378,
+          "bottom": 50
+        },
+        "text": "Default导出人设曜石暗黑已连接Agent 在线更多",
+        "scrollWidth": 86,
+        "clientWidth": 86,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "0 0 auto",
+        "minWidth": "auto",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "topTitles": {
+        "rect": {
+          "x": 64,
+          "y": 16.2,
+          "w": 220,
+          "h": 23.5,
+          "right": 284,
+          "bottom": 39.8
+        },
+        "text": "Please write a short paragraph about the ocean, at least three sentences long.",
+        "scrollWidth": 220,
+        "clientWidth": 220,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "1 1 auto",
+        "minWidth": "0px",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "topTitle": {
+        "rect": {
+          "x": 64,
+          "y": 16.2,
+          "w": 220,
+          "h": 23.5,
+          "right": 284,
+          "bottom": 39.8
+        },
+        "text": "Please write a short paragraph about the ocean, at least three sentences long.",
+        "scrollWidth": 534,
+        "clientWidth": 220,
+        "display": "block",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "hidden",
+        "overflowX": "hidden",
+        "overflowY": "hidden",
+        "whiteSpace": "nowrap",
+        "textOverflow": "ellipsis",
+        "flex": "0 1 auto",
+        "minWidth": "0px",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "usage": null,
+      "usageVisiblePx": 0,
+      "usageClipped": null,
+      "usageAboveFold": null,
+      "usageLineCount": 0,
+      "hasUsageClassCount": 0,
+      "topTitlesChildCount": 1,
+      "contextMeter": {
+        "rect": {
+          "x": 12,
+          "y": 638,
+          "w": 366,
+          "h": 28,
+          "right": 378,
+          "bottom": 666
+        },
+        "text": "上下文 ≈8%16.3k / 200k↑157.8k ↓1.7k",
+        "scrollWidth": 366,
+        "clientWidth": 366,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "0 1 auto",
+        "minWidth": "0px",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto",
+        "tag": "BUTTON",
+        "track": {
+          "x": 14,
+          "y": 650,
+          "w": 291.7,
+          "h": 4,
+          "right": 305.7,
+          "bottom": 654,
+          "height": 4
+        },
+        "fill": {
+          "x": 14,
+          "y": 650,
+          "w": 23.3,
+          "h": 4,
+          "right": 37.3,
+          "bottom": 654,
+          "color": "rgb(201, 100, 66)"
+        },
+        "label": "上下文 ≈8%",
+        "detail": "16.3k / 200k",
+        "totals": "↑157.8k ↓1.7k",
+        "detailDisplay": "none",
+        "totalsDisplay": "none",
+        "ariaLabel": "上下文占用约 8%，16.3k / 200k tokens；本会话累计输入 157.8k，输出 1.7k",
+        "aboveComposer": true
+      },
+      "contextMeterPanel": false,
+      "bubbleUsages": [
+        {
+          "text": "本轮 ↑15.4k ↓120",
+          "title": "本轮用量：输入 15438 · 输出 120 · 合计 15558 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 54,
+            "y": 714.9,
+            "w": 322,
+            "h": 15.4,
+            "right": 376,
+            "bottom": 730.3
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": false,
+          "visible": true
+        },
+        {
+          "text": "本轮 ↑15.5k ↓134",
+          "title": "本轮用量：输入 15547 · 输出 134 · 合计 15681 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 54,
+            "y": 1505.3,
+            "w": 322,
+            "h": 15.4,
+            "right": 376,
+            "bottom": 1520.7
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": false,
+          "visible": false
+        },
+        {
+          "text": "本轮 ↑15.6k ↓113",
+          "title": "本轮用量：输入 15642 · 输出 113 · 合计 15755 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 54,
+            "y": 2189.4,
+            "w": 322,
+            "h": 15.4,
+            "right": 376,
+            "bottom": 2204.8
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": false,
+          "visible": false
+        },
+        {
+          "text": "本轮 ↑15.7k ↓117",
+          "title": "本轮用量：输入 15737 · 输出 117 · 合计 15854 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 54,
+            "y": 2926.7,
+            "w": 322,
+            "h": 15.4,
+            "right": 376,
+            "bottom": 2942.1
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": false,
+          "visible": false
+        },
+        {
+          "text": "本轮 ↑15.8k ↓152",
+          "title": "本轮用量：输入 15836 · 输出 152 · 合计 15988 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 54,
+            "y": 3796.9,
+            "w": 322,
+            "h": 15.4,
+            "right": 376,
+            "bottom": 3812.3
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": false,
+          "visible": false
+        },
+        {
+          "text": "本轮 ↑15.9k ↓152",
+          "title": "本轮用量：输入 15946 · 输出 152 · 合计 16098 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 54,
+            "y": 4614,
+            "w": 322,
+            "h": 15.4,
+            "right": 376,
+            "bottom": 4629.3
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": false,
+          "visible": false
+        },
+        {
+          "text": "本轮 ↑15k ↓104",
+          "title": "本轮用量：输入 15013 · 输出 104 · 合计 15117 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 54,
+            "y": 5298,
+            "w": 322,
+            "h": 15.4,
+            "right": 376,
+            "bottom": 5313.4
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": false,
+          "visible": false
+        },
+        {
+          "text": "本轮 ↑16.1k ↓149",
+          "title": "本轮用量：输入 16102 · 输出 149 · 合计 16251 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 54,
+            "y": 6088.5,
+            "w": 322,
+            "h": 15.4,
+            "right": 376,
+            "bottom": 6103.9
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": false,
+          "visible": false
+        },
+        {
+          "text": "本轮 ↑16.2k ↓510",
+          "title": "本轮用量：输入 16209 · 输出 510 · 合计 16719 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 54,
+            "y": 8158.3,
+            "w": 322,
+            "h": 15.4,
+            "right": 376,
+            "bottom": 8173.7
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": false,
+          "visible": false
+        },
+        {
+          "text": "本轮 ↑16.3k ↓146",
+          "title": "本轮用量：输入 16329 · 输出 146 · 合计 16475 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 54,
+            "y": 8948.8,
+            "w": 322,
+            "h": 15.4,
+            "right": 376,
+            "bottom": 8964.2
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": false,
+          "visible": false
+        }
+      ],
+      "topLeftVsRightOverlap": 0,
+      "hamburger": {
+        "rect": {
+          "x": 12,
+          "y": 6,
+          "w": 44,
+          "h": 44,
+          "right": 56,
+          "bottom": 50
+        },
+        "text": "",
+        "scrollWidth": 44,
+        "clientWidth": 44,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "0 0 44px",
+        "minWidth": "auto",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "hamburgerHit": {
+        "cls": {},
+        "tag": "path"
+      },
+      "hamburgerTapTarget": {
+        "w": 44,
+        "h": 44
+      },
+      "composerCard": {
+        "rect": {
+          "x": 12,
+          "y": 668,
+          "w": 366,
+          "h": 164,
+          "right": 378,
+          "bottom": 832
+        },
+        "text": "附件技能kilo / openrouter/free思考等级默认低中高最大发送",
+        "scrollWidth": 364,
+        "clientWidth": 364,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "0 1 auto",
+        "minWidth": "0px",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "toolbar": {
+        "rect": {
+          "x": 25,
+          "y": 714,
+          "w": 340,
+          "h": 109,
+          "right": 365,
+          "bottom": 823
+        },
+        "text": "附件技能kilo / openrouter/free思考等级默认低中高最大发送",
+        "scrollWidth": 340,
+        "clientWidth": 340,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "0 1 auto",
+        "minWidth": "auto",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "toolbarControls": [
+        {
+          "cls": "attach",
+          "x": 25,
+          "y": 723,
+          "w": 70,
+          "h": 44,
+          "right": 95,
+          "bottom": 767
+        },
+        {
+          "cls": "tool-pill",
+          "x": 103,
+          "y": 723,
+          "w": 70,
+          "h": 44,
+          "right": 173,
+          "bottom": 767
+        },
+        {
+          "cls": "model-wrap",
+          "x": 181,
+          "y": 723,
+          "w": 184,
+          "h": 44,
+          "right": 365,
+          "bottom": 767
+        },
+        {
+          "cls": "model-button",
+          "x": 181,
+          "y": 723,
+          "w": 184,
+          "h": 44,
+          "right": 365,
+          "bottom": 767
+        },
+        {
+          "cls": "effort-wrap",
+          "x": 25,
+          "y": 775,
+          "w": 260,
+          "h": 48,
+          "right": 285,
+          "bottom": 823
+        },
+        {
+          "cls": "effort-opt active",
+          "x": 45,
+          "y": 777,
+          "w": 44,
+          "h": 44,
+          "right": 89,
+          "bottom": 821
+        },
+        {
+          "cls": "effort-opt",
+          "x": 89,
+          "y": 777,
+          "w": 44,
+          "h": 44,
+          "right": 133,
+          "bottom": 821
+        },
+        {
+          "cls": "effort-opt",
+          "x": 133,
+          "y": 777,
+          "w": 44,
+          "h": 44,
+          "right": 177,
+          "bottom": 821
+        },
+        {
+          "cls": "effort-opt",
+          "x": 177,
+          "y": 777,
+          "w": 44,
+          "h": 44,
+          "right": 221,
+          "bottom": 821
+        },
+        {
+          "cls": "effort-opt",
+          "x": 221,
+          "y": 777,
+          "w": 44,
+          "h": 44,
+          "right": 265,
+          "bottom": 821
+        },
+        {
+          "cls": "send",
+          "x": 293,
+          "y": 777,
+          "w": 72,
+          "h": 44,
+          "right": 365,
+          "bottom": 821
+        }
+      ],
+      "toolbarOverlaps": [],
+      "send": {
+        "rect": {
+          "x": 293,
+          "y": 777,
+          "w": 72,
+          "h": 44,
+          "right": 365,
+          "bottom": 821
+        },
+        "text": "发送",
+        "scrollWidth": 72,
+        "clientWidth": 72,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "0.42",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "0 1 auto",
+        "minWidth": "72px",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "effortOpts": [
+        {
+          "text": "默认",
+          "x": 45,
+          "y": 777,
+          "w": 44,
+          "h": 44,
+          "right": 89,
+          "bottom": 821
+        },
+        {
+          "text": "低",
+          "x": 89,
+          "y": 777,
+          "w": 44,
+          "h": 44,
+          "right": 133,
+          "bottom": 821
+        },
+        {
+          "text": "中",
+          "x": 133,
+          "y": 777,
+          "w": 44,
+          "h": 44,
+          "right": 177,
+          "bottom": 821
+        },
+        {
+          "text": "高",
+          "x": 177,
+          "y": 777,
+          "w": 44,
+          "h": 44,
+          "right": 221,
+          "bottom": 821
+        },
+        {
+          "text": "最大",
+          "x": 221,
+          "y": 777,
+          "w": 44,
+          "h": 44,
+          "right": 265,
+          "bottom": 821
+        }
+      ],
+      "messageActions": {
+        "userFooter": {
+          "rect": {
+            "x": 110.6,
+            "y": 167.6,
+            "w": 248.4,
+            "h": 44,
+            "right": 359,
+            "bottom": 211.6
+          },
+          "text": "复制编辑",
+          "scrollWidth": 248,
+          "clientWidth": 248,
+          "display": "flex",
+          "visibility": "visible",
+          "opacity": "1",
+          "overflow": "visible",
+          "overflowX": "visible",
+          "overflowY": "visible",
+          "whiteSpace": "normal",
+          "textOverflow": "clip",
+          "flex": "0 1 auto",
+          "minWidth": "0px",
+          "position": "static",
+          "transform": "none",
+          "zIndex": "auto"
+        },
+        "assistantButtons": [
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 393.5,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": 437.5
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": 393.5,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": 437.5
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 740.3,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": 784.3
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": 740.3,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": 784.3
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 1210.6,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": 1254.6
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": 1210.6,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": 1254.6
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 1530.7,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": 1574.7
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": 1530.7,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": 1574.7
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 1921.3,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": 1965.3
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": 1921.3,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": 1965.3
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 2214.8,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": 2258.8
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": 2214.8,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": 2258.8
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 2631.9,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": 2675.9
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": 2631.9,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": 2675.9
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 2952.1,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": 2996.1
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": 2952.1,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": 2996.1
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 3449,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": 3493
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": 3449,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": 3493
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 3822.3,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": 3866.3
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": 3822.3,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": 3866.3
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 4319.2,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": 4363.2
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": 4319.2,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": 4363.2
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 4639.3,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": 4683.3
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": 4639.3,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": 4683.3
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 4976.7,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": 5020.7
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": 4976.7,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": 5020.7
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 5323.4,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": 5367.4
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": 5323.4,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": 5367.4
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 5793.7,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": 5837.7
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": 5793.7,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": 5837.7
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 6113.9,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": 6157.9
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": 6113.9,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": 6157.9
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 7783.8,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": 7827.8
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": 7783.8,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": 7827.8
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 8183.7,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": 8227.7
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": 8183.7,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": 8227.7
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 8600.8,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": 8644.8
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": 8600.8,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": 8644.8
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 8974.2,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": 9018.2
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": 8974.2,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": 9018.2
+          }
+        ]
+      },
+      "codeBlocks": [],
+      "tables": [],
+      "tapTargetsBelow44": [],
+      "messagesScroll": {
+        "scrollTop": 0,
+        "scrollHeight": 8971,
+        "clientHeight": 575
+      }
+    },
+    "usageView": {
+      "viewport": {
+        "w": 390,
+        "h": 844,
+        "dpr": 3
+      },
+      "page": {
+        "docScrollWidth": 390,
+        "bodyScrollWidth": 390,
+        "horizontalOverflow": false,
+        "scrollX": 0
+      },
+      "top": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 390,
+          "h": 57,
+          "right": 390,
+          "bottom": 57
+        },
+        "text": "Please write a short paragraph about the ocean, at least three sentences long.Default导出人设曜石暗黑已连接Agent 在线更多",
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "0 1 auto",
+        "minWidth": "auto",
+        "position": "sticky",
+        "transform": "none",
+        "zIndex": "20"
+      },
+      "topLeft": {
+        "rect": {
+          "x": 12,
+          "y": 6,
+          "w": 272,
+          "h": 44,
+          "right": 284,
+          "bottom": 50
+        },
+        "text": "Please write a short paragraph about the ocean, at least three sentences long.",
+        "scrollWidth": 272,
+        "clientWidth": 272,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "1 1 auto",
+        "minWidth": "0px",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "topRight": {
+        "rect": {
+          "x": 292,
+          "y": 6,
+          "w": 86,
+          "h": 44,
+          "right": 378,
+          "bottom": 50
+        },
+        "text": "Default导出人设曜石暗黑已连接Agent 在线更多",
+        "scrollWidth": 86,
+        "clientWidth": 86,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "0 0 auto",
+        "minWidth": "auto",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "topTitles": {
+        "rect": {
+          "x": 64,
+          "y": 16.2,
+          "w": 220,
+          "h": 23.5,
+          "right": 284,
+          "bottom": 39.8
+        },
+        "text": "Please write a short paragraph about the ocean, at least three sentences long.",
+        "scrollWidth": 220,
+        "clientWidth": 220,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "1 1 auto",
+        "minWidth": "0px",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "topTitle": {
+        "rect": {
+          "x": 64,
+          "y": 16.2,
+          "w": 220,
+          "h": 23.5,
+          "right": 284,
+          "bottom": 39.8
+        },
+        "text": "Please write a short paragraph about the ocean, at least three sentences long.",
+        "scrollWidth": 534,
+        "clientWidth": 220,
+        "display": "block",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "hidden",
+        "overflowX": "hidden",
+        "overflowY": "hidden",
+        "whiteSpace": "nowrap",
+        "textOverflow": "ellipsis",
+        "flex": "0 1 auto",
+        "minWidth": "0px",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "usage": null,
+      "usageVisiblePx": 0,
+      "usageClipped": null,
+      "usageAboveFold": null,
+      "usageLineCount": 0,
+      "hasUsageClassCount": 0,
+      "topTitlesChildCount": 1,
+      "contextMeter": {
+        "rect": {
+          "x": 12,
+          "y": 638,
+          "w": 366,
+          "h": 28,
+          "right": 378,
+          "bottom": 666
+        },
+        "text": "上下文 ≈8%16.3k / 200k↑157.8k ↓1.7k",
+        "scrollWidth": 366,
+        "clientWidth": 366,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "0 1 auto",
+        "minWidth": "0px",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto",
+        "tag": "BUTTON",
+        "track": {
+          "x": 14,
+          "y": 650,
+          "w": 291.7,
+          "h": 4,
+          "right": 305.7,
+          "bottom": 654,
+          "height": 4
+        },
+        "fill": {
+          "x": 14,
+          "y": 650,
+          "w": 23.3,
+          "h": 4,
+          "right": 37.3,
+          "bottom": 654,
+          "color": "rgb(201, 100, 66)"
+        },
+        "label": "上下文 ≈8%",
+        "detail": "16.3k / 200k",
+        "totals": "↑157.8k ↓1.7k",
+        "detailDisplay": "none",
+        "totalsDisplay": "none",
+        "ariaLabel": "上下文占用约 8%，16.3k / 200k tokens；本会话累计输入 157.8k，输出 1.7k",
+        "aboveComposer": true
+      },
+      "contextMeterPanel": false,
+      "bubbleUsages": [
+        {
+          "text": "本轮 ↑15.4k ↓120",
+          "title": "本轮用量：输入 15438 · 输出 120 · 合计 15558 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 54,
+            "y": -7681.1,
+            "w": 322,
+            "h": 15.4,
+            "right": 376,
+            "bottom": -7665.7
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": false,
+          "visible": false
+        },
+        {
+          "text": "本轮 ↑15.5k ↓134",
+          "title": "本轮用量：输入 15547 · 输出 134 · 合计 15681 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 54,
+            "y": -6890.7,
+            "w": 322,
+            "h": 15.4,
+            "right": 376,
+            "bottom": -6875.3
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": false,
+          "visible": false
+        },
+        {
+          "text": "本轮 ↑15.6k ↓113",
+          "title": "本轮用量：输入 15642 · 输出 113 · 合计 15755 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 54,
+            "y": -6206.6,
+            "w": 322,
+            "h": 15.4,
+            "right": 376,
+            "bottom": -6191.2
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": false,
+          "visible": false
+        },
+        {
+          "text": "本轮 ↑15.7k ↓117",
+          "title": "本轮用量：输入 15737 · 输出 117 · 合计 15854 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 54,
+            "y": -5469.3,
+            "w": 322,
+            "h": 15.4,
+            "right": 376,
+            "bottom": -5453.9
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": false,
+          "visible": false
+        },
+        {
+          "text": "本轮 ↑15.8k ↓152",
+          "title": "本轮用量：输入 15836 · 输出 152 · 合计 15988 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 54,
+            "y": -4599.1,
+            "w": 322,
+            "h": 15.4,
+            "right": 376,
+            "bottom": -4583.7
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": false,
+          "visible": false
+        },
+        {
+          "text": "本轮 ↑15.9k ↓152",
+          "title": "本轮用量：输入 15946 · 输出 152 · 合计 16098 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 54,
+            "y": -3782,
+            "w": 322,
+            "h": 15.4,
+            "right": 376,
+            "bottom": -3766.7
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": false,
+          "visible": false
+        },
+        {
+          "text": "本轮 ↑15k ↓104",
+          "title": "本轮用量：输入 15013 · 输出 104 · 合计 15117 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 54,
+            "y": -3098,
+            "w": 322,
+            "h": 15.4,
+            "right": 376,
+            "bottom": -3082.6
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": false,
+          "visible": false
+        },
+        {
+          "text": "本轮 ↑16.1k ↓149",
+          "title": "本轮用量：输入 16102 · 输出 149 · 合计 16251 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 54,
+            "y": -2307.5,
+            "w": 322,
+            "h": 15.4,
+            "right": 376,
+            "bottom": -2292.1
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": false,
+          "visible": false
+        },
+        {
+          "text": "本轮 ↑16.2k ↓510",
+          "title": "本轮用量：输入 16209 · 输出 510 · 合计 16719 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 54,
+            "y": -237.7,
+            "w": 322,
+            "h": 15.4,
+            "right": 376,
+            "bottom": -222.3
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": false,
+          "visible": false
+        },
+        {
+          "text": "本轮 ↑16.3k ↓146",
+          "title": "本轮用量：输入 16329 · 输出 146 · 合计 16475 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 54,
+            "y": 552.8,
+            "w": 322,
+            "h": 15.4,
+            "right": 376,
+            "bottom": 568.2
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": false,
+          "visible": true
+        }
+      ],
+      "topLeftVsRightOverlap": 0,
+      "hamburger": {
+        "rect": {
+          "x": 12,
+          "y": 6,
+          "w": 44,
+          "h": 44,
+          "right": 56,
+          "bottom": 50
+        },
+        "text": "",
+        "scrollWidth": 44,
+        "clientWidth": 44,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "0 0 44px",
+        "minWidth": "auto",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "hamburgerHit": {
+        "cls": {},
+        "tag": "path"
+      },
+      "hamburgerTapTarget": {
+        "w": 44,
+        "h": 44
+      },
+      "composerCard": {
+        "rect": {
+          "x": 12,
+          "y": 668,
+          "w": 366,
+          "h": 164,
+          "right": 378,
+          "bottom": 832
+        },
+        "text": "附件技能kilo / openrouter/free思考等级默认低中高最大发送",
+        "scrollWidth": 364,
+        "clientWidth": 364,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "0 1 auto",
+        "minWidth": "0px",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "toolbar": {
+        "rect": {
+          "x": 25,
+          "y": 714,
+          "w": 340,
+          "h": 109,
+          "right": 365,
+          "bottom": 823
+        },
+        "text": "附件技能kilo / openrouter/free思考等级默认低中高最大发送",
+        "scrollWidth": 340,
+        "clientWidth": 340,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "0 1 auto",
+        "minWidth": "auto",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "toolbarControls": [
+        {
+          "cls": "attach",
+          "x": 25,
+          "y": 723,
+          "w": 70,
+          "h": 44,
+          "right": 95,
+          "bottom": 767
+        },
+        {
+          "cls": "tool-pill",
+          "x": 103,
+          "y": 723,
+          "w": 70,
+          "h": 44,
+          "right": 173,
+          "bottom": 767
+        },
+        {
+          "cls": "model-wrap",
+          "x": 181,
+          "y": 723,
+          "w": 184,
+          "h": 44,
+          "right": 365,
+          "bottom": 767
+        },
+        {
+          "cls": "model-button",
+          "x": 181,
+          "y": 723,
+          "w": 184,
+          "h": 44,
+          "right": 365,
+          "bottom": 767
+        },
+        {
+          "cls": "effort-wrap",
+          "x": 25,
+          "y": 775,
+          "w": 260,
+          "h": 48,
+          "right": 285,
+          "bottom": 823
+        },
+        {
+          "cls": "effort-opt active",
+          "x": 45,
+          "y": 777,
+          "w": 44,
+          "h": 44,
+          "right": 89,
+          "bottom": 821
+        },
+        {
+          "cls": "effort-opt",
+          "x": 89,
+          "y": 777,
+          "w": 44,
+          "h": 44,
+          "right": 133,
+          "bottom": 821
+        },
+        {
+          "cls": "effort-opt",
+          "x": 133,
+          "y": 777,
+          "w": 44,
+          "h": 44,
+          "right": 177,
+          "bottom": 821
+        },
+        {
+          "cls": "effort-opt",
+          "x": 177,
+          "y": 777,
+          "w": 44,
+          "h": 44,
+          "right": 221,
+          "bottom": 821
+        },
+        {
+          "cls": "effort-opt",
+          "x": 221,
+          "y": 777,
+          "w": 44,
+          "h": 44,
+          "right": 265,
+          "bottom": 821
+        },
+        {
+          "cls": "send",
+          "x": 293,
+          "y": 777,
+          "w": 72,
+          "h": 44,
+          "right": 365,
+          "bottom": 821
+        }
+      ],
+      "toolbarOverlaps": [],
+      "send": {
+        "rect": {
+          "x": 293,
+          "y": 777,
+          "w": 72,
+          "h": 44,
+          "right": 365,
+          "bottom": 821
+        },
+        "text": "发送",
+        "scrollWidth": 72,
+        "clientWidth": 72,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "0.42",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "0 1 auto",
+        "minWidth": "72px",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "effortOpts": [
+        {
+          "text": "默认",
+          "x": 45,
+          "y": 777,
+          "w": 44,
+          "h": 44,
+          "right": 89,
+          "bottom": 821
+        },
+        {
+          "text": "低",
+          "x": 89,
+          "y": 777,
+          "w": 44,
+          "h": 44,
+          "right": 133,
+          "bottom": 821
+        },
+        {
+          "text": "中",
+          "x": 133,
+          "y": 777,
+          "w": 44,
+          "h": 44,
+          "right": 177,
+          "bottom": 821
+        },
+        {
+          "text": "高",
+          "x": 177,
+          "y": 777,
+          "w": 44,
+          "h": 44,
+          "right": 221,
+          "bottom": 821
+        },
+        {
+          "text": "最大",
+          "x": 221,
+          "y": 777,
+          "w": 44,
+          "h": 44,
+          "right": 265,
+          "bottom": 821
+        }
+      ],
+      "messageActions": {
+        "userFooter": {
+          "rect": {
+            "x": 110.6,
+            "y": -8228.4,
+            "w": 248.4,
+            "h": 44,
+            "right": 359,
+            "bottom": -8184.4
+          },
+          "text": "复制编辑",
+          "scrollWidth": 248,
+          "clientWidth": 248,
+          "display": "flex",
+          "visibility": "visible",
+          "opacity": "1",
+          "overflow": "visible",
+          "overflowX": "visible",
+          "overflowY": "visible",
+          "whiteSpace": "normal",
+          "textOverflow": "clip",
+          "flex": "0 1 auto",
+          "minWidth": "0px",
+          "position": "static",
+          "transform": "none",
+          "zIndex": "auto"
+        },
+        "assistantButtons": [
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": -8002.5,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": -7958.5
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": -8002.5,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": -7958.5
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": -7655.7,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": -7611.7
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": -7655.7,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": -7611.7
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": -7185.4,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": -7141.4
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": -7185.4,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": -7141.4
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": -6865.3,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": -6821.3
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": -6865.3,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": -6821.3
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": -6474.7,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": -6430.7
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": -6474.7,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": -6430.7
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": -6181.2,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": -6137.2
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": -6181.2,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": -6137.2
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": -5764.1,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": -5720.1
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": -5764.1,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": -5720.1
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": -5443.9,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": -5399.9
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": -5443.9,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": -5399.9
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": -4947,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": -4903
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": -4947,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": -4903
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": -4573.7,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": -4529.7
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": -4573.7,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": -4529.7
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": -4076.8,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": -4032.8
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": -4076.8,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": -4032.8
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": -3756.7,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": -3712.7
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": -3756.7,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": -3712.7
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": -3419.3,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": -3375.3
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": -3419.3,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": -3375.3
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": -3072.6,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": -3028.6
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": -3072.6,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": -3028.6
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": -2602.3,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": -2558.3
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": -2602.3,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": -2558.3
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": -2282.1,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": -2238.1
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": -2282.1,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": -2238.1
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": -612.2,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": -568.2
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": -612.2,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": -568.2
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": -212.3,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": -168.3
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": -212.3,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": -168.3
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 204.8,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": 248.8
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": 204.8,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": 248.8
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 54,
+            "y": 578.2,
+            "w": 131.6,
+            "h": 44,
+            "right": 185.6,
+            "bottom": 622.2
+          },
+          {
+            "text": "重新生成",
+            "x": 193.6,
+            "y": 578.2,
+            "w": 91,
+            "h": 44,
+            "right": 284.6,
+            "bottom": 622.2
+          }
+        ]
+      },
+      "codeBlocks": [],
+      "tables": [],
+      "tapTargetsBelow44": []
+    },
+    "moreMenu": {
+      "rect": {
+        "x": 182,
+        "y": 58,
+        "w": 196,
+        "h": 162,
+        "right": 378,
+        "bottom": 220
+      },
+      "viewport": {
+        "w": 390,
+        "h": 844
+      },
+      "offscreenRight": false,
+      "offscreenLeft": false,
+      "items": [
+        {
+          "text": "导出 Markdown",
+          "w": 182,
+          "h": 48
+        },
+        {
+          "text": "人设与提示词",
+          "w": 182,
+          "h": 48
+        },
+        {
+          "text": "曜石暗黑",
+          "w": 182,
+          "h": 48
+        }
+      ]
+    },
+    "sidebar": {
+      "transform": "matrix(1, 0, 0, 1, 0, 0)",
+      "width": 300,
+      "left": 0,
+      "mask": true,
+      "bodyOverflowX": "visible",
+      "tapTargetsBelow44": []
+    },
+    "modelPicker": {
+      "rect": {
+        "x": 35,
+        "y": 560,
+        "w": 330,
+        "h": 155,
+        "right": 365,
+        "bottom": 715
+      },
+      "viewport": {
+        "w": 390,
+        "h": 844
+      },
+      "offscreenRight": false,
+      "offscreenLeft": false,
+      "offscreenTop": false,
+      "scrollHeight": 153,
+      "clientHeight": 153
+    },
+    "meterPanel": "上下文 ≈16,329 / 200,000 tokens（最近一轮结束后刷新）本会话累计 ↑157,799 ↓1,697本会话累计 ↑↓ 取自 QwenPaw 每轮 usage 元数据；上下文占用 ≈ 最近一轮最后一次模型调用的输入，工具调用轮次不再累加，仍可能与实时值略有偏差",
+    "desktop": {
+      "viewport": {
+        "w": 1280,
+        "h": 900,
+        "dpr": 1
+      },
+      "page": {
+        "docScrollWidth": 1280,
+        "bodyScrollWidth": 1280,
+        "horizontalOverflow": false,
+        "scrollX": 0
+      },
+      "top": {
+        "rect": {
+          "x": 268,
+          "y": 0,
+          "w": 1012,
+          "h": 51,
+          "right": 1280,
+          "bottom": 51
+        },
+        "text": "Please write a short paragraph about the ocean, at least three sentences long.Default导出人设曜石暗黑已连接Agent 在线更多",
+        "scrollWidth": 1012,
+        "clientWidth": 1012,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "0 1 auto",
+        "minWidth": "auto",
+        "position": "sticky",
+        "transform": "none",
+        "zIndex": "20"
+      },
+      "topLeft": {
+        "rect": {
+          "x": 292,
+          "y": 13.2,
+          "w": 471.2,
+          "h": 23.5,
+          "right": 763.2,
+          "bottom": 36.8
+        },
+        "text": "Please write a short paragraph about the ocean, at least three sentences long.",
+        "scrollWidth": 471,
+        "clientWidth": 471,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "1 1 auto",
+        "minWidth": "0px",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "topRight": {
+        "rect": {
+          "x": 775.2,
+          "y": 10,
+          "w": 480.8,
+          "h": 30,
+          "right": 1256,
+          "bottom": 40
+        },
+        "text": "Default导出人设曜石暗黑已连接Agent 在线更多",
+        "scrollWidth": 481,
+        "clientWidth": 481,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "0 0 auto",
+        "minWidth": "auto",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "topTitles": {
+        "rect": {
+          "x": 292,
+          "y": 13.2,
+          "w": 471.2,
+          "h": 23.5,
+          "right": 763.2,
+          "bottom": 36.8
+        },
+        "text": "Please write a short paragraph about the ocean, at least three sentences long.",
+        "scrollWidth": 471,
+        "clientWidth": 471,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "1 1 auto",
+        "minWidth": "0px",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "topTitle": {
+        "rect": {
+          "x": 292,
+          "y": 13.2,
+          "w": 471.2,
+          "h": 23.5,
+          "right": 763.2,
+          "bottom": 36.8
+        },
+        "text": "Please write a short paragraph about the ocean, at least three sentences long.",
+        "scrollWidth": 534,
+        "clientWidth": 471,
+        "display": "block",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "hidden",
+        "overflowX": "hidden",
+        "overflowY": "hidden",
+        "whiteSpace": "nowrap",
+        "textOverflow": "ellipsis",
+        "flex": "0 1 auto",
+        "minWidth": "0px",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "usage": null,
+      "usageVisiblePx": 0,
+      "usageClipped": null,
+      "usageAboveFold": null,
+      "usageLineCount": 0,
+      "hasUsageClassCount": 0,
+      "topTitlesChildCount": 1,
+      "contextMeter": {
+        "rect": {
+          "x": 384,
+          "y": 736.5,
+          "w": 780,
+          "h": 20,
+          "right": 1164,
+          "bottom": 756.5
+        },
+        "text": "上下文 ≈8%16.3k / 200k↑157.8k ↓1.7k",
+        "scrollWidth": 780,
+        "clientWidth": 780,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "0 1 auto",
+        "minWidth": "0px",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto",
+        "tag": "BUTTON",
+        "track": {
+          "x": 386,
+          "y": 745,
+          "w": 541.1,
+          "h": 3,
+          "right": 927.1,
+          "bottom": 748,
+          "height": 3
+        },
+        "fill": {
+          "x": 386,
+          "y": 745,
+          "w": 43.3,
+          "h": 3,
+          "right": 429.3,
+          "bottom": 748,
+          "color": "rgb(201, 100, 66)"
+        },
+        "label": "上下文 ≈8%",
+        "detail": "16.3k / 200k",
+        "totals": "↑157.8k ↓1.7k",
+        "detailDisplay": "block",
+        "totalsDisplay": "block",
+        "ariaLabel": "上下文占用约 8%，16.3k / 200k tokens；本会话累计输入 157.8k，输出 1.7k",
+        "aboveComposer": true
+      },
+      "contextMeterPanel": false,
+      "bubbleUsages": [
+        {
+          "text": "本轮 ↑15.4k ↓120",
+          "title": "本轮用量：输入 15438 · 输出 120 · 合计 15558 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 424,
+            "y": -3903.7,
+            "w": 96.3,
+            "h": 15.4,
+            "right": 520.3,
+            "bottom": -3888.3
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": true,
+          "visible": false
+        },
+        {
+          "text": "本轮 ↑15.5k ↓134",
+          "title": "本轮用量：输入 15547 · 输出 134 · 合计 15681 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 424,
+            "y": -3461.5,
+            "w": 96.3,
+            "h": 15.4,
+            "right": 520.3,
+            "bottom": -3446.1
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": true,
+          "visible": false
+        },
+        {
+          "text": "本轮 ↑15.6k ↓113",
+          "title": "本轮用量：输入 15642 · 输出 113 · 合计 15755 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 424,
+            "y": -3072.5,
+            "w": 96.3,
+            "h": 15.4,
+            "right": 520.3,
+            "bottom": -3057.1
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": true,
+          "visible": false
+        },
+        {
+          "text": "本轮 ↑15.7k ↓117",
+          "title": "本轮用量：输入 15737 · 输出 117 · 合计 15854 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 424,
+            "y": -2656.8,
+            "w": 96.3,
+            "h": 15.4,
+            "right": 520.3,
+            "bottom": -2641.5
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": true,
+          "visible": false
+        },
+        {
+          "text": "本轮 ↑15.8k ↓152",
+          "title": "本轮用量：输入 15836 · 输出 152 · 合计 15988 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 424,
+            "y": -2188,
+            "w": 96.3,
+            "h": 15.4,
+            "right": 520.3,
+            "bottom": -2172.6
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": true,
+          "visible": false
+        },
+        {
+          "text": "本轮 ↑15.9k ↓152",
+          "title": "本轮用量：输入 15946 · 输出 152 · 合计 16098 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 424,
+            "y": -1745.8,
+            "w": 96.3,
+            "h": 15.4,
+            "right": 520.3,
+            "bottom": -1730.4
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": true,
+          "visible": false
+        },
+        {
+          "text": "本轮 ↑15k ↓104",
+          "title": "本轮用量：输入 15013 · 输出 104 · 合计 15117 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 424,
+            "y": -1356.8,
+            "w": 87.1,
+            "h": 15.4,
+            "right": 511.1,
+            "bottom": -1341.4
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": true,
+          "visible": false
+        },
+        {
+          "text": "本轮 ↑16.1k ↓149",
+          "title": "本轮用量：输入 16102 · 输出 149 · 合计 16251 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 424,
+            "y": -914.6,
+            "w": 96.3,
+            "h": 15.4,
+            "right": 520.3,
+            "bottom": -899.2
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": true,
+          "visible": false
+        },
+        {
+          "text": "本轮 ↑16.2k ↓510",
+          "title": "本轮用量：输入 16209 · 输出 510 · 合计 16719 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 424,
+            "y": 275.2,
+            "w": 96.3,
+            "h": 15.4,
+            "right": 520.3,
+            "bottom": 290.6
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": true,
+          "visible": true
+        },
+        {
+          "text": "本轮 ↑16.3k ↓146",
+          "title": "本轮用量：输入 16329 · 输出 146 · 合计 16475 · 耗时 0.0s（含工具调用）",
+          "rect": {
+            "x": 424,
+            "y": 690.8,
+            "w": 96.3,
+            "h": 15.4,
+            "right": 520.3,
+            "bottom": 706.2
+          },
+          "time": null,
+          "sameLineAsTime": null,
+          "sameLineAsFoot": true,
+          "visible": true
+        }
+      ],
+      "topLeftVsRightOverlap": 0,
+      "hamburger": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0,
+          "right": 0,
+          "bottom": 0
+        },
+        "text": "",
+        "scrollWidth": 0,
+        "clientWidth": 0,
+        "display": "none",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "0 1 auto",
+        "minWidth": "0px",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "hamburgerHit": {
+        "cls": "sidebar",
+        "tag": "ASIDE"
+      },
+      "hamburgerTapTarget": {
+        "w": 0,
+        "h": 0
+      },
+      "composerCard": {
+        "rect": {
+          "x": 384,
+          "y": 762.5,
+          "w": 780,
+          "h": 97,
+          "right": 1164,
+          "bottom": 859.5
+        },
+        "text": "附件技能kilo / openrouter/free思考等级默认低中高最大发送",
+        "scrollWidth": 778,
+        "clientWidth": 778,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "0 1 auto",
+        "minWidth": "0px",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "toolbar": {
+        "rect": {
+          "x": 399,
+          "y": 809.5,
+          "w": 750,
+          "h": 39,
+          "right": 1149,
+          "bottom": 848.5
+        },
+        "text": "附件技能kilo / openrouter/free思考等级默认低中高最大发送",
+        "scrollWidth": 750,
+        "clientWidth": 750,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "1",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "0 1 auto",
+        "minWidth": "auto",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "toolbarControls": [
+        {
+          "cls": "attach",
+          "x": 399,
+          "y": 817.5,
+          "w": 64,
+          "h": 30,
+          "right": 463,
+          "bottom": 847.5
+        },
+        {
+          "cls": "tool-pill",
+          "x": 469,
+          "y": 817.5,
+          "w": 64,
+          "h": 30,
+          "right": 533,
+          "bottom": 847.5
+        },
+        {
+          "cls": "model-wrap",
+          "x": 539,
+          "y": 817.5,
+          "w": 183.3,
+          "h": 30,
+          "right": 722.4,
+          "bottom": 847.5
+        },
+        {
+          "cls": "model-button",
+          "x": 539,
+          "y": 817.5,
+          "w": 183.3,
+          "h": 30,
+          "right": 722.4,
+          "bottom": 847.5
+        },
+        {
+          "cls": "effort-wrap",
+          "x": 728.4,
+          "y": 817.5,
+          "w": 228.5,
+          "h": 30,
+          "right": 956.9,
+          "bottom": 847.5
+        },
+        {
+          "cls": "effort-opt active",
+          "x": 794.4,
+          "y": 821.5,
+          "w": 37,
+          "h": 22,
+          "right": 831.4,
+          "bottom": 843.5
+        },
+        {
+          "cls": "effort-opt",
+          "x": 832.4,
+          "y": 821.5,
+          "w": 25.5,
+          "h": 22,
+          "right": 857.9,
+          "bottom": 843.5
+        },
+        {
+          "cls": "effort-opt",
+          "x": 858.9,
+          "y": 821.5,
+          "w": 25.5,
+          "h": 22,
+          "right": 884.4,
+          "bottom": 843.5
+        },
+        {
+          "cls": "effort-opt",
+          "x": 885.4,
+          "y": 821.5,
+          "w": 25.5,
+          "h": 22,
+          "right": 910.9,
+          "bottom": 843.5
+        },
+        {
+          "cls": "effort-opt",
+          "x": 911.9,
+          "y": 821.5,
+          "w": 37,
+          "h": 22,
+          "right": 948.9,
+          "bottom": 843.5
+        },
+        {
+          "cls": "send",
+          "x": 1078,
+          "y": 816.5,
+          "w": 71,
+          "h": 32,
+          "right": 1149,
+          "bottom": 848.5
+        }
+      ],
+      "toolbarOverlaps": [],
+      "send": {
+        "rect": {
+          "x": 1078,
+          "y": 816.5,
+          "w": 71,
+          "h": 32,
+          "right": 1149,
+          "bottom": 848.5
+        },
+        "text": "发送",
+        "scrollWidth": 71,
+        "clientWidth": 71,
+        "display": "flex",
+        "visibility": "visible",
+        "opacity": "0.42",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "whiteSpace": "normal",
+        "textOverflow": "clip",
+        "flex": "0 1 auto",
+        "minWidth": "auto",
+        "position": "static",
+        "transform": "none",
+        "zIndex": "auto"
+      },
+      "effortOpts": [
+        {
+          "text": "默认",
+          "x": 794.4,
+          "y": 821.5,
+          "w": 37,
+          "h": 22,
+          "right": 831.4,
+          "bottom": 843.5
+        },
+        {
+          "text": "低",
+          "x": 832.4,
+          "y": 821.5,
+          "w": 25.5,
+          "h": 22,
+          "right": 857.9,
+          "bottom": 843.5
+        },
+        {
+          "text": "中",
+          "x": 858.9,
+          "y": 821.5,
+          "w": 25.5,
+          "h": 22,
+          "right": 884.4,
+          "bottom": 843.5
+        },
+        {
+          "text": "高",
+          "x": 885.4,
+          "y": 821.5,
+          "w": 25.5,
+          "h": 22,
+          "right": 910.9,
+          "bottom": 843.5
+        },
+        {
+          "text": "最大",
+          "x": 911.9,
+          "y": 821.5,
+          "w": 37,
+          "h": 22,
+          "right": 948.9,
+          "bottom": 843.5
+        }
+      ],
+      "messageActions": {
+        "userFooter": {
+          "rect": {
+            "x": 597.4,
+            "y": -4202.8,
+            "w": 549.6,
+            "h": 24.1,
+            "right": 1147,
+            "bottom": -4178.7
+          },
+          "text": "复制编辑",
+          "scrollWidth": 550,
+          "clientWidth": 550,
+          "display": "flex",
+          "visibility": "visible",
+          "opacity": "0",
+          "overflow": "visible",
+          "overflowX": "visible",
+          "overflowY": "visible",
+          "whiteSpace": "normal",
+          "textOverflow": "clip",
+          "flex": "0 1 auto",
+          "minWidth": "0px",
+          "position": "static",
+          "transform": "none",
+          "zIndex": "auto"
+        },
+        "assistantButtons": [
+          {
+            "text": "复制 Markdown",
+            "x": 424,
+            "y": -4076.5,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 543.9,
+            "bottom": -4052.4
+          },
+          {
+            "text": "重新生成",
+            "x": 549.9,
+            "y": -4076.5,
+            "w": 81,
+            "h": 24.1,
+            "right": 630.9,
+            "bottom": -4052.4
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 530.3,
+            "y": -3908.1,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 650.2,
+            "bottom": -3884
+          },
+          {
+            "text": "重新生成",
+            "x": 656.2,
+            "y": -3908.1,
+            "w": 81,
+            "h": 24.1,
+            "right": 737.2,
+            "bottom": -3884
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 424,
+            "y": -3634.3,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 543.9,
+            "bottom": -3610.2
+          },
+          {
+            "text": "重新生成",
+            "x": 549.9,
+            "y": -3634.3,
+            "w": 81,
+            "h": 24.1,
+            "right": 630.9,
+            "bottom": -3610.2
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 530.3,
+            "y": -3465.8,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 650.2,
+            "bottom": -3441.7
+          },
+          {
+            "text": "重新生成",
+            "x": 656.2,
+            "y": -3465.8,
+            "w": 81,
+            "h": 24.1,
+            "right": 737.2,
+            "bottom": -3441.7
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 424,
+            "y": -3218.7,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 543.9,
+            "bottom": -3194.6
+          },
+          {
+            "text": "重新生成",
+            "x": 549.9,
+            "y": -3218.7,
+            "w": 81,
+            "h": 24.1,
+            "right": 630.9,
+            "bottom": -3194.6
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 530.3,
+            "y": -3076.8,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 650.2,
+            "bottom": -3052.7
+          },
+          {
+            "text": "重新生成",
+            "x": 656.2,
+            "y": -3076.8,
+            "w": 81,
+            "h": 24.1,
+            "right": 737.2,
+            "bottom": -3052.7
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 424,
+            "y": -2829.7,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 543.9,
+            "bottom": -2805.6
+          },
+          {
+            "text": "重新生成",
+            "x": 549.9,
+            "y": -2829.7,
+            "w": 81,
+            "h": 24.1,
+            "right": 630.9,
+            "bottom": -2805.6
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 530.3,
+            "y": -2661.2,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 650.2,
+            "bottom": -2637.1
+          },
+          {
+            "text": "重新生成",
+            "x": 656.2,
+            "y": -2661.2,
+            "w": 81,
+            "h": 24.1,
+            "right": 737.2,
+            "bottom": -2637.1
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 424,
+            "y": -2387.4,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 543.9,
+            "bottom": -2363.3
+          },
+          {
+            "text": "重新生成",
+            "x": 549.9,
+            "y": -2387.4,
+            "w": 81,
+            "h": 24.1,
+            "right": 630.9,
+            "bottom": -2363.3
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 530.3,
+            "y": -2192.4,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 650.2,
+            "bottom": -2168.3
+          },
+          {
+            "text": "重新生成",
+            "x": 656.2,
+            "y": -2192.4,
+            "w": 81,
+            "h": 24.1,
+            "right": 737.2,
+            "bottom": -2168.3
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 424,
+            "y": -1918.6,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 543.9,
+            "bottom": -1894.5
+          },
+          {
+            "text": "重新生成",
+            "x": 549.9,
+            "y": -1918.6,
+            "w": 81,
+            "h": 24.1,
+            "right": 630.9,
+            "bottom": -1894.5
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 530.3,
+            "y": -1750.2,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 650.2,
+            "bottom": -1726.1
+          },
+          {
+            "text": "重新生成",
+            "x": 656.2,
+            "y": -1750.2,
+            "w": 81,
+            "h": 24.1,
+            "right": 737.2,
+            "bottom": -1726.1
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 424,
+            "y": -1529.6,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 543.9,
+            "bottom": -1505.5
+          },
+          {
+            "text": "重新生成",
+            "x": 549.9,
+            "y": -1529.6,
+            "w": 81,
+            "h": 24.1,
+            "right": 630.9,
+            "bottom": -1505.5
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 521.1,
+            "y": -1361.1,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 641,
+            "bottom": -1337
+          },
+          {
+            "text": "重新生成",
+            "x": 647,
+            "y": -1361.1,
+            "w": 81,
+            "h": 24.1,
+            "right": 728,
+            "bottom": -1337
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 424,
+            "y": -1087.4,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 543.9,
+            "bottom": -1063.3
+          },
+          {
+            "text": "重新生成",
+            "x": 549.9,
+            "y": -1087.4,
+            "w": 81,
+            "h": 24.1,
+            "right": 630.9,
+            "bottom": -1063.3
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 530.3,
+            "y": -918.9,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 650.2,
+            "bottom": -894.8
+          },
+          {
+            "text": "重新生成",
+            "x": 656.2,
+            "y": -918.9,
+            "w": 81,
+            "h": 24.1,
+            "right": 737.2,
+            "bottom": -894.8
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 424,
+            "y": 75.8,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 543.9,
+            "bottom": 99.9
+          },
+          {
+            "text": "重新生成",
+            "x": 549.9,
+            "y": 75.8,
+            "w": 81,
+            "h": 24.1,
+            "right": 630.9,
+            "bottom": 99.9
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 530.3,
+            "y": 270.8,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 650.2,
+            "bottom": 294.9
+          },
+          {
+            "text": "重新生成",
+            "x": 656.2,
+            "y": 270.8,
+            "w": 81,
+            "h": 24.1,
+            "right": 737.2,
+            "bottom": 294.9
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 424,
+            "y": 518,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 543.9,
+            "bottom": 542.1
+          },
+          {
+            "text": "重新生成",
+            "x": 549.9,
+            "y": 518,
+            "w": 81,
+            "h": 24.1,
+            "right": 630.9,
+            "bottom": 542.1
+          },
+          {
+            "text": "复制 Markdown",
+            "x": 530.3,
+            "y": 686.5,
+            "w": 119.9,
+            "h": 24.1,
+            "right": 650.2,
+            "bottom": 710.5
+          },
+          {
+            "text": "重新生成",
+            "x": 656.2,
+            "y": 686.5,
+            "w": 81,
+            "h": 24.1,
+            "right": 737.2,
+            "bottom": 710.5
+          }
+        ]
+      },
+      "codeBlocks": [],
+      "tables": [],
+      "tapTargetsBelow44": [
+        {
+          "cls": "new-chat",
+          "text": "新建会话/new",
+          "w": 243,
+          "h": 41.8
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "New chat",
+          "w": 221,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Say hello in one short sentence",
+          "w": 221,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Please write a short paragraph about the",
+          "w": 221,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "I attached a small note. Reply with one ",
+          "w": 221,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Write a detailed numbered list of 10 tip",
+          "w": 221,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Use your shell tool to run exactly this ",
+          "w": 221,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "I attached a file named m5.bin. Reply wi",
+          "w": 221,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Archive check TURSO-E2E-mvq7dtun-5993: p",
+          "w": 221,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "M7 check: reply with the single word ok",
+          "w": 221,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Reply with the single word: ok",
+          "w": 221,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "M7 check: reply with the single word ok",
+          "w": 221,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Reply with exactly: ok",
+          "w": 221,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Reply with exactly: ok",
+          "w": 221,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Reply with exactly: ok",
+          "w": 221,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Reply with exactly: ok",
+          "w": 221,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Reply with exactly: ok",
+          "w": 221,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Reply with exactly: ok",
+          "w": 221,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Reply with exactly: ok",
+          "w": 221,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-title",
+          "text": "Reply with exactly: ok",
+          "w": 221,
+          "h": 19.5
+        },
+        {
+          "cls": "chat-act",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "chat-act danger",
+          "text": "",
+          "w": 22,
+          "h": 22
+        },
+        {
+          "cls": "endpoint-switch",
+          "text": "本地演示节点",
+          "w": 101,
+          "h": 28.5
+        },
+        {
+          "cls": "help-btn",
+          "text": "",
+          "w": 26,
+          "h": 26
+        },
+        {
+          "cls": "help-btn",
+          "text": "",
+          "w": 26,
+          "h": 26
+        },
+        {
+          "cls": "icon-btn",
+          "text": "导出",
+          "w": 64,
+          "h": 30
+        },
+        {
+          "cls": "icon-btn",
+          "text": "人设",
+          "w": 64,
+          "h": 30
+        },
+        {
+          "cls": "icon-btn",
+          "text": "曜石暗黑",
+          "w": 88,
+          "h": 30
+        },
+        {
+          "cls": "copy-btn",
+          "text": "复制 Markdown",
+          "w": 119.9,
+          "h": 24.1
+        },
+        {
+          "cls": "msg-act-btn",
+          "text": "重新生成",
+          "w": 81,
+          "h": 24.1
+        },
+        {
+          "cls": "copy-btn",
+          "text": "复制 Markdown",
+          "w": 119.9,
+          "h": 24.1
+        },
+        {
+          "cls": "msg-act-btn",
+          "text": "重新生成",
+          "w": 81,
+          "h": 24.1
+        },
+        {
+          "cls": "copy-btn",
+          "text": "复制",
+          "w": 58,
+          "h": 24.1
+        },
+        {
+          "cls": "msg-act-btn",
+          "text": "编辑",
+          "w": 58,
+          "h": 24.1
+        },
+        {
+          "cls": "copy-btn",
+          "text": "复制 Markdown",
+          "w": 119.9,
+          "h": 24.1
+        },
+        {
+          "cls": "msg-act-btn",
+          "text": "重新生成",
+          "w": 81,
+          "h": 24.1
+        },
+        {
+          "cls": "copy-btn",
+          "text": "复制 Markdown",
+          "w": 119.9,
+          "h": 24.1
+        },
+        {
+          "cls": "msg-act-btn",
+          "text": "重新生成",
+          "w": 81,
+          "h": 24.1
+        },
+        {
+          "cls": "attach",
+          "text": "附件",
+          "w": 64,
+          "h": 30
+        },
+        {
+          "cls": "tool-pill",
+          "text": "技能",
+          "w": 64,
+          "h": 30
+        },
+        {
+          "cls": "model-button",
+          "text": "kilo / openrouter/free",
+          "w": 183.3,
+          "h": 30
+        },
+        {
+          "cls": "effort-opt active",
+          "text": "默认",
+          "w": 37,
+          "h": 22
+        },
+        {
+          "cls": "effort-opt",
+          "text": "低",
+          "w": 25.5,
+          "h": 22
+        },
+        {
+          "cls": "effort-opt",
+          "text": "中",
+          "w": 25.5,
+          "h": 22
+        },
+        {
+          "cls": "effort-opt",
+          "text": "高",
+          "w": 25.5,
+          "h": 22
+        },
+        {
+          "cls": "effort-opt",
+          "text": "最大",
+          "w": 37,
+          "h": 22
+        },
+        {
+          "cls": "send",
+          "text": "发送",
+          "w": 71,
+          "h": 32
+        }
+      ]
+    }
+  },
+  "screenshots": {
+    "chat": "/home/hatch/workspace/qwenpaw-webchannel/tests/mobile-shots/m15-after-chat.png",
+    "topbar": "/home/hatch/workspace/qwenpaw-webchannel/tests/mobile-shots/m15-after-topbar.png",
+    "moreMenu": "/home/hatch/workspace/qwenpaw-webchannel/tests/mobile-shots/m15-after-more-menu.png",
+    "sidebar": "/home/hatch/workspace/qwenpaw-webchannel/tests/mobile-shots/m15-after-sidebar.png",
+    "modelPicker": "/home/hatch/workspace/qwenpaw-webchannel/tests/mobile-shots/m15-after-model-picker.png",
+    "composer": "/home/hatch/workspace/qwenpaw-webchannel/tests/mobile-shots/m15-after-composer.png",
+    "messageActions": "/home/hatch/workspace/qwenpaw-webchannel/tests/mobile-shots/m15-after-message-actions.png",
+    "meterPanel": "/home/hatch/workspace/qwenpaw-webchannel/tests/mobile-shots/m15-after-meter-panel.png",
+    "desktop": "/home/hatch/workspace/qwenpaw-webchannel/tests/mobile-shots/m15-after-desktop.png"
+  },
+  "checks": {
+    "contextMeterPanelOpens": true,
+    "hamburgerTappable": true,
+    "bubbleUsageVisible": true,
+    "bubbleUsageText": "本轮 ↑16.3k ↓146",
+    "bubbleUsageTitle": true,
+    "contextMeterVisible": true,
+    "contextMeterAboveComposer": true,
+    "usageLineRemoved": true,
+    "topbarSingleLine": true,
+    "meterMobileCompact": true,
+    "noPageOverflow": true,
+    "noToolbarOverlap": true,
+    "toolbarFits": true,
+    "allTapTargets44": true,
+    "sidebarMasked": true,
+    "sidebarTapTargets44": true,
+    "moreMenuFits": true,
+    "sidebarOffCanvas": true,
+    "userActionsReachable": true,
+    "codeBlocksScroll": true,
+    "desktopMeterTotals": true,
+    "desktopMeterTrack": true,
+    "desktopBubbleInline": true,
+    "desktopUsageLineRemoved": true,
+    "desktopNoOverflow": true,
+    "receiptSumWithinTotals": true
+  },
+  "checkList": [
+    "PASS contextMeterPanelOpens",
+    "PASS hamburgerTappable",
+    "PASS bubbleUsageVisible",
+    "PASS bubbleUsageTitle",
+    "PASS contextMeterVisible",
+    "PASS contextMeterAboveComposer",
+    "PASS usageLineRemoved",
+    "PASS topbarSingleLine",
+    "PASS meterMobileCompact",
+    "PASS noPageOverflow",
+    "PASS noToolbarOverlap",
+    "PASS toolbarFits",
+    "PASS allTapTargets44",
+    "PASS sidebarMasked",
+    "PASS sidebarTapTargets44",
+    "PASS moreMenuFits",
+    "PASS sidebarOffCanvas",
+    "PASS userActionsReachable",
+    "PASS codeBlocksScroll",
+    "PASS desktopMeterTotals",
+    "PASS desktopMeterTrack",
+    "PASS desktopBubbleInline",
+    "PASS desktopUsageLineRemoved",
+    "PASS desktopNoOverflow",
+    "PASS receiptSumWithinTotals"
+  ],
+  "pageErrors": [],
+  "authErrors": [],
+  "failures": 0
+}

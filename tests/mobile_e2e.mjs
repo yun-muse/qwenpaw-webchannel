@@ -1,14 +1,18 @@
 #!/usr/bin/env node
 /**
- * M14 mobile UI/UX E2E capture + diagnostics (390x844, touch, iPhone Safari UA).
+ * M14 mobile UI/UX + M15 usage-v2 E2E capture + diagnostics.
+ *
+ * Two viewports are exercised in one run:
+ *   - 390x844, touch, iPhone Safari UA (the M14 checks + M15 mobile rules)
+ *   - 1280x900 desktop (the M15 inline receipt / meter-totals rules)
  *
  * Re-run (from the repo root):
  *   cd tests && npm install && npx playwright install chromium
- *   node mobile_e2e.mjs
+ *   LABEL=m15-before node mobile_e2e.mjs
+ *   BASE_URL=http://127.0.0.1:4173/ LABEL=m15-after node mobile_e2e.mjs
  *
- * Point it at a different base URL (the local preview after a build):
- *   BASE_URL=http://127.0.0.1:4173/ LABEL=after node mobile_e2e.mjs
- *   BASE_URL=https://qwenpaw-webchannel-spa.pages.dev/ LABEL=before node mobile_e2e.mjs
+ * Point it at any other base URL:
+ *   BASE_URL=https://qwenpaw-webchannel-spa.pages.dev/ LABEL=m15-live node mobile_e2e.mjs
  *
  * Environment variables (all optional):
  *   BASE_URL              target origin; default https://qwenpaw-webchannel-spa.pages.dev/
@@ -17,11 +21,25 @@
  *   LABEL                 file-name prefix; default "before"
  *   CHAT_ID               chat to open; default chat-mvqvtho0 (the M9 entropy chat)
  *   CHAT_TITLE_HINT       fallback title match; default M9验证
+ *   ENDPOINT              "cloud" (default; uses the sidebar endpoint switch on a
+ *                         hosted build) or "local" (local preview + relay-node)
  *   VIEWPORT_WIDTH/HEIGHT default 390x844 (overrides are for 360/430 spot checks)
  *   PROXY_SERVER          upstream HTTP proxy for Chromium; defaults to HTTPS_PROXY/http_proxy.
  *                         A loopback CONNECT bridge is started automatically, because Chromium
  *                         cannot reach the egress gateway directly in this sandbox.
  *   HEADED=1              run with a visible browser
+ *
+ * Screenshots (LABEL-prefixed): chat, topbar, more-menu, sidebar, model-picker,
+ * composer, message-actions, meter-panel, desktop. `desktop` is the 1280x900
+ * pass.
+ *
+ * M15 checks read `.bubble-usage` receipts (per-turn tokens under an assistant
+ * bubble) and the `.context-meter` above the composer. The per-turn inputs are
+ * summed and compared with the meter's session total: history only covers the
+ * latest window, so the sum must be <= the cumulative total (compact k/M
+ * rounding is allowed for). Before the M15 build these checks fail by design;
+ * the baseline is captured with `LABEL=m15-before ... || true`. The final run
+ * must pass every check: the process exits 1 on any FAIL.
  *
  * The password is read into memory only: it is never printed, written to disk,
  * or embedded in a screenshot name.
@@ -44,6 +62,7 @@ const OUT_DIR = resolve(HERE, process.env.OUT_DIR || './mobile-shots');
 const LABEL = process.env.LABEL || 'before';
 const CHAT_ID = process.env.CHAT_ID || 'chat-mvqvtho0';
 const CHAT_TITLE_HINT = process.env.CHAT_TITLE_HINT || 'M9验证';
+const ENDPOINT = process.env.ENDPOINT === 'local' ? 'local' : 'cloud';
 const UPSTREAM_PROXY =
   process.env.PROXY_SERVER || process.env.HTTPS_PROXY || process.env.https_proxy || '';
 const HEADED = process.env.HEADED === '1';
@@ -55,6 +74,29 @@ mkdirSync(OUT_DIR, { recursive: true });
 const shot = (name) => join(OUT_DIR, `${LABEL}-${name}.png`);
 const log = (...args) => console.log('[mobile-e2e]', ...args);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** First `↑12.3k` / `↓456` value in *text*, or null (compact k/M units). */
+function arrowValue(text, arrow) {
+  const match = new RegExp(`${arrow}\\s*([0-9]+(?:\\.[0-9]+)?)\\s*([kKmM])?`).exec(text || '');
+  if (!match) return null;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value)) return null;
+  const unit = (match[2] || '').toLowerCase();
+  return unit === 'k' ? value * 1000 : unit === 'm' ? value * 1e6 : value;
+}
+
+/** Sum of one arrow's values over a receipt list (rounding slack is caller's). */
+function arrowSum(receipts, arrow) {
+  let total = 0;
+  let found = 0;
+  for (const receipt of receipts) {
+    const value = arrowValue(receipt.text, arrow);
+    if (value == null) continue;
+    total += value;
+    found += 1;
+  }
+  return { total, found };
+}
 
 /** Reads the secret once; the value never leaves this process. */
 function readPassword() {
@@ -144,6 +186,9 @@ async function startProxyBridge(upstreamUrl) {
 const TAP_TARGET_SCRIPT = `(() => {
   const out = [];
   for (const el of document.querySelectorAll('button, [role="button"], summary, a')) {
+    // M15's meter is a deliberately slim 28 px row (the brief's mobile spec);
+    // it is a secondary disclosure, not an action button.
+    if (el.classList && el.classList.contains('context-meter')) continue;
     const r = el.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) continue;
     const cs = getComputedStyle(el);
@@ -204,6 +249,41 @@ const MEASURE_SCRIPT = `(() => {
     ? Math.max(0, Math.min(usageRect.right, innerWidth) - Math.max(usageRect.left, 0)) *
       Math.max(0, Math.min(usageRect.bottom, innerHeight) - Math.max(usageRect.top, 0))
     : 0;
+  const textOf = (el) => (el ? (el.textContent || '').trim().replace(/\\s+/g, ' ') : '');
+  const meter = document.querySelector('.context-meter');
+  const meterTrack = meter ? meter.querySelector('.context-meter-track') : null;
+  const meterFill = meter ? meter.querySelector('.context-meter-fill') : null;
+  const meterLabel = meter ? meter.querySelector('.context-meter-label') : null;
+  const meterDetail = meter ? meter.querySelector('.context-meter-detail') : null;
+  const meterTotals = meter ? meter.querySelector('.context-meter-totals') : null;
+  const meterBox = meter ? meter.getBoundingClientRect() : null;
+  const bubbleUsages = [...document.querySelectorAll('.row.assistant .bubble-usage')].map((el) => {
+    const foot = el.closest('.bubble-foot');
+    const time = foot ? foot.querySelector('.bubble-time') : null;
+    const footButton = foot ? foot.querySelector('.copy-btn, .msg-act-btn') : null;
+    const box = el.getBoundingClientRect();
+    const timeBox = time ? time.getBoundingClientRect() : null;
+    const footBox = footButton ? footButton.getBoundingClientRect() : null;
+    const cs = getComputedStyle(el);
+    return {
+      text: textOf(el),
+      title: el.getAttribute('title') || '',
+      rect: rect(el),
+      time: time ? { text: textOf(time), ...rect(time) } : null,
+      sameLineAsTime: timeBox
+        ? Math.abs((box.top + box.bottom) / 2 - (timeBox.top + timeBox.bottom) / 2) <= 4
+        : null,
+      // History messages carry no clock, so the desktop row check falls back
+      // to the action buttons that share the same footer line.
+      sameLineAsFoot: footBox
+        ? Math.abs((box.top + box.bottom) / 2 - (footBox.top + footBox.bottom) / 2) <= 6
+        : null,
+      visible:
+        box.width > 0 && box.height > 0 &&
+        cs.visibility !== 'hidden' && cs.display !== 'none' &&
+        box.right > 0 && box.left < innerWidth && box.bottom > 0 && box.top < innerHeight,
+    };
+  });
   const toolbar = document.querySelector('.composer-toolbar');
   const controls = [...document.querySelectorAll('.composer-toolbar button, .composer-toolbar .effort-wrap, .composer-toolbar .model-wrap')];
   const controlRects = controls.map((el) => ({ cls: el.className, ...rect(el) }));
@@ -242,6 +322,37 @@ const MEASURE_SCRIPT = `(() => {
     usageVisiblePx,
     usageClipped: usage ? usage.scrollWidth > usage.clientWidth : null,
     usageAboveFold: usageRect ? usageRect.top >= 0 && usageRect.bottom <= innerHeight : null,
+    usageLineCount: document.querySelectorAll('.usage-line').length,
+    hasUsageClassCount: document.querySelectorAll('.top.has-usage').length,
+    topTitlesChildCount: (() => {
+      const titles = document.querySelector('.top-titles');
+      return titles ? titles.children.length : null;
+    })(),
+    contextMeter: meter ? {
+      ...info(meter),
+      tag: meter.tagName,
+      track: meterTrack ? {
+        ...rect(meterTrack),
+        height: Math.round(meterTrack.getBoundingClientRect().height * 10) / 10,
+      } : null,
+      fill: meterFill ? {
+        ...rect(meterFill),
+        color: getComputedStyle(meterFill).backgroundColor,
+      } : null,
+      label: textOf(meterLabel),
+      detail: textOf(meterDetail),
+      totals: textOf(meterTotals),
+      detailDisplay: meterDetail ? getComputedStyle(meterDetail).display : null,
+      totalsDisplay: meterTotals ? getComputedStyle(meterTotals).display : null,
+      ariaLabel: meter.getAttribute('aria-label') || '',
+      aboveComposer: (() => {
+        const card = document.querySelector('.composer-card');
+        if (!card || !meterBox) return null;
+        return meterBox.bottom <= card.getBoundingClientRect().top + 0.5;
+      })(),
+    } : null,
+    contextMeterPanel: Boolean(document.querySelector('.context-meter-panel')),
+    bubbleUsages,
     topLeftVsRightOverlap: topLeft && topRight ? overlap(topLeft.getBoundingClientRect(), topRight.getBoundingClientRect()) : null,
     hamburger: info(hamburger),
     hamburgerHit: hit ? { cls: hit.className, tag: hit.tagName } : null,
@@ -332,12 +443,13 @@ async function openChat(page) {
     undefined,
     { timeout: 45000 },
   );
-  // Wait for the M11 usage control frame (it is not replayed); tolerate absence
-  // so the "before" run can prove the bug instead of failing.
+  // Wait for the usage UI: the M11 usage line before M15, the meter/receipt
+  // after it. It is a control frame (not replayed), so tolerate absence and
+  // let the checks prove it instead of failing the whole run here.
   await page
     .waitForFunction(
       () => {
-        const el = document.querySelector('.usage-line');
+        const el = document.querySelector('.usage-line, .context-meter, .bubble-usage');
         return el && el.textContent.trim().length > 0;
       },
       undefined,
@@ -391,7 +503,8 @@ async function main() {
     await page.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForTimeout(1200);
 
-    result.steps.cloudGate = await ensureCloudEndpoint(page);
+    result.steps.cloudGate =
+      ENDPOINT === 'local' ? 'local-endpoint' : await ensureCloudEndpoint(page);
     if (await page.locator('.login-card').count()) {
       log('logging in (password read from file, not printed)');
       await login(page, password);
@@ -440,6 +553,19 @@ async function main() {
     });
     await page.screenshot({ path: shot('chat'), fullPage: false });
     result.screenshots.chat = shot('chat');
+
+    // M15: the newest per-turn receipt lives at the end of the last assistant
+    // bubble. Bring it (and the meter above the composer) on screen, measure
+    // again and re-take the chat shot at that position.
+    await page.evaluate(() => {
+      const list = document.querySelector('.messages');
+      if (!list) return;
+      list.style.scrollBehavior = 'auto';
+      list.scrollTop = list.scrollHeight;
+    });
+    await sleep(500);
+    result.measures.usageView = await page.evaluate(MEASURE_SCRIPT);
+    await page.screenshot({ path: shot('chat'), fullPage: false });
 
     // Header close-up.
     await page.locator('.top').screenshot({ path: shot('topbar') });
@@ -530,8 +656,8 @@ async function main() {
     await page.locator('.model-button').evaluate((el) => el.blur()).catch(() => {});
     await page.mouse.move(2, 2);
 
-    // Composer close-up (full bottom deck).
-    await page.locator('.composer-card').screenshot({ path: shot('composer') });
+    // Composer close-up (the whole bottom deck, including the M15 meter).
+    await page.locator('.composer').screenshot({ path: shot('composer') });
     result.screenshots.composer = shot('composer');
 
     // Assistant message actions close-up (copy / regenerate).
@@ -551,6 +677,26 @@ async function main() {
       await page.locator('.messages').screenshot({ path: shot('wide-content') }).catch(() => {});
       result.screenshots.wideContent = shot('wide-content');
     }
+
+    // M15: the meter's tap panel is the only place with full numbers on a phone.
+    let meterPanelOpened = false;
+    if (await page.locator('.context-meter-interactive').count()) {
+      await page.locator('.context-meter-interactive').click({ timeout: 3000 }).catch(() => {});
+      meterPanelOpened = await page
+        .locator('.context-meter-panel')
+        .isVisible()
+        .catch(() => false);
+      if (meterPanelOpened) {
+        result.measures.meterPanel = await page.evaluate(() => {
+          const panel = document.querySelector('.context-meter-panel');
+          return panel ? (panel.textContent || '').trim().replace(/\s+/g, ' ') : '';
+        });
+        await page.screenshot({ path: shot('meter-panel'), fullPage: false });
+        result.screenshots.meterPanel = shot('meter-panel');
+        await page.locator('.context-meter-interactive').click({ timeout: 3000 }).catch(() => {});
+      }
+    }
+    result.checks.contextMeterPanelOpens = meterPanelOpened;
 
     // Real tap check on the hamburger: Playwright's actionability includes
     // hit-testing, so this fails when another element covers it.
@@ -580,16 +726,39 @@ async function main() {
     result.checks.hamburgerTappable = tapOk;
     result.steps.hamburgerTapError = tapError;
 
-    // Assertions used by the M14 report (the before run is expected to fail
-    // most of these; it still exits 0 so both runs can be captured).
+    // M14 layout checks + M15 usage-v2 checks (the before run is expected to
+    // fail the M15 ones; it still writes all screenshots and diagnostics).
     const m = result.measures.chat;
-    result.checks.usagePresent = Boolean(m.usage && m.usage.text);
-    result.checks.usageText = m.usage ? m.usage.text : '';
-    result.checks.usageVisible =
-      Boolean(m.usage && m.usage.rect && m.usageVisiblePx > 0 && m.usage.rect.w > 24);
-    result.checks.usageFullText =
-      result.checks.usagePresent && m.usageClipped === false && m.usageVisiblePx > 0;
-    result.checks.usageHasPercent = /%/.test(result.checks.usageText);
+    const u = result.measures.usageView || m;
+    const receipts = u.bubbleUsages.filter(
+      (item) => item.visible && /本轮/.test(item.text) && /[↑↓]/.test(item.text),
+    );
+    result.checks.bubbleUsageVisible = receipts.length > 0;
+    result.checks.bubbleUsageText = receipts[0] ? receipts[0].text : '';
+    result.checks.bubbleUsageTitle = receipts.some((item) => /本轮用量/.test(item.title));
+
+    const meter = u.contextMeter;
+    result.checks.contextMeterVisible = Boolean(
+      meter &&
+        meter.rect &&
+        meter.rect.w > 0 &&
+        meter.rect.h > 0 &&
+        meter.track &&
+        meter.track.height >= 3 &&
+        /上下文 ≈\d+%/.test(meter.label),
+    );
+    result.checks.contextMeterAboveComposer = Boolean(meter && meter.aboveComposer);
+    result.checks.usageLineRemoved = u.usageLineCount === 0 && u.hasUsageClassCount === 0;
+    result.checks.topbarSingleLine = Boolean(
+      u.top && u.top.rect && u.top.rect.h <= 60 && u.topTitlesChildCount === 1,
+    );
+    result.checks.meterMobileCompact = Boolean(
+      meter &&
+        meter.detailDisplay === 'none' &&
+        meter.totalsDisplay === 'none' &&
+        meter.track &&
+        meter.track.height >= 4,
+    );
     result.checks.noPageOverflow = m.page.horizontalOverflow === false;
     result.checks.noToolbarOverlap = m.toolbarOverlaps.length === 0;
     result.checks.toolbarFits = Boolean(m.toolbar && m.toolbar.scrollWidth <= m.toolbar.clientWidth);
@@ -610,11 +779,100 @@ async function main() {
     );
     result.checks.codeBlocksScroll =
       m.codeBlocks.length === 0 || m.codeBlocks.every((b) => b.overflowX === 'auto');
+
+    // ---- M15: desktop pass (1280x900) ----------------------------------
+    // A second context reuses the mobile login; the desktop rules are the
+    // inline receipt, the meter's ↑↓ totals and the untouched single top bar.
+    let desktopReceipts = [];
+    try {
+      const storageState = await context.storageState();
+      const desktopContext = await browser.newContext({
+        viewport: { width: 1280, height: 900 },
+        screen: { width: 1280, height: 900 },
+        deviceScaleFactor: 1,
+        locale: 'zh-CN',
+        ignoreHTTPSErrors: true,
+        storageState,
+      });
+      try {
+        const desktopPage = await desktopContext.newPage();
+        desktopPage.on('pageerror', (err) => pageErrors.push(`desktop: ${err}`));
+        await desktopPage.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await desktopPage.waitForTimeout(800);
+        await waitForApp(desktopPage);
+        await openChat(desktopPage);
+        await desktopPage.evaluate(() => {
+          const list = document.querySelector('.messages');
+          if (!list) return;
+          list.style.scrollBehavior = 'auto';
+          list.scrollTop = list.scrollHeight;
+        });
+        await sleep(900);
+        result.measures.desktop = await desktopPage.evaluate(MEASURE_SCRIPT);
+        await desktopPage.screenshot({ path: shot('desktop'), fullPage: false });
+        result.screenshots.desktop = shot('desktop');
+
+        const d = result.measures.desktop;
+        desktopReceipts = d.bubbleUsages.filter(
+          (item) => item.visible && /本轮/.test(item.text),
+        );
+        const renderedReceipts = d.bubbleUsages.filter((item) => /本轮/.test(item.text));
+        const desktopMeter = d.contextMeter;
+        const meterTotals = desktopMeter ? desktopMeter.totals : '';
+        const inputTotal = arrowValue(meterTotals, '↑');
+        const outputTotal = arrowValue(meterTotals, '↓');
+        const inputSum = arrowSum(renderedReceipts, '↑');
+        result.steps.desktopTotals = {
+          meterTotals, inputTotal, outputTotal, inputSum,
+          rendered: renderedReceipts.length,
+        };
+
+        result.checks.desktopMeterTotals = Boolean(
+          desktopMeter &&
+            inputTotal != null &&
+            outputTotal != null &&
+            desktopMeter.totalsDisplay !== 'none',
+        );
+        result.checks.desktopMeterTrack = Boolean(
+          desktopMeter &&
+            desktopMeter.track &&
+            desktopMeter.track.height >= 3 &&
+            /上下文 ≈\d+%/.test(desktopMeter.label),
+        );
+        result.checks.desktopBubbleInline = desktopReceipts.some((item) =>
+          item.time ? item.sameLineAsTime === true : item.sameLineAsFoot === true,
+        );
+        result.checks.desktopUsageLineRemoved =
+          d.usageLineCount === 0 && d.hasUsageClassCount === 0;
+        result.checks.desktopNoOverflow = d.page.horizontalOverflow === false;
+        // Visible receipts are a window over the session, so their sum can be
+        // smaller than the cumulative total but never materially larger; the
+        // slack covers the compact k/M rounding of each displayed value.
+        result.checks.receiptSumWithinTotals = Boolean(
+          inputTotal != null &&
+            inputSum.found > 0 &&
+            inputSum.total > 0 &&
+            inputSum.total <= inputTotal * 1.05 + 1000,
+        );
+      } finally {
+        await desktopContext.close();
+      }
+    } catch (err) {
+      result.steps.desktopError = String(err.message || err).split('\n')[0];
+      result.checks.desktopMeterTotals = false;
+      result.checks.desktopMeterTrack = false;
+      result.checks.desktopBubbleInline = false;
+      result.checks.desktopUsageLineRemoved = false;
+      result.checks.desktopNoOverflow = false;
+      result.checks.receiptSumWithinTotals = false;
+    }
+
     result.checkList = Object.entries(result.checks)
       .filter(([, v]) => typeof v === 'boolean')
       .map(([k, v]) => `${v ? 'PASS' : 'FAIL'} ${k}`);
     result.pageErrors = pageErrors;
     result.authErrors = authErrors;
+    result.failures = result.checkList.filter((line) => line.startsWith('FAIL')).length;
 
     writeFileSync(
       join(OUT_DIR, `${LABEL}-diagnostics.json`),
@@ -624,9 +882,11 @@ async function main() {
 
     log('--- results ---');
     for (const line of result.checkList) log(line);
-    log(`usage: ${JSON.stringify(result.checks.usageText)}`);
+    log(`receipt: ${JSON.stringify(result.checks.bubbleUsageText)}`);
+    log(`failures: ${result.failures}`);
     log(`screenshots → ${OUT_DIR}`);
     if (pageErrors.length) log(`page errors: ${pageErrors.join(' | ')}`);
+    process.exitCode = result.failures > 0 ? 1 : 0;
   } finally {
     await context.close();
     await browser.close();
