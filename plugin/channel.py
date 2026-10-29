@@ -1515,11 +1515,20 @@ class WebChannel(BaseChannel):
                 return
 
             title = await self._chat_title(chat)
+            # Identity is metadata only: a failed lookup degrades to the
+            # agent id / no model line, never to a failed export.
+            agent_name = await self._agent_display_name()
+            provider, model = await self._fetch_active()
+            model_label = (
+                "%s/%s" % (provider, model) if provider and model
+                else (model or provider)
+            )
             exported_at = datetime.now().astimezone().replace(
                 microsecond=0,
             ).isoformat()
             document = build_export_markdown(
                 history, chat, title, exported_at,
+                agent=agent_name, model=model_label,
             )
             data = document.encode("utf-8")
             if len(data) > MAX_EXPORT_BYTES:

@@ -12,7 +12,6 @@ import math
 import os
 import threading
 from collections import deque
-from datetime import datetime
 from urllib.parse import urlsplit
 
 # Protocol §2.4 ``hist`` frames carry at most the last 50 messages unless the
@@ -194,46 +193,6 @@ def _part_texts(content):
             yield text
 
 
-def _iso_moment(value):
-    """Parse one ISO-8601 timestamp, or ``None`` when it is unusable."""
-    if isinstance(value, datetime):
-        return value
-    if not isinstance(value, str):
-        return None
-    text = value.strip()
-    if not text:
-        return None
-    if text.endswith(("Z", "z")):
-        text = text[:-1] + "+00:00"
-    try:
-        return datetime.fromisoformat(text)
-    except ValueError:
-        return None
-
-
-def _duration_ms(created_at, finished_at):
-    """Wall-clock milliseconds between two ISO timestamps, or ``None``.
-
-    QwenPaw records no duration: the only evidence is the turn's outer
-    ``metadata.timestamp`` (created) and ``metadata.finished_at`` (REPLY_END),
-    either of which may be null. A value is produced only when both parse,
-    carry the same tz-awareness and ``finished >= created``.
-    """
-    created = _iso_moment(created_at)
-    finished = _iso_moment(finished_at)
-    if created is None or finished is None:
-        return None
-    if (created.tzinfo is None) != (finished.tzinfo is None):
-        return None
-    try:
-        delta = (finished - created).total_seconds() * 1000.0
-    except (OverflowError, TypeError):
-        return None
-    if delta < 0:
-        return None
-    return int(round(delta))
-
-
 def _history_turn_usage(message):
     """The ``qwenpaw_turn_usage`` dict of one raw ``Message``, or ``None``.
 
@@ -262,11 +221,15 @@ def _history_original_id(message):
     return value if isinstance(value, str) and value else ""
 
 
-def _make_turn(turn_id, usage, duration_ms=None):
+def _make_turn(turn_id, usage):
     """One ``turn`` receipt from a usage dict, or ``None`` without tokens.
 
     Missing fields are omitted, never zero-filled; ``estimated`` is written
     only when the source explicitly marked the usage as an estimate.
+
+    No duration is included: QwenPaw's ``finished_at`` is stamped at the
+    first ``REPLY_END`` of a reply, so the span against ``timestamp`` is
+    always ~0 and does not measure the turn (M20 removed ``duration_ms``).
     """
     prompt = _token_count(usage.get("prompt_tokens"))
     completion = _token_count(usage.get("completion_tokens"))
@@ -283,12 +246,6 @@ def _make_turn(turn_id, usage, duration_ms=None):
         total = prompt + completion
     if total is not None:
         turn["total"] = total
-    if (
-        isinstance(duration_ms, int)
-        and not isinstance(duration_ms, bool)
-        and duration_ms >= 0
-    ):
-        turn["duration_ms"] = duration_ms
     if usage.get("estimated") is True:
         turn["estimated"] = True
     return turn
@@ -340,20 +297,38 @@ def _attach_history_turns(entries):
         if anchor is None:
             continue
 
-        duration = None
-        for entry in members:
-            metadata = entry["message"].get("metadata")
-            if not isinstance(metadata, dict):
-                continue
-            duration = _duration_ms(
-                metadata.get("timestamp"), metadata.get("finished_at"),
-            )
-            if duration is not None:
-                break
-
-        turn = _make_turn(original_id, usages[0], duration)
+        turn = _make_turn(original_id, usages[0])
         if turn is not None:
             anchor["turn"] = turn
+
+
+def _history_entries(raw_messages):
+    """Project raw ``ChatHistory.messages`` to ``{role, text, type, ...}``.
+
+    One entry per message that carries text; ``index`` points back at the raw
+    list so callers that render the original messages can find the turn
+    anchor again. Shared by ``hist`` and the Markdown export so both derive
+    per-turn receipts from exactly the same rules.
+    """
+    entries = []
+    if not isinstance(raw_messages, list):
+        return entries
+    for index, message in enumerate(raw_messages):
+        if not isinstance(message, dict):
+            continue
+        text = "".join(_part_texts(message.get("content")))
+        if not text:
+            continue
+        role = message.get("role")
+        role = getattr(role, "value", role)
+        entries.append({
+            "role": str(role or ""),
+            "text": text,
+            "type": _message_type(message),
+            "message": message,
+            "index": index,
+        })
+    return entries
 
 
 def history_messages(history, limit=DEFAULT_HIST_LIMIT):
@@ -377,22 +352,7 @@ def history_messages(history, limit=DEFAULT_HIST_LIMIT):
     if not isinstance(raw, list):
         return []
 
-    entries = []
-    for message in raw:
-        if not isinstance(message, dict):
-            continue
-        text = "".join(_part_texts(message.get("content")))
-        if not text:
-            continue
-        role = message.get("role")
-        role = getattr(role, "value", role)
-        entries.append({
-            "role": str(role or ""),
-            "text": text,
-            "type": _message_type(message),
-            "message": message,
-        })
-
+    entries = _history_entries(raw)
     _attach_history_turns(entries)
 
     limit = hist_limit(limit)
@@ -1382,8 +1342,7 @@ def session_last_turn(messages):
     if not isinstance(turn_id, str) or not turn_id:
         return None
 
-    duration = _duration_ms(last.get("created_at"), last.get("finished_at"))
-    return _make_turn(turn_id, usage, duration)
+    return _make_turn(turn_id, usage)
 
 
 def _stem_matches(path, session_id, chat, chat_id):
@@ -1821,48 +1780,95 @@ def _reasoning_text(message):
     return "\n\n".join(texts)
 
 
-def _render_message(message):
-    """One message as Markdown, or "" when it carries nothing to export."""
+def _turn_footnote(turn):
+    """One blockquote line for a ``turn`` receipt, or "" without numbers.
+
+    Rendered from the same receipt ``hist`` carries, so a footnote can never
+    show a number the history projection does not report. Absent fields are
+    skipped (never shown as 0); ``estimated`` appends a marker.
+    """
+    parts = []
+    for key, label in (
+        ("input", "输入"), ("output", "输出"), ("total", "合计"),
+    ):
+        value = turn.get(key)
+        if not isinstance(value, int) or isinstance(value, bool):
+            continue
+        if value >= 0:
+            parts.append("%s %s" % (label, format(value, ",")))
+    if not parts:
+        return ""
+    line = "> 本轮用量：%s tokens" % " · ".join(parts)
+    if turn.get("estimated") is True:
+        line += "（估算）"
+    return line
+
+
+def _with_footnote(block, turn):
+    """Append *turn*'s usage footnote to *block* when both exist."""
+    footnote = _turn_footnote(turn) if isinstance(turn, dict) else ""
+    return "%s\n\n%s" % (block, footnote) if footnote else block
+
+
+def _render_message(message, turn=None):
+    """One message as Markdown, or "" when it carries nothing to export.
+
+    *turn* is the per-turn usage receipt attached to this message, if any;
+    it becomes a footnote below the body.
+    """
     message_type = _message_type(message)
 
     if message_type == "REASONING":
         text = _reasoning_text(message)
-        return _folded_reasoning(text) if text else ""
+        return _with_footnote(_folded_reasoning(text), turn) if text else ""
 
     blocks = _content_blocks(message, message_type)
     if not blocks:
         return ""
     if message_type in ("PLUGIN_CALL", "PLUGIN_CALL_OUTPUT"):
-        return "\n\n".join(blocks)
+        return _with_footnote("\n\n".join(blocks), turn)
 
     role = _message_role(message)
     heading = "### %s" % _EXPORT_ROLE_LABELS.get(role, "消息")
     timestamp = _message_timestamp(message)
     if timestamp:
         heading += " · %s" % timestamp
-    return "%s\n\n%s" % (heading, "\n\n".join(blocks))
+    return _with_footnote("%s\n\n%s" % (heading, "\n\n".join(blocks)), turn)
 
 
-def build_export_markdown(history, chat, title, exported_at):
+def build_export_markdown(
+    history, chat, title, exported_at, agent="", model="",
+):
     """Render a ``ChatHistory`` response as the export Markdown document.
 
-    The header names the chat, the export time, the number of rendered
-    messages and the one-line basis statement. Messages keep their original
-    order and type: ``MESSAGE`` becomes a role heading with body text,
-    ``REASONING`` a ``<details>`` block, ``PLUGIN_CALL`` /
+    The header names the agent, the model when known, the export time, the
+    number of rendered messages and the one-line basis statement. Messages
+    keep their original order and type: ``MESSAGE`` becomes a role heading
+    with body text, ``REASONING`` a ``<details>`` block, ``PLUGIN_CALL`` /
     ``PLUGIN_CALL_OUTPUT`` compact tool blocks, and attachments an
-    ``[附件: name]`` metadata line. An empty conversation yields the header
-    only.
+    ``[附件: name]`` metadata line. An assistant message that carries a
+    ``qwenpaw_turn_usage`` receipt gets one 本轮用量 footnote. An empty
+    conversation yields the header only.
     """
     raw_messages = history.get("messages") if isinstance(history, dict) else None
     if not isinstance(raw_messages, list):
         raw_messages = []
 
+    # Turn receipts follow the same rules as `hist`: one per persisted Msg,
+    # anchored to its last assistant text segment.
+    entries = _history_entries(raw_messages)
+    _attach_history_turns(entries)
+    turns = {
+        entry["index"]: entry["turn"]
+        for entry in entries
+        if "turn" in entry
+    }
+
     blocks = []
-    for message in raw_messages:
+    for index, message in enumerate(raw_messages):
         if not isinstance(message, dict):
             continue
-        block = _render_message(message)
+        block = _render_message(message, turns.get(index))
         if block:
             blocks.append(block)
 
@@ -1871,14 +1877,19 @@ def build_export_markdown(history, chat, title, exported_at):
         or safe_export_title(chat)
         or "会话"
     )
-    header = "\n".join((
-        "# %s" % title_text,
-        "",
+    header_lines = ["# %s" % title_text, ""]
+    agent_text = safe_export_title(agent)
+    if agent_text:
+        header_lines.append("- 智能体：%s" % agent_text)
+    model_text = safe_export_title(model)
+    if model_text:
+        header_lines.append("- 模型：%s" % model_text)
+    header_lines.extend((
         "- 导出时间：%s" % (_one_line(exported_at) or "未知"),
         "- 消息条数：%d" % len(blocks),
         "- 导出口径：%s" % EXPORT_BASIS,
     ))
-    return "\n\n".join([header, *blocks]) + "\n"
+    return "\n\n".join(["\n".join(header_lines), *blocks]) + "\n"
 
 
 def chunk_utf8(data, size=CHUNK_RAW_BYTES):

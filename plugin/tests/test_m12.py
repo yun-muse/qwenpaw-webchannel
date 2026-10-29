@@ -87,6 +87,23 @@ def _history(messages):
     return {"messages": messages, "status": "idle"}
 
 
+def _usage_message(role, text, oid="m1", usage=None, estimated=False):
+    """Assistant ``Message`` carrying QwenPaw's per-turn usage metadata."""
+    message = _message("MESSAGE", role, [_text(text)])
+    inner = {}
+    if usage is not None:
+        payload = dict(usage)
+        if estimated:
+            payload["estimated"] = True
+        inner["qwenpaw_turn_usage"] = {"usage": payload}
+    message["metadata"] = {
+        "timestamp": TS,
+        "original_id": oid,
+        "metadata": inner,
+    }
+    return message
+
+
 def _mixed_history():
     return _history([
         _message("MESSAGE", "user", [_text("你好")]),
@@ -202,6 +219,88 @@ def test_markdown_empty_session_has_only_header():
     assert EXPORT_BASIS in doc
     assert "###" not in doc
     assert "<details>" not in doc
+
+
+def test_markdown_header_names_agent_and_model():
+    doc = build_export_markdown(
+        _history([]), WEB_CHAT, "测试会话", EXPORTED_AT,
+        agent="小爪", model="openai/gpt-4o",
+    )
+    assert "- 智能体：小爪" in doc
+    assert "- 模型：openai/gpt-4o" in doc
+    assert (
+        doc.index("- 智能体：")
+        < doc.index("- 模型：")
+        < doc.index("- 导出时间：")
+        < doc.index("- 消息条数：")
+    )
+
+
+def test_markdown_header_omits_unknown_agent_and_model():
+    doc = build_export_markdown(_history([]), WEB_CHAT, "t", EXPORTED_AT)
+    assert "- 智能体：" not in doc
+    assert "- 模型：" not in doc
+    assert "- 导出时间：" in doc
+
+    # A one-line safety cap: a hostile name cannot inject document structure.
+    doc = build_export_markdown(
+        _history([]), WEB_CHAT, "t", EXPORTED_AT,
+        agent="a\n## b", model="m\n# n",
+    )
+    assert "- 智能体：a ## b" in doc
+    assert "- 模型：m # n" in doc
+
+
+def test_markdown_turn_usage_footnote():
+    doc = build_export_markdown(_history([
+        _message("MESSAGE", "user", [_text("你好")]),
+        _usage_message(
+            "assistant", "答", usage={"prompt_tokens": 1234,
+                                      "completion_tokens": 567},
+        ),
+    ]), WEB_CHAT, "t", EXPORTED_AT)
+
+    assert doc.count("> 本轮用量：") == 1
+    assert "> 本轮用量：输入 1,234 · 输出 567 · 合计 1,801 tokens" in doc
+    # The footnote sits under the answer, not under the user message.
+    assert doc.index("> 本轮用量：") > doc.index("答")
+
+
+def test_markdown_turn_usage_footnote_marks_estimated_and_partial():
+    doc = build_export_markdown(_history([
+        _usage_message(
+            "assistant", "a", usage={"prompt_tokens": 10}, estimated=True,
+        ),
+    ]), WEB_CHAT, "t", EXPORTED_AT)
+    assert "> 本轮用量：输入 10 tokens（估算）" in doc
+    assert "输出" not in doc.split("> 本轮用量：", 1)[1]
+
+
+def test_markdown_turn_usage_footnote_once_per_persisted_turn():
+    # One persisted Msg split into reasoning + answer segments, both carrying
+    # the same usage: only the answer text segment is an anchor.
+    reasoning = _message("REASONING", "assistant", [_text("思考")])
+    reasoning["metadata"] = {
+        "timestamp": TS,
+        "original_id": "m9",
+        "metadata": {"qwenpaw_turn_usage": {"usage": {
+            "prompt_tokens": 5, "completion_tokens": 2,
+        }}},
+    }
+    doc = build_export_markdown(_history([
+        reasoning,
+        _usage_message(
+            "assistant", "答案", oid="m9",
+            usage={"prompt_tokens": 5, "completion_tokens": 2},
+        ),
+    ]), WEB_CHAT, "t", EXPORTED_AT)
+    assert doc.count("> 本轮用量：") == 1
+    assert doc.index("> 本轮用量：") > doc.index("答案")
+
+
+def test_markdown_without_usage_has_no_footnote():
+    doc = build_export_markdown(_mixed_history(), WEB_CHAT, "t", EXPORTED_AT)
+    assert "本轮用量" not in doc
 
 
 def test_markdown_attachment_only_message():
@@ -386,15 +485,54 @@ def test_export_handler_happy_path():
     doc = data.decode("utf-8")
     assert doc.startswith("# 测试会话\n")
     assert "最终答案" in doc
+    # Identity lookup succeeded for neither agent name nor model: the agent id
+    # is the fallback and the model line is omitted entirely.
+    assert "- 智能体：agent-1" in doc
+    assert "- 模型：" not in doc
 
     for frame in frames:
         assert "seq" not in frame
     assert channel._seq.peek(WEB_CHAT) == 0
     assert channel._ring.since(WEB_CHAT, 0) == []
-    # One lookup for the ChatSpec id, one for its title.
+    # One lookup for the ChatSpec id, one for its title, then identity.
     assert [call["path"] for call in app.calls] == [
         "/api/chats", "/api/chats",
+        "/api/agents/agent-1", "/api/models/active",
     ]
+
+
+def test_export_handler_header_uses_agent_name_and_model():
+    class _IdentityApp(_FakeApp):
+        async def __call__(self, method, path, params=None, json_body=None):
+            if method == "GET" and path == "/api/agents/agent-1":
+                self.calls.append({
+                    "method": method, "path": path,
+                    "params": params, "json": json_body,
+                })
+                return 200, {"id": "agent-1", "name": "小爪"}
+            if method == "GET" and path == "/api/models/active":
+                self.calls.append({
+                    "method": method, "path": path,
+                    "params": params, "json": json_body,
+                })
+                return 200, {
+                    "active_llm": {"provider_id": "openai", "model": "gpt-4o"},
+                }
+            return await super().__call__(method, path, params, json_body)
+
+    channel = _channel(_IdentityApp())
+
+    async def history(chat_id):
+        return _history([])
+
+    channel._get_history = history
+    asyncio.run(channel._on_relay_frame(
+        {"t": "export", "chat": WEB_CHAT, "id": "exp-identity"},
+    ))
+
+    doc = _exported_text(channel._relay.sent).decode("utf-8")
+    assert "- 智能体：小爪" in doc
+    assert "- 模型：openai/gpt-4o" in doc
 
 
 def test_export_handler_empty_chat_still_exports_header():

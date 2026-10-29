@@ -445,7 +445,7 @@ Agent → client:
 ```json
 {"t":"usage","chat":"…","id":"usage-get","input_total":12345,"output_total":6789,
  "context_tokens":68000,"context_limit":200000,
- "last_turn":{"id":"<Msg.id>","input":1234,"output":567,"total":1801,"duration_ms":12350}}
+ "last_turn":{"id":"<Msg.id>","input":1234,"output":567,"total":1801}}
 {"t":"usage","chat":"…"}
 ```
 
@@ -490,18 +490,19 @@ Agent → client:
 `Msg`; `usage.last_turn` carries the same object for the newest reply:
 
 ```json
-{"id":"<Msg.id>","input":1234,"output":567,"total":1801,"duration_ms":12350,"estimated":true}
+{"id":"<Msg.id>","input":1234,"output":567,"total":1801,"estimated":true}
 ```
 
 - `id` — the persisted `Msg.id` (QwenPaw's `metadata.original_id` on history messages). It is the
   deduplication key between `hist` and `last_turn`.
 - `input` / `output` — that turn's `prompt_tokens` / `completion_tokens`; `total` — the recorded
   `total_tokens`, or `input + output` when both are known.
-- `duration_ms` — wall-clock time between the turn's `timestamp` (created) and `finished_at`
-  (REPLY_END). It includes tool calls and approval waits. Omitted when either timestamp is missing,
-  unparsable, tz-mismatched or the delta is negative.
 - `estimated` — present and `true` only when QwenPaw marked the turn's usage as an estimate; absent
   means "not estimated", not `false`.
+- `duration_ms` **was removed (M20)**. QwenPaw stamps `finished_at` at the first `REPLY_END` of a
+  reply, so the span against `timestamp` was always ~0 and never the turn's real duration; the SPA
+  had already stopped parsing it in M17. Clients must ignore the field if an older plugin still
+  sends it — it is an optional extra, so its absence needs no version negotiation (§7).
 - **A message without `turn` means "no usable usage for this turn", never 0.** Reasons include a
   turn that recorded no usage, a group with conflicting usage, no assistant text segment, or a
   history window that does not contain the anchor. Fields absent inside a `turn` are unknown and
@@ -511,10 +512,9 @@ Agent → client:
 The SPA renders the meter above the composer as `上下文 ≈<pct>%` with a thin bar (fill colour turns
 amber from 75% and red from 90%) and, on desktop, the session totals `↑<input> ↓<output>` on the
 same row; tapping the row opens a small panel with the exact numbers. Each assistant bubble shows
-`≈本轮 ↑<input> ↓<output>` (the `≈` only for estimated turns) with exact numbers, total and
-`耗时 <s>s（含工具调用）` in the tooltip. Without `context_limit` the meter degrades to the text
-`上下文 ≈<context>` (no percentage); with only totals it shows just `↑… ↓…`; with neither it is
-hidden. Numbers use a compact `k`/`M` format.
+`≈本轮 ↑<input> ↓<output>` (the `≈` only for estimated turns) with exact numbers and total. Without
+`context_limit` the meter degrades to the text `上下文 ≈<context>` (no percentage); with only totals
+it shows just `↑… ↓…`; with neither it is hidden. Numbers use a compact `k`/`M` format.
 
 ### 11.3 Control frames
 
@@ -567,10 +567,12 @@ Agent → client:
 
 ### 12.2 Document rules
 
-The header names the chat title (`ChatSpec.name`/`title`, else the chat id), the export time
-(ISO-8601), the number of exported messages and one basis statement: *基于 QwenPaw 会话历史导出；
-上下文若已被后端压缩，早期轮次以历史接口返回为准；思考过程以折叠形式附后（若包含）；附件仅记录
-文件名等元信息，不含附件内容。*
+The header names the chat title (`ChatSpec.name`/`title`, else the chat id), the agent
+(`GET /api/agents/{id}` display name, else the agent id), the model when the effective model is known
+(`provider/model`), the export time (ISO-8601), the number of exported messages and one basis
+statement: *基于 QwenPaw 会话历史导出；上下文若已被后端压缩，早期轮次以历史接口返回为准；思考过程以
+折叠形式附后（若包含）；附件仅记录文件名等元信息，不含附件内容。* An unavailable agent/model lookup
+only drops its line — it never fails the export.
 
 Every `Message` keeps its type:
 
@@ -581,6 +583,18 @@ Every `Message` keeps its type:
   in a fenced code block.
 - Attachments are metadata only: the bare `filename` (or the last path segment of a URL, or
   `内嵌附件` for a data URL). Absolute hosted paths and payload bytes never appear.
+
+**Turn usage footnotes (M20).** When the history payload already carries QwenPaw's
+`qwenpaw_turn_usage`, the assistant message that closes a persisted `Msg` (the same anchor `hist`
+uses, §11.2) gets one blockquote line under its body:
+
+```markdown
+> 本轮用量：输入 1,234 · 输出 567 · 合计 1,801 tokens（估算）
+```
+
+Only the fields present in the `turn` receipt are shown (absent ≠ 0), and `（估算）` appears only for
+`estimated:true`. A turn without usable usage adds nothing — the export never invents numbers and
+never reads a second source for them.
 
 Message text and reasoning are never truncated. Tool output is the one oversized field and is cut at
 8000 characters with a trailing `…（输出过长，已截断；原始 N 个字符）` note. Titles are collapsed to

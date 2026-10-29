@@ -495,11 +495,10 @@ interface ChatUsage {
 /**
  * One turn's token receipt (`hist.messages[].turn` / `usage.last_turn`, M15).
  *
- * `duration_ms` is deliberately not modelled: the frame carries only the
- * plugin's derived integer, never the turn's start/end timestamps, so the SPA
- * cannot tell a measured span from a record whose timestamps are identical
- * (the 0.0s receipts seen in production). No real span in the SPA's data means
- * no duration is shown (M17).
+ * No duration is modelled. The plugin stopped emitting `duration_ms` in M20:
+ * QwenPaw's `finished_at` is stamped at the first REPLY_END, so the span was
+ * always ~0 and never the turn's real duration. The SPA stopped showing one
+ * in M17; an old plugin's extra field is simply ignored.
  */
 interface TurnUsage {
   id: string;

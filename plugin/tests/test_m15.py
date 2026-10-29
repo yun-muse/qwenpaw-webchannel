@@ -313,7 +313,12 @@ def test_history_estimated_and_partial_fields():
     assert "turn" not in history_messages(no_tokens)[0]
 
 
-def test_history_duration_needs_both_timestamps():
+def test_history_never_emits_duration():
+    """M20: duration_ms is gone even when both timestamps are present.
+
+    QwenPaw stamps ``finished_at`` at the first REPLY_END, so the span was
+    always ~0 and never the turn's real duration.
+    """
     def history_for(timestamp, finished_at):
         return {"messages": [_history_message(
             "assistant", "a", oid="m1",
@@ -321,23 +326,15 @@ def test_history_duration_needs_both_timestamps():
             timestamp=timestamp, finished_at=finished_at,
         )]}
 
-    full = history_messages(history_for(
-        "2026-10-28T10:00:00+08:00", "2026-10-28T10:00:12.500+08:00",
-    ))
-    assert full[0]["turn"]["duration_ms"] == 12500
-
-    assert "duration_ms" not in history_messages(history_for(
-        "2026-10-28T10:00:00+08:00", None,
-    ))[0]["turn"]
-    assert "duration_ms" not in history_messages(history_for(
-        "not-a-time", "2026-10-28T10:00:12+08:00",
-    ))[0]["turn"]
-    assert "duration_ms" not in history_messages(history_for(
-        "2026-10-28T10:00:12+08:00", "2026-10-28T10:00:00+08:00",
-    ))[0]["turn"]
-    assert "duration_ms" not in history_messages(history_for(
-        "2026-10-28T10:00:00", "2026-10-28T10:00:12+08:00",
-    ))[0]["turn"]
+    for timestamp, finished_at in (
+        ("2026-10-28T10:00:00+08:00", "2026-10-28T10:00:12.500+08:00"),
+        ("2026-10-28T10:00:00+08:00", None),
+        ("2026-10-28T10:00:00", "2026-10-28T10:00:12+08:00"),
+    ):
+        turn = history_messages(history_for(timestamp, finished_at))[0]["turn"]
+        assert "duration_ms" not in turn
+        assert turn["input"] == 10
+        assert turn["output"] == 1
 
 
 def test_history_accepts_outer_usage_metadata():
@@ -380,7 +377,6 @@ def test_session_last_turn_is_the_newest_assistant():
     ]
     assert session_last_turn(messages) == {
         "id": "a2", "input": 200, "output": 20, "total": 250,
-        "duration_ms": 2000,
     }
 
 
@@ -526,7 +522,6 @@ def test_get_usage_handler_includes_last_turn():
             "context_limit": 200000,
             "last_turn": {
                 "id": "a1", "input": 3000, "output": 200, "total": 3200,
-                "duration_ms": 4000,
             },
         }
         assert "seq" not in frames[0]
