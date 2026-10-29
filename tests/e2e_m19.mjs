@@ -2,7 +2,8 @@
 /**
  * M19 — SPA polish pack E2E (items 1–4, 6; item 5 is asserted alongside the
  * meter) plus the M22 SPA experience pack (dark theme, highlighting,
- * paste-to-attach, per-chat drafts, prompt library). Runs entirely local
+ * paste-to-attach, per-chat drafts, prompt library) and the M23 pack (chat
+ * tags, Ctrl/⌘+K command palette, archive search jump). Runs entirely local
  * against a production build:
  *
  *   1. `npm run build` in spa/ (fails the run if the build fails)
@@ -79,6 +80,70 @@ const HISTORY = [
   },
 ];
 
+/** M23: the unique sentence the jump-to-message search will land on. */
+const ANCHOR_PHRASE = '风起于青萍之末，浪成于微澜之间';
+const ANCHOR_MESSAGE = `这是历史中的第 18 条消息。它包含唯一的跳转锚点：${ANCHOR_PHRASE}。搜索命中后应当滚动到这里并闪一下。`;
+
+/**
+ * A long chat-beta history puts the anchor well below the fold on both
+ * passes, so "scrolled to the message" is measurable rather than assumed.
+ */
+const BETA_HISTORY = Array.from({ length: 24 }, (_, i) => ({
+  role: i % 2 === 0 ? 'user' : 'assistant',
+  text:
+    i === 17
+      ? ANCHOR_MESSAGE
+      : `历史消息 ${i + 1}：这是一段用来把列表撑高的说明文字，滚动定位测试需要足够的纵向空间，所以每条都写上两行左右的内容。`,
+}));
+
+/** M23: a hit whose chat is not in localStorage/chats (仅归档 behaviour). */
+const ARCHIVED_HIT_TEXT = `只存在于归档的旧项目记录，关键词：归档专属，原会话已经不在服务器列表中。`;
+const ARCHIVED_HIT = {
+  chat: 'chat-archived',
+  title: '旧项目归档',
+  role: 'assistant',
+  text: ARCHIVED_HIT_TEXT,
+  ts: 1760000000,
+};
+
+/** Build the same snippet shape the plugin sends (40 code points of context). */
+function searchHitFor(chat, title, role, text, q, ts) {
+  const at = text.toLowerCase().indexOf(q.toLowerCase());
+  if (at < 0) return null;
+  const start = Math.max(0, at - 40);
+  const end = Math.min(text.length, at + q.length + 40);
+  return {
+    chat,
+    title,
+    role,
+    snippet: text.slice(start, end),
+    match_start: at - start,
+    match_len: q.length,
+    ts,
+  };
+}
+
+function mockSearchItems(query) {
+  const items = [];
+  for (const [chat, messages] of Object.entries(state.history)) {
+    const title = (state.chats.find((item) => item.chat === chat) || {}).title || chat;
+    for (const message of messages) {
+      const hit = searchHitFor(chat, title, message.role, message.text, query, 1760000000);
+      if (hit) items.push(hit);
+    }
+  }
+  const archived = searchHitFor(
+    ARCHIVED_HIT.chat,
+    ARCHIVED_HIT.title,
+    ARCHIVED_HIT.role,
+    ARCHIVED_HIT.text,
+    query,
+    ARCHIVED_HIT.ts,
+  );
+  if (archived) items.push(archived);
+  return items;
+}
+
 /** The streamed reply: long enough to scroll away from while it arrives. */
 const STREAM_TEXT = [
   '这是流式回答。',
@@ -111,7 +176,7 @@ function resetState() {
     { chat: 'chat-alpha', title: 'Alpha 会话', updated_at: '2026-10-28T09:00:00Z' },
     { chat: 'chat-beta', title: 'Beta 会话', updated_at: '2026-10-27T09:00:00Z' },
   ];
-  state.history = { 'chat-alpha': HISTORY, 'chat-beta': [] };
+  state.history = { 'chat-alpha': HISTORY, 'chat-beta': BETA_HISTORY };
   state.usage = {
     'chat-alpha': {
       input_total: 12345,
@@ -178,6 +243,12 @@ function handleAgentFrame(frame) {
     case 'hist': {
       const chat = String(frame.chat || '');
       agentSend({ t: 'hist', chat, messages: state.history[chat] || [] });
+      break;
+    }
+    case 'search': {
+      const q = String(frame.q || '').trim();
+      const items = q ? mockSearchItems(q) : [];
+      agentSend({ t: 'search_results', id: frame.id, q, items, total: items.length });
       break;
     }
     case 'get_usage': {
@@ -344,12 +415,39 @@ async function pinCount(page) {
 }
 
 async function activateSearch(page) {
+  // M23: Ctrl/Cmd+K opens the palette; 全文搜索 is now the action that focuses
+  // the archive box (the old direct binding moved inside the palette).
   await page.keyboard.press('Control+K');
-  await sleep(120);
+  await page.waitForSelector('.cmd-palette', { timeout: 4000 });
+  await page.locator('.cmd-input').fill('全文搜索');
+  await page.waitForFunction(() => document.querySelectorAll('.cmd-row').length > 0);
+  await page.keyboard.press('Enter');
+  await sleep(250);
   return page.evaluate(() => ({
     active: document.activeElement ? document.activeElement.className : '',
     tag: document.activeElement ? document.activeElement.tagName : '',
     drawer: Boolean(document.querySelector('.app.sidebar-open')),
+    palette: Boolean(document.querySelector('.cmd-palette')),
+  }));
+}
+
+async function openCommandPalette(page) {
+  await page.keyboard.press('Control+K');
+  await page.waitForSelector('.cmd-palette', { timeout: 4000 });
+  await sleep(120);
+}
+
+async function commandLabels(page) {
+  return page.evaluate(() => ({
+    rows: [...document.querySelectorAll('.cmd-row')].map((row) => ({
+      label: (row.querySelector('.cmd-row-label') || {}).textContent || '',
+      hint: (row.querySelector('.cmd-row-hint') || {}).textContent || '',
+      active: row.classList.contains('active'),
+    })),
+    groups: [...document.querySelectorAll('.cmd-group-label')].map((el) =>
+      (el.textContent || '').trim(),
+    ),
+    focused: document.activeElement ? document.activeElement.className : '',
   }));
 }
 
@@ -961,6 +1059,258 @@ async function runM22Checks(page, pass, mobile) {
 }
 
 // ---------------------------------------------------------------------------
+// M23 — tags, command palette (keyboard flow lives in section 6), jump
+// ---------------------------------------------------------------------------
+
+async function runM23Checks(page, pass, mobile) {
+  resetState();
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.evaluate(() => {
+    localStorage.setItem('webchannel.chats', JSON.stringify(['chat-alpha', 'chat-beta']));
+    localStorage.setItem('webchannel.activeChat', 'chat-alpha');
+    localStorage.setItem('webchannel.pinnedChats', '[]');
+    localStorage.removeItem('webchannel.chatTags');
+    localStorage.setItem('webchannel.chatNames', '{}');
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await waitForHistory(page);
+  await sleep(350);
+
+  const openDrawer = async () => {
+    if (!mobile) return;
+    if (await page.locator('.app.sidebar-open').count()) return;
+    await page.locator('.hamburger').click();
+    await sleep(350);
+  };
+
+  const rowFor = (title) => page.locator('.chat-item', { hasText: title }).first();
+  const assignTags = async (title, tags) => {
+    const row = rowFor(title);
+    await row.hover().catch(() => {});
+    await row.locator('.chat-tag-btn').click();
+    await page.locator('.chat-tag-input').fill(tags);
+    await page.locator('.chat-tag-input').press('Enter');
+    await sleep(200);
+  };
+
+  // ---- M23.1: assign tags from the existing chat-item actions -----------
+  await openDrawer();
+  await assignTags('Alpha 会话', '工作, 重要');
+  await assignTags('Beta 会话', '读书');
+  const tagged = await page.evaluate(() => ({
+    stored: JSON.parse(localStorage.getItem('webchannel.chatTags') || '{}'),
+    chips: [...document.querySelectorAll('.chat-item .chat-tag')].map((el) =>
+      (el.textContent || '').trim(),
+    ),
+    filters: [...document.querySelectorAll('.tag-filter')].map((el) => ({
+      text: (el.textContent || '').trim(),
+      active: el.classList.contains('active'),
+    })),
+  }));
+  check(
+    `${pass}: tags persist per chat id in localStorage`,
+    JSON.stringify(tagged.stored['chat-alpha']) === JSON.stringify(['工作', '重要']) &&
+      JSON.stringify(tagged.stored['chat-beta']) === JSON.stringify(['读书']),
+    JSON.stringify(tagged.stored),
+  );
+  check(
+    `${pass}: tagged chats show their chips`,
+    tagged.chips.includes('工作') && tagged.chips.includes('重要') && tagged.chips.includes('读书'),
+    JSON.stringify(tagged.chips),
+  );
+  check(
+    `${pass}: the sidebar shows 全部 plus every tag`,
+    tagged.filters.map((item) => item.text).join('|') === '全部|工作|重要|读书' &&
+      tagged.filters[0].active,
+    JSON.stringify(tagged.filters),
+  );
+  await page.screenshot({ path: shot(pass, 'm23-tags'), fullPage: false });
+
+  // ---- M23.2: filtering, with 置顶 grouping still intact ----------------
+  await page.locator('.tag-filter', { hasText: '工作' }).click();
+  await sleep(200);
+  const filtered = await page.evaluate(() => ({
+    rows: [...document.querySelectorAll('.chat-item .chat-id')].map((el) =>
+      (el.textContent || '').trim(),
+    ),
+    active: [...document.querySelectorAll('.tag-filter.active')].map((el) =>
+      (el.textContent || '').trim(),
+    ),
+  }));
+  check(
+    `${pass}: a tag chip keeps only chats carrying that tag`,
+    filtered.rows.length === 1 && filtered.rows[0] === 'chat-alpha' && filtered.active.join('') === '工作',
+    JSON.stringify(filtered),
+  );
+
+  await rowFor('Alpha 会话').hover().catch(() => {});
+  await rowFor('Alpha 会话').locator('.chat-pin').click();
+  await sleep(200);
+  const pinnedWithTag = await page.evaluate(() => ({
+    labels: [...document.querySelectorAll('.chat-group-label')].map((el) =>
+      (el.textContent || '').trim(),
+    ),
+    first: (document.querySelector('.chat-item .chat-id') || {}).textContent || '',
+  }));
+  check(
+    `${pass}: 置顶 grouping still works under a tag filter`,
+    pinnedWithTag.labels.includes('置顶') && pinnedWithTag.first === 'chat-alpha',
+    JSON.stringify(pinnedWithTag),
+  );
+
+  await page.locator('.tag-filter', { hasText: '全部' }).click();
+  await sleep(200);
+  const allFilter = await page.evaluate(() => ({
+    rows: [...document.querySelectorAll('.chat-item .chat-id')].map((el) =>
+      (el.textContent || '').trim(),
+    ),
+    label: (document.querySelector('.chat-group-label') || {}).textContent || '',
+    first: (document.querySelector('.chat-item .chat-id') || {}).textContent || '',
+  }));
+  check(
+    `${pass}: 全部 restores every chat and keeps the pin first`,
+    allFilter.rows.length === 2 &&
+      allFilter.label.trim() === '置顶' &&
+      allFilter.first === 'chat-alpha',
+    JSON.stringify(allFilter),
+  );
+
+  // ---- M23.3: tags survive a reload, then prune like pins --------------
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await waitForHistory(page);
+  await sleep(350);
+  await openDrawer();
+  const persistedTags = await page.evaluate(() => ({
+    filters: [...document.querySelectorAll('.tag-filter')].map((el) =>
+      (el.textContent || '').trim(),
+    ),
+    stored: JSON.parse(localStorage.getItem('webchannel.chatTags') || '{}'),
+  }));
+  check(
+    `${pass}: tags and their filter chips survive a reload`,
+    persistedTags.filters.includes('工作') &&
+      persistedTags.filters.includes('读书') &&
+      persistedTags.stored['chat-beta']?.[0] === '读书',
+    JSON.stringify(persistedTags),
+  );
+
+  state.chats = [
+    { chat: 'chat-alpha', title: 'Alpha 会话', updated_at: '2026-10-28T09:00:00Z' },
+  ];
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await waitForHistory(page);
+  await sleep(450);
+  await openDrawer();
+  const prunedTags = await page.evaluate(() => ({
+    stored: JSON.parse(localStorage.getItem('webchannel.chatTags') || '{}'),
+    filters: [...document.querySelectorAll('.tag-filter')].map((el) =>
+      (el.textContent || '').trim(),
+    ),
+  }));
+  check(
+    `${pass}: tags for vanished chats are pruned like pins`,
+    !('chat-beta' in prunedTags.stored) &&
+      prunedTags.stored['chat-alpha']?.length === 2 &&
+      !prunedTags.filters.includes('读书'),
+    JSON.stringify(prunedTags),
+  );
+
+  // ---- M23.4: search hit jumps to the anchored message -----------------
+  resetState();
+  await page.evaluate(() => {
+    localStorage.setItem('webchannel.chats', JSON.stringify(['chat-alpha', 'chat-beta']));
+    localStorage.setItem('webchannel.activeChat', 'chat-alpha');
+    localStorage.setItem('webchannel.pinnedChats', '[]');
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await waitForHistory(page);
+  await sleep(350);
+
+  await openDrawer();
+  await page.locator('.chat-search').fill(ANCHOR_PHRASE);
+  await page.waitForSelector('.search-hit', { timeout: 5000 });
+  const hitMeta = await page.evaluate(() => ({
+    count: document.querySelectorAll('.search-hit').length,
+    badge: Boolean(document.querySelector('.search-hit-badge')),
+    mark: (document.querySelector('.search-hit-snippet mark') || {}).textContent || '',
+  }));
+  check(
+    `${pass}: archive search returns the seeded message`,
+    hitMeta.count === 1 && hitMeta.mark === ANCHOR_PHRASE && !hitMeta.badge,
+    JSON.stringify(hitMeta),
+  );
+
+  await page.locator('.search-hit').first().click();
+  await page.waitForSelector('.row.jump-flash', { timeout: 5000 });
+  await sleep(450);
+  const jumped = await page.evaluate(() => {
+    const row = document.querySelector('.row.jump-flash');
+    const list = document.querySelector('.messages');
+    if (!row || !list) return null;
+    const rr = row.getBoundingClientRect();
+    const lr = list.getBoundingClientRect();
+    return {
+      active: localStorage.getItem('webchannel.activeChat'),
+      text: (row.textContent || '').trim(),
+      scrollTop: Math.round(list.scrollTop),
+      visible: rr.top >= lr.top - 1 && rr.bottom <= lr.bottom + 1,
+      toast: (document.querySelector('.toast') || {}).textContent || '',
+    };
+  });
+  check(
+    `${pass}: clicking a hit opens the chat and scrolls to the message`,
+    Boolean(
+      jumped &&
+        jumped.active === 'chat-beta' &&
+        jumped.text.includes(ANCHOR_PHRASE) &&
+        jumped.scrollTop > 0 &&
+        jumped.visible,
+    ),
+    JSON.stringify(jumped),
+  );
+  check(
+    `${pass}: an exact text anchor does not claim to be approximate`,
+    Boolean(jumped && !/无法精确锚定/.test(jumped.toast)),
+    jumped ? jumped.toast : 'null',
+  );
+  await page.screenshot({ path: shot(pass, 'm23-jump'), fullPage: false });
+  await sleep(1800);
+  const flashGone = await page.evaluate(
+    () => document.querySelectorAll('.row.jump-flash').length,
+  );
+  check(`${pass}: the highlight flash is brief`, flashGone === 0, String(flashGone));
+
+  // ---- M23.5: archived-only hits keep their existing behaviour ----------
+  await openDrawer();
+  await page.locator('.chat-search').fill('归档专属');
+  await page.waitForSelector('.search-hit-badge', { timeout: 5000 });
+  const archivedBadge = await page.evaluate(() => ({
+    badge: (document.querySelector('.search-hit-badge') || {}).textContent || '',
+    text: (document.querySelector('.search-hit') || {}).textContent || '',
+  }));
+  check(
+    `${pass}: an archived-only hit is still labelled 仅归档`,
+    archivedBadge.badge === '仅归档',
+    JSON.stringify(archivedBadge).slice(0, 160),
+  );
+  await page.locator('.search-hit').first().click();
+  await page.waitForSelector('.toast', { timeout: 5000 });
+  await sleep(300);
+  const archivedJump = await page.evaluate(() => ({
+    active: localStorage.getItem('webchannel.activeChat'),
+    toast: (document.querySelector('.toast') || {}).textContent || '',
+    rows: document.querySelectorAll('.messages .row').length,
+  }));
+  check(
+    `${pass}: an archived-only jump opens the chat and says it cannot locate`,
+    archivedJump.active === 'chat-archived' &&
+      archivedJump.rows === 0 &&
+      /仅存在于归档/.test(archivedJump.toast),
+    JSON.stringify(archivedJump),
+  );
+}
+
+// ---------------------------------------------------------------------------
 // One pass (desktop or mobile)
 // ---------------------------------------------------------------------------
 
@@ -1319,21 +1669,109 @@ async function runPass(browser, pass, viewport, mobile) {
       JSON.stringify(emptyFallback),
     );
 
-    // ---- 6. keyboard shortcuts ------------------------------------------
+    // ---- 6. keyboard shortcuts (M23: Ctrl/⌘+K is a command palette) ------
+    await openCommandPalette(page);
+    const paletteOpen = await commandLabels(page);
+    check(
+      `${pass}: Ctrl/Cmd+K opens the command palette`,
+      paletteOpen.focused.includes('cmd-input') && paletteOpen.groups.includes('操作'),
+      JSON.stringify({ focused: paletteOpen.focused, groups: paletteOpen.groups }),
+    );
+    check(
+      `${pass}: the palette lists actions and chats in two groups`,
+      paletteOpen.groups.includes('操作') &&
+        paletteOpen.groups.includes('会话') &&
+        paletteOpen.rows.some((row) => row.label === '新建会话') &&
+        paletteOpen.rows.some((row) => row.label === 'Alpha 会话'),
+      JSON.stringify(paletteOpen.groups),
+    );
+    await page.screenshot({ path: shot(pass, 'm23-palette'), fullPage: false });
+
+    await page.locator('.cmd-input').fill('会话');
+    await sleep(150);
+    const filteredPalette = await commandLabels(page);
+    check(
+      `${pass}: one query filters actions and chat titles`,
+      filteredPalette.rows.some((row) => row.label === '新建会话') &&
+        filteredPalette.rows.some((row) => row.label === 'Alpha 会话') &&
+        !filteredPalette.rows.some((row) => row.label === '切换主题'),
+      JSON.stringify(filteredPalette.rows.map((row) => row.label)),
+    );
+
+    const firstActive = filteredPalette.rows.findIndex((row) => row.active);
+    await page.keyboard.press('ArrowDown');
+    await sleep(80);
+    const downActive = (await commandLabels(page)).rows.findIndex((row) => row.active);
+    await page.keyboard.press('ArrowUp');
+    await sleep(80);
+    const upActive = (await commandLabels(page)).rows.findIndex((row) => row.active);
+    check(
+      `${pass}: arrow keys move the palette selection`,
+      firstActive === 0 && downActive === 1 && upActive === 0,
+      JSON.stringify({ firstActive, downActive, upActive }),
+    );
+
+    await page.keyboard.press('Escape');
+    await sleep(150);
+    const paletteClosed = await page.evaluate(
+      () => document.querySelectorAll('.cmd-palette').length,
+    );
+    check(`${pass}: Escape closes the palette`, paletteClosed === 0);
+
+    // Enter executes a chat row: the palette jumps to that conversation.
+    await openCommandPalette(page);
+    await page.locator('.cmd-input').fill('Alpha');
+    await sleep(120);
+    await page.keyboard.press('Enter');
+    await sleep(350);
+    const paletteJump = await page.evaluate(() => ({
+      active: localStorage.getItem('webchannel.activeChat'),
+      palette: document.querySelectorAll('.cmd-palette').length,
+    }));
+    check(
+      `${pass}: Enter on a chat row opens that chat`,
+      paletteJump.active === 'chat-alpha' && paletteJump.palette === 0,
+      JSON.stringify(paletteJump),
+    );
+
     const searchState = await activateSearch(page);
     check(
-      `${pass}: Ctrl/Cmd+K focuses the archive search`,
-      /chat-search/.test(searchState.active) && searchState.tag === 'INPUT',
+      `${pass}: 全文搜索 still focuses the archive search`,
+      /chat-search/.test(searchState.active) && searchState.tag === 'INPUT' && !searchState.palette,
       JSON.stringify(searchState),
     );
     if (mobile) {
-      check(`${pass}: Ctrl/Cmd+K opens the drawer on mobile`, searchState.drawer === true);
+      check(`${pass}: 全文搜索 opens the drawer on mobile`, searchState.drawer === true);
     }
     await page.keyboard.type('Alpha');
     await sleep(250);
     const filtered = await page.evaluate(() => document.querySelectorAll('.chat-item').length);
     check(`${pass}: typing filters the chat list`, filtered === 1, String(filtered));
     await page.locator('.chat-search').fill('');
+
+    if (mobile) {
+      // 全文搜索 just opened the drawer; its scrim would swallow the header tap.
+      if (await page.locator('.app.sidebar-open').count()) {
+        await page.locator('.sidebar-close').click();
+        await sleep(300);
+      }
+      await page.locator('.top-more-btn').click();
+      await sleep(150);
+      await page.locator('.top-menu button[aria-label="打开命令面板"]').click();
+      await page.waitForSelector('.cmd-palette', { timeout: 4000 });
+      await sleep(180);
+      const fromMenu = await page.evaluate(() => ({
+        palette: Boolean(document.querySelector('.cmd-palette')),
+        focused: document.activeElement ? document.activeElement.className : '',
+      }));
+      check(
+        `${pass}: the header menu opens the palette on mobile`,
+        fromMenu.palette && fromMenu.focused.includes('cmd-input'),
+        JSON.stringify(fromMenu),
+      );
+      await page.keyboard.press('Escape');
+      await sleep(150);
+    }
 
     const before = await page.evaluate(() => localStorage.getItem('webchannel.activeChat'));
     await page.keyboard.press('Control+Shift+O');
@@ -1373,6 +1811,9 @@ async function runPass(browser, pass, viewport, mobile) {
 
     // ---- 7. M22: theme, highlighting, paste, drafts, prompt library ------
     await runM22Checks(page, pass, mobile);
+
+    // ---- 8. M23: tags, command palette, search jump ----------------------
+    await runM23Checks(page, pass, mobile);
 
     check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
   } finally {

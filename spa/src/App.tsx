@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type {
   ChangeEvent,
   ClipboardEvent as ReactClipboardEvent,
@@ -18,6 +18,7 @@ import {
   ChevronUp,
   Cloud,
   Code2,
+  Command,
   Compass,
   Copy,
   Cpu,
@@ -45,6 +46,7 @@ import {
   Sparkles,
   Square,
   Sun,
+  Tag,
   Trash2,
   X,
   Zap,
@@ -56,13 +58,21 @@ import {
   ACTIVE_KEY,
   CHATS_KEY,
   PINS_KEY,
+  TAGS_KEY,
+  allChatTags,
+  chatMatchesTag,
   newestServerChat,
   newChatId,
+  parseTagInput,
+  persistedChatTags,
   persistedChats,
+  pruneChatTags,
   prunePins,
   restoreSession,
+  setChatTags,
   togglePin as togglePinIn,
 } from './lib/chatState';
+import type { ChatTags } from './lib/chatState';
 import { draftOf, loadDrafts, saveDrafts, setDraft } from './lib/drafts';
 import type { Drafts } from './lib/drafts';
 import { EXPORT_ERROR_TEXT, base64Of, exportFileName, hexOf, verifyExport } from './lib/export';
@@ -77,6 +87,12 @@ import {
 import type { SavedPrompt } from './lib/promptLibrary';
 import { searchHitsOf, snippetParts } from './lib/search';
 import type { SearchHit } from './lib/search';
+import { findMessageAnchor } from './lib/jump';
+import {
+  movePaletteCursor,
+  paletteEntries,
+} from './lib/palette';
+import type { PaletteEntry } from './lib/palette';
 import { formatExact, formatTokens, turnTitle, turnUsageOf, usageOf } from './lib/usage';
 import type { ChatUsage, TurnUsage } from './lib/usage';
 import {
@@ -902,18 +918,22 @@ function ApprovalCard({
 function MessageView({
   message,
   chat,
+  flash = false,
   onApproval,
   onRegenerate,
   onEditResend,
 }: {
   message: ChatMessage;
   chat: string;
+  flash?: boolean;
   onApproval: (chat: string, message: ChatMessage, action: 'approve' | 'deny') => void;
   onRegenerate?: (message: ChatMessage) => void;
   onEditResend?: (message: ChatMessage) => void;
 }) {
   const [copied, setCopied] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rowClass = (role: Role) =>
+    `row ${role}${flash ? ' jump-flash' : ''}`;
 
   useEffect(
     () => () => {
@@ -924,7 +944,7 @@ function MessageView({
 
   if (message.kind === 'approval') {
     return (
-      <div className="row assistant">
+      <div className={rowClass('assistant')} data-mid={message.id}>
         <div className="assistant-avatar">
           <Sparkles size={13} />
         </div>
@@ -1016,7 +1036,7 @@ function MessageView({
 
   if (isAssistant) {
     return (
-      <div className="row assistant">
+      <div className={rowClass('assistant')} data-mid={message.id}>
         <div className="assistant-avatar" title="QwenPaw Agent">
           <Sparkles size={13} />
         </div>
@@ -1037,7 +1057,11 @@ function MessageView({
     );
   }
 
-  return <div className="row user">{bubble}</div>;
+  return (
+    <div className={rowClass('user')} data-mid={message.id}>
+      {bubble}
+    </div>
+  );
 }
 
 /**
@@ -1046,8 +1070,17 @@ function MessageView({
  * the tap-opened panel. Degrades to text-only rows when a part is missing and
  * renders nothing when only `context_limit` is known.
  */
-function ContextMeter({ usage, turns }: { usage: ChatUsage | undefined; turns: number }) {
-  const [open, setOpen] = useState(false);
+function ContextMeter({
+  usage,
+  turns,
+  open,
+  onToggle,
+}: {
+  usage: ChatUsage | undefined;
+  turns: number;
+  open: boolean;
+  onToggle: () => void;
+}) {
   if (!usage) return null;
 
   const { contextTokens, contextLimit, inputTotal, outputTotal } = usage;
@@ -1098,7 +1131,7 @@ function ContextMeter({ usage, turns }: { usage: ChatUsage | undefined; turns: n
           contextLimit,
         )} tokens${totalHint}`}
         title={USAGE_TITLE}
-        onClick={() => setOpen((value) => !value)}
+        onClick={onToggle}
       >
         <span className="context-meter-track">
           <span
@@ -1280,6 +1313,26 @@ export default function App() {
   const [chatNames, setChatNames] = useState<Record<string, string>>(persistedNames);
   // M19: pinned chats, most recently pinned first (the 置顶 group's order).
   const [pins, setPins] = useState<string[]>(() => persistedChats(PINS_KEY));
+  // M23: free-text tags per chat, plus the sidebar's active filter.
+  const [chatTags, setChatTagsState] = useState<ChatTags>(persistedChatTags);
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
+  const [taggingId, setTaggingId] = useState<string | null>(null);
+  const [tagDraft, setTagDraft] = useState('');
+  // M23: Ctrl/⌘+K command palette (separate from the slash palette above).
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [commandQuery, setCommandQuery] = useState('');
+  const [commandCursor, setCommandCursor] = useState(0);
+  // M23: search-hit jump target (consumed once the chat's history is loaded).
+  const [jumpTarget, setJumpTarget] = useState<{
+    chat: string;
+    hit: SearchHit;
+    archivedOnly: boolean;
+  } | null>(null);
+  const [flashMessageId, setFlashMessageId] = useState<number | null>(null);
+  // Bumped on every `hist` frame so the jump effect re-runs after a late load.
+  const [histTick, setHistTick] = useState(0);
+  // M15: the usage panel is controlled so the command palette can open it.
+  const [usageOpen, setUsageOpen] = useState(false);
   // M9: local choice per chat (restored first), plus what the server confirmed.
   const [effortLevels, setEffortLevels] = useState<Record<string, EffortLevel>>(persistedEfforts);
   const [effortMeta, setEffortMeta] = useState<Record<string, EffortMeta>>({});
@@ -1346,6 +1399,10 @@ export default function App() {
   const restoredChatRef = useRef<string | null>(session.restored ? session.active : null);
   const touchedChatsRef = useRef<Set<string>>(new Set());
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  // M23: command palette input + the jump highlight's timeout.
+  const commandInputRef = useRef<HTMLInputElement | null>(null);
+  const commandOpenRef = useRef(false);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // M9: onFrame runs outside React's render closure, so the effort state it
   // reads (and rolls back) lives in refs mirrored from the React state.
   const effortLevelsRef = useRef<Record<string, EffortLevel>>(effortLevels);
@@ -1719,8 +1776,16 @@ export default function App() {
   }, [chatNames]);
 
   useEffect(() => {
+    commandOpenRef.current = commandOpen;
+  }, [commandOpen]);
+
+  useEffect(() => {
     storageSet(PINS_KEY, JSON.stringify(pins));
   }, [pins]);
+
+  useEffect(() => {
+    storageSet(TAGS_KEY, JSON.stringify(chatTags));
+  }, [chatTags]);
 
   useEffect(() => {
     // The ref is the write-through source for event handlers; every setter
@@ -1784,6 +1849,7 @@ export default function App() {
       const searchJob = searchRef.current;
       if (searchJob?.timer) clearTimeout(searchJob.timer);
       searchRef.current = null;
+      if (flashTimer.current) clearTimeout(flashTimer.current);
     },
     [],
   );
@@ -1900,6 +1966,9 @@ export default function App() {
   // own Ctrl/⌘+K (address bar) and Ctrl/⌘+Shift+O (bookmarks), which the
   // preventDefault below suppresses wherever the page is allowed to see it.
   // Empty deps are safe: every callback below only touches setters and refs.
+  //
+  // M23: Ctrl/⌘+K now opens the command palette. Focusing the archive search
+  // became one action inside it (全文搜索), not a separate binding.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const mod = event.metaKey || event.ctrlKey;
@@ -1907,9 +1976,11 @@ export default function App() {
       const key = event.key.toLowerCase();
       if (key === 'k' && !event.shiftKey) {
         event.preventDefault();
-        setSidebarOpen(true);
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
+        if (!commandOpenRef.current) {
+          setCommandQuery('');
+          setCommandCursor(0);
+        }
+        setCommandOpen(true);
         return;
       }
       if (key === 'o' && event.shiftKey) {
@@ -1922,6 +1993,23 @@ export default function App() {
     return () => document.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- setters + refs only
   }, []);
+
+  // M23: the palette owns the keyboard while it is open.
+  useEffect(() => {
+    if (!commandOpen) return;
+    const timer = setTimeout(() => {
+      commandInputRef.current?.focus();
+      commandInputRef.current?.select();
+    }, 0);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setCommandOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [commandOpen]);
 
   useEffect(() => {
     if (needsLogin) return;
@@ -2143,6 +2231,8 @@ export default function App() {
             rt.histOpen = false;
             rt.loaded = true;
           }
+          // M23: a search-hit jump may be waiting for exactly this history.
+          setHistTick((tick) => tick + 1);
           break;
         }
 
@@ -2376,6 +2466,8 @@ export default function App() {
               // silently. An empty list is not trusted — the plugin also
               // answers [] when its own chat API fails.
               setPins((prev) => prunePins(prev, incomingIds));
+              // M23: tags follow the same rule as pins.
+              setChatTagsState((prev) => pruneChatTags(prev, incomingIds));
             }
 
             // M19: the chat restored from localStorage is only validated
@@ -2575,6 +2667,57 @@ export default function App() {
     el.scrollTop = el.scrollHeight;
   }, [messages, activeChat]);
 
+  // M23: once the hit's chat history is on screen, find the message whose
+  // text contains the archive snippet and centre it in the thread. The
+  // bottom-scroll effect above runs first; this one overrides it for the
+  // jump. `histTick` lets a late history frame retry after an empty first
+  // pass, and `rt.loaded` stops us from giving up mid-stream.
+  useEffect(() => {
+    if (!jumpTarget || jumpTarget.chat !== activeChat) return;
+    const list = messagesByChat[activeChat] ?? [];
+    const rt = runtimeOf(activeChat);
+    if (list.length === 0) {
+      if (!rt.loaded) return;
+    }
+    const anchor = list.length > 0 ? findMessageAnchor(list, jumpTarget.hit) : null;
+    if (!anchor && !rt.loaded) return;
+
+    setJumpTarget(null);
+    if (!anchor) {
+      showToastBriefly(
+        jumpTarget.archivedOnly
+          ? '该消息仅存在于归档，已打开会话，无法在会话内定位'
+          : '该消息不在已加载的历史窗口中，已打开会话',
+        'info',
+      );
+      return;
+    }
+
+    const target = list[anchor.index];
+    const container = listRef.current;
+    const row = container?.querySelector<HTMLElement>(`[data-mid="${target.id}"]`);
+    if (container && row) {
+      const box = container.getBoundingClientRect();
+      const rect = row.getBoundingClientRect();
+      // `.messages` has scroll-behavior: smooth; a jump must land before the
+      // highlight timer starts, so force this one scroll to be instant.
+      const previousBehavior = container.style.scrollBehavior;
+      container.style.scrollBehavior = 'auto';
+      container.scrollTop += rect.top - box.top - (container.clientHeight - rect.height) / 2;
+      container.style.scrollBehavior = previousBehavior;
+    }
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    setFlashMessageId(target.id);
+    flashTimer.current = setTimeout(() => {
+      flashTimer.current = null;
+      setFlashMessageId(null);
+    }, 1800);
+    if (!anchor.exact) {
+      showToastBriefly('已定位到最接近的匹配位置（该命中无法精确锚定）', 'info');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- messages/histTick drive the retry
+  }, [jumpTarget, activeChat, messages, histTick]);
+
   const onListScroll = () => {
     const el = listRef.current;
     if (!el) return;
@@ -2654,18 +2797,69 @@ export default function App() {
   };
 
   const query = search.trim().toLowerCase();
+  // M23: the active tag narrows the list first; the text query then narrows
+  // the result. Both sections (置顶 / 其他会话) are built from the same list,
+  // so pinning keeps working with and without a tag filter.
+  const tagOptions = allChatTags(chatTags, chatIds);
+  const taggedChats =
+    tagFilter == null
+      ? chatIds
+      : chatIds.filter((id) => chatMatchesTag(chatTags, id, tagFilter));
   const visibleChats = query
-    ? chatIds.filter((id) => titleOf(id).toLowerCase().includes(query))
-    : chatIds;
+    ? taggedChats.filter((id) => titleOf(id).toLowerCase().includes(query))
+    : taggedChats;
 
   // M19: pinned chats keep their pin order (newest first) in the 置顶 group.
   const pinnedSet = new Set(pins);
   const visiblePinned = pins.filter((id) => visibleChats.includes(id));
   const visibleOthers = visibleChats.filter((id) => !pinnedSet.has(id));
 
+  // M23: the command palette filters actions and chat titles with one query.
+  const commandEntries = paletteEntries(
+    commandQuery,
+    chatIds.map((id) => ({ id, title: titleOf(id) })),
+  );
+  const commandIndex =
+    commandEntries.length > 0
+      ? Math.min(commandCursor, commandEntries.length - 1)
+      : 0;
+
+  /** Drop a filter whose last tagged chat disappeared (pruned or deleted). */
+  useEffect(() => {
+    if (tagFilter != null && !allChatTags(chatTags, chatIds).includes(tagFilter)) {
+      setTagFilter(null);
+    }
+  }, [tagFilter, chatTags, chatIds]);
+
   /** Pin or unpin one chat; the newest pin sits first in the 置顶 group. */
   const togglePin = (id: string) => {
     setPins((prev) => togglePinIn(prev, id));
+  };
+
+  // ---- M23: chat tags ----
+  const setTagsForChat = (id: string, tags: readonly string[]) => {
+    setChatTagsState((prev) => setChatTags(prev, id, tags));
+  };
+
+  const openTagEditor = (id: string) => {
+    if (taggingId === id) {
+      setTaggingId(null);
+      setTagDraft('');
+      return;
+    }
+    setTaggingId(id);
+    setTagDraft((chatTags[id] ?? []).join(', '));
+  };
+
+  const commitTagEdit = (id: string) => {
+    setTagsForChat(id, parseTagInput(tagDraft));
+    setTaggingId(null);
+    setTagDraft('');
+  };
+
+  const closeTagEditor = () => {
+    setTaggingId(null);
+    setTagDraft('');
   };
 
   const requestModels = () => {
@@ -2911,6 +3105,7 @@ export default function App() {
     activeRef.current = id;
     clientRef.current?.setActiveChat(id);
     setSidebarOpen(false);
+    setUsageOpen(false);
     cancelUpload();
     setComposerError(null);
     setAttachment(null);
@@ -2926,9 +3121,16 @@ export default function App() {
     return hit.chat;
   };
 
-  /** Open a hit's chat, adopting it from the archive when it is not local. */
+  /**
+   * Open a hit's chat, adopting it from the archive when it is not local,
+   * and remember the hit so the jump effect can scroll to it once `hist`
+   * arrives (M23). `hist` carries no ids/timestamps, so the anchor is the
+   * hit's snippet text (see lib/jump.ts).
+   */
   const openSearchHit = (hit: SearchHit) => {
-    if (!chatIds.includes(hit.chat)) ensureChat(hit.chat);
+    const archivedOnly = !chatIds.includes(hit.chat);
+    setJumpTarget({ chat: hit.chat, hit, archivedOnly });
+    if (archivedOnly) ensureChat(hit.chat);
     selectChat(hit.chat);
   };
 
@@ -2940,6 +3142,7 @@ export default function App() {
     activeRef.current = id;
     clientRef.current?.setActiveChat(id);
     setSidebarOpen(false);
+    setUsageOpen(false);
     cancelUpload();
     setComposerError(null);
     setAttachment(null);
@@ -2967,6 +3170,8 @@ export default function App() {
     });
     // M19: a deleted chat cannot stay pinned.
     setPins((prev) => (prev.includes(id) ? prev.filter((pin) => pin !== id) : prev));
+    // M23: nor keep its tags around.
+    setChatTagsState((prev) => setChatTags(prev, id, []));
     // M22: its unsent draft goes with it.
     rememberDraft(id, '');
     runtimes.current.delete(id);
@@ -3041,6 +3246,65 @@ export default function App() {
         break;
       case 'help':
         setComposer('');
+        setHelpOpen(true);
+        break;
+      default:
+        break;
+    }
+  };
+
+  // ---- M23: Ctrl/⌘+K command palette ----
+  const closeCommandPalette = () => {
+    setCommandOpen(false);
+    setCommandQuery('');
+    setCommandCursor(0);
+  };
+
+  const openCommandPalette = () => {
+    setCommandQuery('');
+    setCommandCursor(0);
+    setCommandOpen(true);
+  };
+
+  /** The old Ctrl/⌘+K behaviour, now the 全文搜索 palette action. */
+  const focusArchiveSearch = () => {
+    closeCommandPalette();
+    setSidebarOpen(true);
+    window.setTimeout(() => {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    }, 30);
+  };
+
+  const runPaletteEntry = (entry: PaletteEntry) => {
+    closeCommandPalette();
+    if (entry.kind === 'chat') {
+      ensureChat(entry.id);
+      selectChat(entry.id);
+      return;
+    }
+    switch (entry.id) {
+      case 'new':
+        newChat();
+        window.setTimeout(() => textareaRef.current?.focus(), 30);
+        break;
+      case 'export':
+        startExport();
+        break;
+      case 'search':
+        focusArchiveSearch();
+        break;
+      case 'theme':
+        toggleTheme();
+        break;
+      case 'model':
+        openModelPicker();
+        break;
+      case 'usage':
+        requestUsage(activeChat);
+        setUsageOpen(true);
+        break;
+      case 'help':
         setHelpOpen(true);
         break;
       default:
@@ -3400,6 +3664,7 @@ export default function App() {
   /** M19: one sidebar row, used by both the 置顶 group and the main list. */
   const chatRow = (id: string) => {
     const pinned = pinnedSet.has(id);
+    const tags = chatTags[id] ?? [];
     return (
       <div
         key={id}
@@ -3441,8 +3706,55 @@ export default function App() {
             <span className="chat-title-text">{titleOf(id)}</span>
           </button>
         )}
+        {tags.length > 0 ? (
+          <div className="chat-tags" aria-label="会话标签">
+            {tags.map((tag) => (
+              <span className="chat-tag" key={tag}>
+                {tag}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {taggingId === id ? (
+          <div className="chat-tag-edit">
+            <input
+              className="chat-tag-input"
+              value={tagDraft}
+              autoFocus
+              aria-label="会话标签（逗号分隔）"
+              placeholder="标签，逗号分隔"
+              onChange={(e) => setTagDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  commitTagEdit(id);
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  closeTagEditor();
+                }
+              }}
+            />
+            <button
+              className="chat-tag-save"
+              type="button"
+              onClick={() => commitTagEdit(id)}
+            >
+              保存
+            </button>
+          </div>
+        ) : null}
         <span className="chat-id">{id}</span>
         <span className="chat-actions">
+          <button
+            className={`chat-act chat-tag-btn${taggingId === id ? ' on' : ''}`}
+            title="标签"
+            aria-label="管理标签"
+            aria-pressed={taggingId === id}
+            onClick={() => openTagEditor(id)}
+          >
+            <Tag size={12} />
+          </button>
           <button
             className={`chat-act chat-pin${pinned ? ' on' : ''}`}
             title={pinned ? '取消置顶' : '置顶会话'}
@@ -3534,6 +3846,30 @@ export default function App() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
+
+        {tagOptions.length > 0 ? (
+          <div className="tag-filters" role="group" aria-label="标签筛选">
+            <button
+              type="button"
+              className={`tag-filter${tagFilter == null ? ' active' : ''}`}
+              aria-pressed={tagFilter == null}
+              onClick={() => setTagFilter(null)}
+            >
+              全部
+            </button>
+            {tagOptions.map((tag) => (
+              <button
+                key={tag}
+                type="button"
+                className={`tag-filter${tagFilter === tag ? ' active' : ''}`}
+                aria-pressed={tagFilter === tag}
+                onClick={() => setTagFilter((current) => (current === tag ? null : tag))}
+              >
+                {tag}
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         <div className="sidebar-section-label">
           <span>对话记录 ({visibleChats.length})</span>
@@ -3734,6 +4070,19 @@ export default function App() {
                   <button
                     type="button"
                     role="menuitem"
+                    aria-label="打开命令面板"
+                    onClick={() => {
+                      setMoreOpen(false);
+                      openCommandPalette();
+                    }}
+                  >
+                    <Command size={14} />
+                    <span>命令面板</span>
+                    <span className="top-menu-kbd">⌘K</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
                     disabled={exporting}
                     onClick={() => {
                       setMoreOpen(false);
@@ -3833,6 +4182,7 @@ export default function App() {
                 key={m.id}
                 message={m}
                 chat={activeChat}
+                flash={m.id === flashMessageId}
                 onApproval={onApproval}
                 onRegenerate={handleRegenerate}
                 onEditResend={handleEditResend}
@@ -3935,7 +4285,15 @@ export default function App() {
 
           {composerError ? <div className="composer-error">{composerError}</div> : null}
 
-          <ContextMeter usage={activeUsage} turns={turnCount} />
+          <ContextMeter
+            usage={activeUsage}
+            turns={turnCount}
+            open={usageOpen}
+            onToggle={() => {
+              if (!activeUsage) requestUsage(activeChat);
+              setUsageOpen((open) => !open);
+            }}
+          />
 
           <div className="composer-card">
             {activeSkill || attachment ? (
@@ -4334,6 +4692,117 @@ export default function App() {
         </div>
       ) : null}
 
+      {commandOpen ? (
+        <div
+          className="cmd-overlay"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeCommandPalette();
+          }}
+        >
+          <div className="cmd-palette" role="dialog" aria-modal="true" aria-label="命令面板">
+            <div className="cmd-head">
+              <Command size={16} className="cmd-head-icon" />
+              <input
+                ref={commandInputRef}
+                className="cmd-input"
+                type="text"
+                role="combobox"
+                aria-label="搜索操作或会话"
+                aria-expanded="true"
+                aria-controls="cmd-results"
+                aria-activedescendant={
+                  commandEntries[commandIndex] ? `cmd-opt-${commandIndex}` : undefined
+                }
+                placeholder="搜索操作或会话…"
+                value={commandQuery}
+                onChange={(e) => {
+                  setCommandQuery(e.target.value);
+                  setCommandCursor(0);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setCommandCursor(
+                      movePaletteCursor(commandIndex, 1, commandEntries.length),
+                    );
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setCommandCursor(
+                      movePaletteCursor(commandIndex, -1, commandEntries.length),
+                    );
+                  } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const entry = commandEntries[commandIndex];
+                    if (entry) runPaletteEntry(entry);
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    closeCommandPalette();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="cmd-close"
+                aria-label="关闭命令面板"
+                onClick={closeCommandPalette}
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            <div className="cmd-results" id="cmd-results" role="listbox" aria-label="操作与会话">
+              {commandEntries.length === 0 ? (
+                <div className="cmd-empty">没有匹配的操作或会话</div>
+              ) : null}
+              {commandEntries.map((entry, index) => {
+                const previous = commandEntries[index - 1];
+                return (
+                  <Fragment key={entry.key}>
+                    {!previous || previous.kind !== entry.kind ? (
+                      <div className="cmd-group-label">
+                        {entry.kind === 'action' ? '操作' : '会话'}
+                      </div>
+                    ) : null}
+                    <button
+                      type="button"
+                      id={`cmd-opt-${index}`}
+                      role="option"
+                      aria-selected={index === commandIndex}
+                      className={`cmd-row${index === commandIndex ? ' active' : ''}`}
+                      onMouseEnter={() => setCommandCursor(index)}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => runPaletteEntry(entry)}
+                    >
+                      {entry.kind === 'action' ? (
+                        <Command size={14} className="cmd-row-icon" />
+                      ) : (
+                        <MessageSquare size={14} className="cmd-row-icon" />
+                      )}
+                      <span className="cmd-row-label">{entry.label}</span>
+                      <span className="cmd-row-hint">{entry.hint}</span>
+                    </button>
+                  </Fragment>
+                );
+              })}
+            </div>
+
+            <div className="cmd-foot">
+              <span>
+                <kbd>↑</kbd>
+                <kbd>↓</kbd> 选择
+              </span>
+              <span>
+                <kbd>Enter</kbd> 执行
+              </span>
+              <span>
+                <kbd>Esc</kbd> 关闭
+              </span>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {helpOpen ? (
         <div className="help-overlay" onClick={() => setHelpOpen(false)}>
           <div
@@ -4363,8 +4832,8 @@ export default function App() {
             <ul className="help-list">
               <li>
                 <code>⌘/Ctrl + K</code>
-                <span>聚焦会话搜索</span>
-                <em>窄屏会自动打开会话列表；直接输入即可筛选标题与正文命中</em>
+                <span>打开命令面板</span>
+                <em>一个输入框同时搜索操作与会话；全文搜索也在这里（↑↓ 选择，Enter 执行，Esc 关闭）</em>
               </li>
               <li>
                 <code>⌘/Ctrl + Shift + O</code>

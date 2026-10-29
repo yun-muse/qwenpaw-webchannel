@@ -3,10 +3,19 @@ import {
   ACTIVE_KEY,
   CHATS_KEY,
   PINS_KEY,
+  TAGS_KEY,
+  allChatTags,
+  chatMatchesTag,
   newestServerChat,
+  normalizeTags,
+  parseChatTags,
+  parseTagInput,
+  persistedChatTags,
   persistedChats,
+  pruneChatTags,
   prunePins,
   restoreSession,
+  setChatTags,
   togglePin,
 } from '../src/lib/chatState';
 import type { ReadonlyStorage } from '../src/lib/chatState';
@@ -171,5 +180,90 @@ describe('prunePins', () => {
     // The handler only calls this inside `if (incomingIds.length > 0)`; an
     // empty list can also mean "the plugin's own API call failed".
     expect(prunePins(['a'], [])).toEqual([]);
+  });
+});
+
+describe('parseTagInput / normalizeTags', () => {
+  it('splits on commas, full-width commas, enumeration and semicolons', () => {
+    expect(parseTagInput('工作, 重要，待办、读书；灵感')).toEqual([
+      '工作',
+      '重要',
+      '待办',
+      '读书',
+      '灵感',
+    ]);
+  });
+
+  it('splits on whitespace, trims and removes duplicates in order', () => {
+    expect(parseTagInput('  work   work\tstudy\nwork ')).toEqual(['work', 'study']);
+    expect(parseTagInput('   ,，、; ')).toEqual([]);
+  });
+
+  it('normalises stored values and drops non-strings', () => {
+    expect(normalizeTags([' a ', 'a', '', 3, null, 'b'])).toEqual(['a', 'b']);
+    expect(normalizeTags('a')).toEqual([]);
+    expect(normalizeTags(undefined)).toEqual([]);
+  });
+});
+
+describe('chat tags persistence', () => {
+  it('parses a per-chat map and drops malformed rows', () => {
+    expect(
+      parseChatTags(
+        JSON.stringify({
+          a: ['work', ''],
+          b: 'not-an-array',
+          c: [],
+          '': ['ignored'],
+          d: ['x', 'x', ' y '],
+        }),
+      ),
+    ).toEqual({ a: ['work'], d: ['x', 'y'] });
+    expect(parseChatTags(null)).toEqual({});
+    expect(parseChatTags('not json')).toEqual({});
+    expect(parseChatTags('[]')).toEqual({});
+  });
+
+  it('reads the tags key and survives blocked storage', () => {
+    const storage = storageOf({ [TAGS_KEY]: '{"chat-a":["工作"]}' });
+    expect(persistedChatTags(storage)).toEqual({ 'chat-a': ['工作'] });
+    const broken: ReadonlyStorage = {
+      getItem() {
+        throw new Error('blocked');
+      },
+    };
+    expect(persistedChatTags(broken)).toEqual({});
+  });
+
+  it('sets, replaces and clears one chat without mutating the input', () => {
+    const empty: Record<string, never> = {};
+    const first = setChatTags(empty, 'a', ['work', '重要']);
+    expect(first).toEqual({ a: ['work', '重要'] });
+    expect(empty).toEqual({});
+    expect(setChatTags(first, 'a', ['读书'])).toEqual({ a: ['读书'] });
+    expect(setChatTags(first, 'a', [])).toEqual({});
+    expect(setChatTags(first, 'b', ['  ', ''])).toBe(first);
+  });
+
+  it('returns the same map when the tag list is unchanged', () => {
+    const tags = { a: ['work'] };
+    expect(setChatTags(tags, 'a', [' work ', 'work'])).toBe(tags);
+  });
+
+  it('prunes chats the server no longer lists, preserving order', () => {
+    const tags = { b: ['work'], a: ['读书'], c: ['work'] };
+    expect(pruneChatTags(tags, ['a', 'c'])).toEqual({ a: ['读书'], c: ['work'] });
+    expect(pruneChatTags(tags, ['a', 'b', 'c'])).toBe(tags);
+    expect(pruneChatTags(tags, [])).toEqual({});
+  });
+
+  it('collects distinct tags in chat order and filters by exact tag', () => {
+    const tags = { a: ['work', '重要'], b: ['重要', '读书'] };
+    expect(allChatTags(tags, ['b', 'a'])).toEqual(['重要', '读书', 'work']);
+    expect(allChatTags(tags, ['a', 'b'])).toEqual(['work', '重要', '读书']);
+    expect(chatMatchesTag(tags, 'a', null)).toBe(true);
+    expect(chatMatchesTag(tags, 'a', 'work')).toBe(true);
+    expect(chatMatchesTag(tags, 'a', '读书')).toBe(false);
+    expect(chatMatchesTag(tags, 'missing', 'work')).toBe(false);
   });
 });
