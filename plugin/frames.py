@@ -1,4 +1,4 @@
-"""WebChannel frame builders/parser -- protocol/frames.md v1 (+ v2 files, v6 export, v7 search).
+"""WebChannel frame builders/parser -- protocol/frames.md v1 (+ v2 files, v6 export, v7 search, v9 stats).
 
 Pure stdlib only. Frame builders return plain dicts ready for
 ``json.dumps``; the relay forwards them verbatim.
@@ -8,6 +8,7 @@ development/tests or as a top-level ``frames`` module by the QwenPaw plugin
 loader, so imports fall back to absolute form.
 """
 
+import datetime
 import json
 
 try:  # package-relative (tests, ``python -m plugin...``)
@@ -15,6 +16,7 @@ try:  # package-relative (tests, ``python -m plugin...``)
         CHUNK_RAW_BYTES,
         MAX_FILE_BYTES,
         PROMPT_FILES,
+        STATS_TOP_CHATS,
         TRANSFER_TTL_S,
         FileTransfers,
         RingBuffer,
@@ -28,6 +30,7 @@ except ImportError:  # loaded as a top-level module by the plugin loader
         CHUNK_RAW_BYTES,
         MAX_FILE_BYTES,
         PROMPT_FILES,
+        STATS_TOP_CHATS,
         TRANSFER_TTL_S,
         FileTransfers,
         RingBuffer,
@@ -44,6 +47,7 @@ __all__ = [
     "MAX_FRAME_BYTES",
     "PROMPT_FILES",
     "RingBuffer",
+    "STATS_TOP_CHATS",
     "SeqCounter",
     "StreamDiffer",
     "TRANSFER_TTL_S",
@@ -74,6 +78,7 @@ __all__ = [
     "search_results_frame",
     "skills_frame",
     "start_frame",
+    "stats_frame",
     "status_frame",
     "usage_frame",
 ]
@@ -412,6 +417,129 @@ def usage_frame(
             frame[key] = value
     if isinstance(last_turn, dict) and last_turn:
         frame["last_turn"] = last_turn
+    return frame
+
+
+def _stats_count(value):
+    """Non-negative int for one stats field, else ``None``."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and value >= 0:
+        return value
+    return None
+
+
+def _stats_totals(raw):
+    """Cleaned ``{turns, input?, output?}`` object, or ``None``."""
+    if not isinstance(raw, dict):
+        return None
+    cleaned = {}
+    turns = _stats_count(raw.get("turns"))
+    if turns is not None:
+        cleaned["turns"] = turns
+    for key in ("input", "output"):
+        value = _stats_count(raw.get(key))
+        if value is not None:
+            cleaned[key] = value
+    return cleaned or None
+
+
+def stats_frame(
+    req_id=None, totals=None, days=None, chats=None, covered_chats=None,
+    uncovered_chats=None, undated_turns=None, day_tz=None,
+):
+    """All-chats usage dashboard: ``{t:"stats", id?, totals, days[], chats[]}``.
+
+    A **control frame** like ``usage``: no ``seq``, never ring-buffered and
+    never replayed on ``resume`` (protocol/frames.md §14). The payload is a
+    summary of every chat that has usable persisted turns:
+
+    - ``totals`` — ``{turns, input?, output?}``; a missing token side means
+      "no turn recorded it", never 0.
+    - ``covered_chats`` — how many chats contribute to the numbers (a real 0
+      when there is no data yet).
+    - ``uncovered_chats`` — known web chats with no usable data. Omitted when
+      the server chat list could not be read: unknown is not 0.
+    - ``days`` — ``[{date, turns, input?, output?}]`` ascending by ISO date,
+      bucketed by the **container's local calendar day** (``created_at`` is a
+      naive local wall clock).
+    - ``chats`` — top chats by recorded tokens, capped at
+      ``STATS_TOP_CHATS``; ``title`` appears only when the chat list resolved
+      one.
+    - ``undated_turns`` — present only when some counted turn had no usable
+      timestamp; those turns are in the totals but not in ``days``.
+
+    Every malformed field is dropped rather than sent as a placeholder; the
+    handler always answers, so ``{"t":"stats"}`` is the documented "nothing
+    to report" reply.
+    """
+    frame = {"t": "stats", "day_basis": "container-local"}
+    if isinstance(req_id, str) and req_id:
+        frame["id"] = req_id
+
+    cleaned_totals = _stats_totals(totals)
+    if cleaned_totals is not None:
+        frame["totals"] = cleaned_totals
+
+    if isinstance(days, (list, tuple)):
+        cleaned_days = []
+        for raw in days:
+            if not isinstance(raw, dict):
+                continue
+            date = raw.get("date")
+            if not isinstance(date, str):
+                continue
+            try:
+                datetime.date.fromisoformat(date)
+            except ValueError:
+                continue
+            item = {"date": date}
+            turns = _stats_count(raw.get("turns"))
+            if turns is not None:
+                item["turns"] = turns
+            for key in ("input", "output"):
+                value = _stats_count(raw.get(key))
+                if value is not None:
+                    item[key] = value
+            cleaned_days.append(item)
+        frame["days"] = cleaned_days
+
+    if isinstance(chats, (list, tuple)):
+        cleaned_chats = []
+        for raw in list(chats)[:STATS_TOP_CHATS]:
+            if not isinstance(raw, dict):
+                continue
+            chat = raw.get("chat")
+            if not isinstance(chat, str) or not chat:
+                continue
+            item = {"chat": chat}
+            title = raw.get("title")
+            if isinstance(title, str) and title.strip():
+                item["title"] = title.strip()
+            turns = _stats_count(raw.get("turns"))
+            if turns is not None:
+                item["turns"] = turns
+            for key in ("input", "output"):
+                value = _stats_count(raw.get(key))
+                if value is not None:
+                    item[key] = value
+            cleaned_chats.append(item)
+        frame["chats"] = cleaned_chats
+
+    for key, value, allow_zero in (
+        ("covered_chats", covered_chats, True),
+        ("uncovered_chats", uncovered_chats, True),
+        ("undated_turns", undated_turns, False),
+    ):
+        count = _stats_count(value)
+        if count is None:
+            continue
+        if count == 0 and not allow_zero:
+            continue
+        frame[key] = count
+
+    if isinstance(day_tz, str) and day_tz.strip():
+        frame["day_tz"] = day_tz.strip()
     return frame
 
 

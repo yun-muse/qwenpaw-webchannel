@@ -72,6 +72,7 @@ superseded generation) is not acked.
 | `status` | `agent_name`, `provider?`, `model?` | **v3** identity push, sent when the agent attaches and whenever a client joins/leaves; the header displays it |
 | `effort` | `chat`, `level`, `effective`, `budget_tokens?`, `supported?`, `kind?`, `model_key?` | **v4** session thinking state: reply to `get_effort` / `set_effort`; control frame |
 | `usage` | `chat`, `id?`, `input_total?`, `output_total?`, `context_tokens?`, `context_limit?`, `last_turn?` | **v5**/**v8** session token usage: reply to `get_usage`; every numeric field is optional (absent = unknown); `last_turn` is the newest turn's receipt (§11.2); control frame |
+| `stats` | `id?`, `totals`, `days`, `chats`, `covered_chats?`, `uncovered_chats?`, `undated_turns?`, `day_basis`, `day_tz?` | **v9** all-chats usage dashboard: reply to `get_stats`; every count is optional except `totals.turns`; control frame (§14) |
 | `export_begin` | `chat`, `id`, `bytes`, `chunks`, `sha256` | **v6** export snapshot: whole-document UTF-8 byte length, chunk count, lower-case hex digest; control frame |
 | `export_chunk` | `chat`, `id`, `i`, `data` | **v6** one export chunk; `i` is 0-based, `data` is base64 of ≤96 KB raw bytes; control frame |
 | `export_end` | `chat`, `id` | **v6** all export chunks sent; the client verifies and saves; control frame |
@@ -90,9 +91,9 @@ model's thinking and MUST NOT be concatenated into it. A reply is streaming unti
 segment's `end` — an `end` for `reasoning` closes that segment only. Missing `stream_type` means
 `message` (older containers).
 
-`models`, `model_changed`, `status`, `effort`, `usage`, the `export_*` frames and `search_results`
-are **control frames**: they carry no `seq`, belong to no chat's stream, and are never ring-buffered
-or replayed on `resume` (§9.4, §10.3, §11.3, §12.4, §13.4).
+`models`, `model_changed`, `status`, `effort`, `usage`, `stats`, the `export_*` frames and
+`search_results` are **control frames**: they carry no `seq`, belong to no chat's stream, and are
+never ring-buffered or replayed on `resume` (§9.4, §10.3, §11.3, §12.4, §13.4, §14.4).
 
 ### 2.4 browser → container
 
@@ -108,6 +109,7 @@ or replayed on `resume` (§9.4, §10.3, §11.3, §12.4, §13.4).
 | `get_effort` | `chat` | **v4** request that chat's session thinking setting |
 | `set_effort` | `chat`, `level` | **v4** set that chat's thinking level (`default` clears the override) |
 | `get_usage` | `chat`, `id?` | **v5** request that chat's cumulative token usage and current context approximation |
+| `get_stats` | `id?` | **v9** request the all-chats usage dashboard (§14) |
 | `export` | `chat`, `id` | **v6** request a Markdown export of that chat; answered with `export_begin` / `export_chunk` / `export_end` |
 | `search` | `id`, `q`, `limit?` | **v7** full-text search over the archive; answered with `search_results` or `error{code:"E_SEARCH"}` |
 | `file_begin` | `chat`, `id`, `name`, `mime`, `size`, `chunks`, `sha256` | **v2** start a chunked upload; `chunks` is how many `file_chunk` frames follow |
@@ -686,3 +688,73 @@ results. Messages that have not been archived yet are invisible until their turn
 `search_results` is a **control frame**: it carries no `seq`, is not ring-buffered and is not
 replayed on `resume`. Reconnect and re-issue the `search` with a new `id` instead.
 
+
+## 14. Protocol v9 — all-chats usage dashboard
+
+Aggregates the per-turn receipts of §11 across every persisted web chat, so the SPA's 用量统计
+view can show totals, a per-day series and a top-chats ranking. The relay needs **no changes**;
+both frames are forwarded verbatim.
+
+### 14.1 Wire format
+
+Client → agent:
+
+```json
+{"t":"get_stats","id":"stats-1"}
+```
+
+Agent → client:
+
+```json
+{"t":"stats","id":"stats-1",
+ "totals":{"turns":95,"input":1648974,"output":12314},
+ "covered_chats":37,"uncovered_chats":0,
+ "days":[{"date":"2026-10-26","turns":20,"input":406196,"output":4556}],
+ "chats":[{"chat":"m2file","title":"…","turns":10,"input":273651,"output":1271}],
+ "day_basis":"container-local","day_tz":"UTC"}
+{"t":"stats"}
+```
+
+- `totals` — `{turns, input?, output?}` across all covered chats. A missing token side means **no
+  turn recorded it**; it is never sent as 0. `turns` is present even when it is 0.
+- `covered_chats` — how many chats contributed at least one usable turn. Real `0` is sent.
+- `uncovered_chats` — known web chats (the `GET /api/chats?channel=web` list) that contributed no
+  usable data. **Omitted when the chat list could not be read**: unknown is not 0.
+- `days[]` — `{date, turns, input?, output?}`, ascending by ISO `YYYY-MM-DD`.
+- `chats[]` — top chats by `input + output` (then `turns`, then chat id), **capped at 10**.
+  `title` appears only when the chat list resolved one.
+- `undated_turns` — present only when counted turns had no usable timestamp. Those turns are in
+  `totals` but not in `days`.
+- `day_basis` — always `"container-local"`; `day_tz` carries the container's local time-zone name
+  when known.
+- `id` echoes the request's envelope `id` when it had one.
+
+The agent **always answers**, at worst `{"t":"stats"}`, and never raises into the chat path. Every
+malformed field is dropped rather than replaced by a placeholder.
+
+### 14.2 Day bucketing
+
+A turn's day is the **container's local calendar day**. QwenPaw (AgentScope) stamps
+`Msg.created_at` with a naive local wall-clock ISO timestamp, so its date prefix is already local;
+an offset-aware timestamp is converted to local time first, and `finished_at` is the fallback.
+A turn without a parseable timestamp is counted in the totals but **not** in a made-up day bucket
+(`undated_turns` says how many). Day boundaries therefore follow the container's `TZ`, which may
+differ from the browser's.
+
+### 14.3 Coverage
+
+Covered data is every `sessions/web/*.json` (plus legacy `sessions/*.json`) file that parses, has
+at least one assistant message carrying `qwenpaw_turn_usage.usage` with a usable
+`prompt_tokens`/`completion_tokens`, and resolves to a chat id (recorded session id, a known
+ChatSpec id / chat id, or the QwenPaw file name `web-user_web--web-user--<chat>.json`).
+Malformed, empty and usage-less files are skipped silently. Turns that QwenPaw compacted away,
+replies never persisted, and chats with no session file are not in the numbers — which is exactly
+what `uncovered_chats` tells the UI.
+
+The scan reuses the `usage` handler's `(mtime_ns, size)` cache, so opening the dashboard re-stats
+files but only re-parses those that changed.
+
+### 14.4 Control frame
+
+`stats` carries **no `seq`**, belongs to no chat stream, and is never ring-buffered or replayed on
+`resume`. A reconnecting client re-issues `get_stats` with a new `id`.

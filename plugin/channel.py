@@ -88,6 +88,7 @@ try:  # package-relative (tests, ``python -m plugin...``)
         search_results_frame,
         skills_frame,
         start_frame,
+        stats_frame,
         status_frame,
         usage_frame,
     )
@@ -103,6 +104,7 @@ try:  # package-relative (tests, ``python -m plugin...``)
         SessionUsageStore,
         active_llm_detail,
         active_llm_of,
+        aggregate_usage_stats,
         approval_owner_ok,
         build_export_markdown,
         chunk_utf8,
@@ -149,6 +151,7 @@ except ImportError:  # loaded as a top-level module by the plugin loader
         search_results_frame,
         skills_frame,
         start_frame,
+        stats_frame,
         status_frame,
         usage_frame,
     )
@@ -164,6 +167,7 @@ except ImportError:  # loaded as a top-level module by the plugin loader
         SessionUsageStore,
         active_llm_detail,
         active_llm_of,
+        aggregate_usage_stats,
         approval_owner_ok,
         build_export_markdown,
         chunk_utf8,
@@ -499,8 +503,8 @@ class WebChannel(BaseChannel):
         """Send a control frame directly through the relay (M7).
 
         ``models`` / ``model_changed`` / ``status`` (plus the later
-        ``effort`` / ``usage`` replies) belong to no chat stream, so they are
-        sent without a ``seq`` and are neither ring-buffered nor replayed on
+        ``effort`` / ``usage`` / ``stats`` replies) belong to no chat stream,
+        so they are sent without a ``seq`` and are neither ring-buffered nor replayed on
         ``resume``. A failed control send is logged and swallowed: it must
         never surface into the handler that produced it.
         """
@@ -554,6 +558,8 @@ class WebChannel(BaseChannel):
             await self._handle_set_effort(frame)
         elif kind == "get_usage":
             await self._handle_get_usage(frame)
+        elif kind == "get_stats":
+            await self._handle_get_stats(frame)
         elif kind == "chats":
             await self._handle_chats(frame)
         elif kind == "del_chat":
@@ -1439,6 +1445,90 @@ class WebChannel(BaseChannel):
                 "webchannel: get_usage failed for chat=%s", chat, exc_info=True,
             )
         await self._send_control(usage_frame(chat, req_id=req_id, **fields))
+
+    # -- M24: all-chats usage dashboard ----------------------------------
+
+    async def _handle_get_stats(self, frame: Dict[str, Any]) -> None:
+        """Reply to ``{t:"get_stats", id?}`` with ``{t:"stats", ...}``.
+
+        Class 1 (per-file parse) lives in ``SessionUsageStore.stats_entries``:
+        every ``sessions/web/*.json`` file is summarised once, cached by
+        ``(mtime_ns, size)``, and malformed/usage-less files are skipped.
+        Class 2 (cross-file) is ``aggregate_usage_stats``: totals, per-day
+        buckets in the container's local calendar day, top chats, and the
+        uncovered count. The chat list is read first so titles can be
+        attached and "known but no data" chats can be counted; if that call
+        fails the numbers still come from the files and
+        ``uncovered_chats`` is omitted instead of pretending to be 0.
+
+        Like ``get_usage`` this is a control frame: no ``seq``, not
+        ring-buffered, never replayed. It always answers -- at worst
+        ``{"t":"stats"}`` -- and never raises into the chat path.
+        """
+        req_id = frame.get("id") if isinstance(frame.get("id"), str) else None
+        fields: Dict[str, Any] = {}
+        known_chats = None
+        titles: Dict[str, str] = {}
+        by_session: Dict[str, str] = {}
+        by_spec: Dict[str, str] = {}
+        try:
+            status, payload = await self._api_json(
+                "GET", "/api/chats", params={"channel": self.channel},
+            )
+            if 200 <= status < 300 and isinstance(payload, list):
+                items = extract_web_chats(
+                    payload, channel=self.channel, sender_id=SENDER_ID,
+                )
+                known_chats = [item["chat"] for item in items]
+                titles = {
+                    item["chat"]: item["title"]
+                    for item in items if item["title"]
+                }
+                prefix = f"{self.channel}:{SENDER_ID}:"
+                for spec in payload:
+                    if not isinstance(spec, dict):
+                        continue
+                    if spec.get("channel") != self.channel:
+                        continue
+                    session_id = spec.get("session_id")
+                    if not (
+                        isinstance(session_id, str)
+                        and session_id.startswith(prefix)
+                    ):
+                        continue
+                    chat = session_id.split(":", 2)[2]
+                    if not chat:
+                        continue
+                    by_session[session_id] = chat
+                    spec_id = spec.get("id")
+                    if isinstance(spec_id, str) and spec_id:
+                        by_spec[spec_id] = chat
+        except Exception:  # noqa: BLE001 - the files are the primary source
+            logger.warning(
+                "webchannel: get_stats could not read the chat list",
+                exc_info=True,
+            )
+            known_chats = None
+            titles = {}
+            by_session = {}
+            by_spec = {}
+
+        try:
+            entries = await asyncio.to_thread(
+                self._usage.stats_entries,
+                self._workspace_dir() / "sessions",
+                SENDER_ID,
+                self.channel,
+                known_chats,
+                by_session,
+                by_spec,
+            )
+            fields = aggregate_usage_stats(entries, known_chats, titles)
+            if time.tzname and time.tzname[0]:
+                fields["day_tz"] = time.tzname[0]
+        except Exception:  # noqa: BLE001 - a control frame never fails a chat
+            logger.warning("webchannel: get_stats failed", exc_info=True)
+        await self._send_control(stats_frame(req_id=req_id, **fields))
 
     # -- M12: conversation export (Markdown) -----------------------------
 

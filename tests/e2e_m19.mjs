@@ -2,14 +2,15 @@
 /**
  * M19 — SPA polish pack E2E (items 1–4, 6; item 5 is asserted alongside the
  * meter) plus the M22 SPA experience pack (dark theme, highlighting,
- * paste-to-attach, per-chat drafts, prompt library) and the M23 pack (chat
- * tags, Ctrl/⌘+K command palette, archive search jump). Runs entirely local
- * against a production build:
+ * paste-to-attach, per-chat drafts, prompt library), the M23 pack (chat
+ * tags, Ctrl/⌘+K command palette, archive search jump) and the M24 pack
+ * (all-chats usage dashboard: totals, day chart, ranking, empty state).
+ * Runs entirely local against a production build:
  *
  *   1. `npm run build` in spa/ (fails the run if the build fails)
  *   2. relay-node on :8787 (the build's baked-in local relay URL)
  *   3. an in-process mock agent that speaks the frames the SPA needs
- *      (chats / hist / models / skills / usage / effort / msg streaming)
+ *      (chats / hist / models / skills / usage / stats / effort / msg streaming)
  *   4. `vite preview` on :4173 serving spa/dist
  *
  * Two passes share the same server: desktop 1280x900 and iPhone 13
@@ -106,6 +107,38 @@ const ARCHIVED_HIT = {
   ts: 1760000000,
 };
 
+/**
+ * M24: the plugin's `stats` payload. Same shape the real handler builds, with
+ * the numbers the local probe produced (95 turns over two container-local
+ * days, 37 covered chats, 2 known chats without data).
+ */
+const DEFAULT_STATS = {
+  totals: { turns: 95, input: 1648974, output: 12314 },
+  covered_chats: 37,
+  uncovered_chats: 2,
+  days: [
+    { date: '2026-10-26', turns: 20, input: 406196, output: 4556 },
+    { date: '2026-10-27', turns: 75, input: 1242778, output: 7758 },
+  ],
+  chats: [
+    { chat: 'chat-beta', title: 'Beta 会话', turns: 40, input: 900000, output: 6000 },
+    { chat: 'chat-alpha', title: 'Alpha 会话', turns: 30, input: 500000, output: 4000 },
+  ],
+  day_basis: 'container-local',
+  day_tz: 'UTC',
+};
+
+/** M24 empty dashboard: real zeros, no days, no ranked chats. */
+const EMPTY_STATS = {
+  totals: { turns: 0 },
+  covered_chats: 0,
+  uncovered_chats: 2,
+  days: [],
+  chats: [],
+  day_basis: 'container-local',
+  day_tz: 'UTC',
+};
+
 /** Build the same snippet shape the plugin sends (40 code points of context). */
 function searchHitFor(chat, title, role, text, q, ts) {
   const at = text.toLowerCase().indexOf(q.toLowerCase());
@@ -168,6 +201,7 @@ const state = {
   chats: [],
   history: {},
   usage: {},
+  stats: JSON.parse(JSON.stringify(DEFAULT_STATS)),
   streaming: new Map(),
 };
 
@@ -186,6 +220,7 @@ function resetState() {
     },
     'chat-beta': { input_total: 300, output_total: 42, context_tokens: 900, context_limit: 32768 },
   };
+  state.stats = JSON.parse(JSON.stringify(DEFAULT_STATS));
   for (const timer of state.streaming.values()) clearInterval(timer);
   state.streaming.clear();
 }
@@ -256,6 +291,9 @@ function handleAgentFrame(frame) {
       agentSend({ t: 'usage', chat, ...(state.usage[chat] || {}) });
       break;
     }
+    case 'get_stats':
+      agentSend({ t: 'stats', id: frame.id, ...state.stats });
+      break;
     case 'get_effort':
       agentSend({
         t: 'effort',
@@ -1311,6 +1349,224 @@ async function runM23Checks(page, pass, mobile) {
 }
 
 // ---------------------------------------------------------------------------
+// M24 helpers (all-chats usage dashboard)
+// ---------------------------------------------------------------------------
+
+async function runM24Checks(page, pass, mobile) {
+  state.stats = JSON.parse(JSON.stringify(DEFAULT_STATS));
+
+  const openStatsView = async () => {
+    if (mobile && !(await page.locator('.app.sidebar-open').count())) {
+      await page.locator('.hamburger').click();
+      await sleep(350);
+    }
+    await page.locator('.stats-open').click();
+    await page.waitForSelector('.stats-view', { timeout: 4000 });
+    await sleep(300);
+  };
+
+  await openStatsView();
+  await page.screenshot({ path: shot(pass, 'm24-stats'), fullPage: false });
+
+  const view = await page.evaluate(() => {
+    const text = (sel) => (document.querySelector(sel) || {}).textContent || '';
+    const cards = [...document.querySelectorAll('.stats-card')].map((el) => ({
+      label: (el.querySelector('.stats-card-label') || {}).textContent || '',
+      value: (el.querySelector('.stats-card-value') || {}).textContent || '',
+      sub: (el.querySelector('.stats-card-sub') || {}).textContent || '',
+    }));
+    const bars = [...document.querySelectorAll('.stats-bar-col')].map((el) => {
+      const fill = el.querySelector('.stats-bar-fill');
+      const track = el.querySelector('.stats-bar-track');
+      let ratio = null;
+      if (fill && track) {
+        const f = fill.getBoundingClientRect();
+        const t = track.getBoundingClientRect();
+        ratio = t.height > 0 ? Math.round((f.height / t.height) * 1000) / 1000 : null;
+      }
+      return {
+        label: (el.querySelector('.stats-bar-label') || {}).textContent || '',
+        turns: (el.querySelector('.stats-bar-turns') || {}).textContent || '',
+        ratio,
+      };
+    });
+    const rows = [...document.querySelectorAll('.stats-chat-row')].map((el) => ({
+      rank: (el.querySelector('.stats-chat-rank') || {}).textContent || '',
+      title: (el.querySelector('.stats-chat-title') || {}).textContent || '',
+      id: (el.querySelector('.stats-chat-id') || {}).textContent || '',
+      turns: (el.querySelector('.stats-chat-turns') || {}).textContent || '',
+    }));
+    const box = document.querySelector('.stats-view');
+    const rect = box ? box.getBoundingClientRect() : null;
+    return {
+      cards,
+      bars,
+      rows,
+      head: text('.stats-title'),
+      chartHead: text('.stats-chart-wrap .stats-section-head'),
+      topHead: text('.stats-top .stats-section-head'),
+      basis: text('.stats-basis'),
+      dialog: rect ? { w: Math.round(rect.width), h: Math.round(rect.height) } : null,
+      overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      viewport: { w: innerWidth, h: innerHeight },
+    };
+  });
+
+  check(`${pass}: stats view opens from the sidebar`, view.dialog != null, JSON.stringify(view.dialog));
+  check(
+    `${pass}: stats has four totals cards`,
+    view.cards.length === 4,
+    view.cards.map((c) => `${c.label}=${c.value}`).join(' · '),
+  );
+  check(
+    `${pass}: totals show turns / input / output / covered chats`,
+    view.cards[0].value === '95' &&
+      view.cards[1].value === '1.6M' &&
+      view.cards[2].value === '12.3k' &&
+      view.cards[3].value === '37',
+    view.cards.map((c) => c.value).join(','),
+  );
+  check(
+    `${pass}: exact input total and uncovered count are stated`,
+    view.cards[1].sub.includes('1,648,974') && view.cards[3].sub.includes('另有 2 个无数据'),
+    `${view.cards[1].sub} | ${view.cards[3].sub}`,
+  );
+  check(
+    `${pass}: day chart has one bar per day, ascending`,
+    view.bars.length === 2 && view.bars[0].label === '10/26' && view.bars[1].label === '10/27',
+    JSON.stringify(view.bars.map((b) => b.label)),
+  );
+  check(
+    `${pass}: bars scale to the peak day`,
+    view.bars[0].ratio != null &&
+      Math.abs(view.bars[0].ratio - 0.328) < 0.02 &&
+      Math.abs(view.bars[1].ratio - 1) < 0.01,
+    JSON.stringify(view.bars.map((b) => b.ratio)),
+  );
+  check(
+    `${pass}: every bar keeps its turn count`,
+    view.bars[0].turns === '20 轮' && view.bars[1].turns === '75 轮',
+    JSON.stringify(view.bars.map((b) => b.turns)),
+  );
+  check(
+    `${pass}: chart header names the peak`,
+    view.chartHead.includes('峰值') && view.chartHead.includes('1.3M'),
+    view.chartHead.trim(),
+  );
+  check(
+    `${pass}: top chats are ranked with titles`,
+    view.rows.length === 2 &&
+      view.rows[0].rank === '1' &&
+      view.rows[0].title === 'Beta 会话' &&
+      view.rows[0].id === 'chat-beta' &&
+      view.rows[0].turns === '40 轮' &&
+      view.rows[1].title === 'Alpha 会话',
+    JSON.stringify(view.rows),
+  );
+  check(
+    `${pass}: ranking header explains the cap`,
+    view.topHead.includes('共 37 个会话有数据') && view.topHead.includes('前 2'),
+    view.topHead.trim(),
+  );
+  check(
+    `${pass}: basis note states source, coverage and timezone`,
+    view.basis.includes('数据来源与覆盖范围') &&
+      view.basis.includes('sessions/web/*.json') &&
+      view.basis.includes('容器本地时区') &&
+      view.basis.includes('（UTC）') &&
+      view.basis.includes('37 个会话有可用数据') &&
+      view.basis.includes('2 个已知会话没有可统计的用量'),
+    view.basis.replace(/\s+/g, ' ').slice(0, 160),
+  );
+
+  if (mobile) {
+    check(
+      `${pass}: stats dialog fills the 390px screen`,
+      view.viewport.w === 390 &&
+        view.dialog != null &&
+        Math.abs(view.dialog.w - 390) <= 1 &&
+        view.dialog.h >= view.viewport.h - 1,
+      JSON.stringify({ dialog: view.dialog, viewport: view.viewport }),
+    );
+    check(
+      `${pass}: stats view has no horizontal overflow`,
+      view.overflowX <= 0,
+      String(view.overflowX),
+    );
+    // Scope the audit to the dialog: the M23 toast's compact "关闭" button
+    // (asserted to stay ≤24px above) may still be on screen behind it.
+    const audit = await page.evaluate(() => {
+      const out = [];
+      for (const el of document.querySelectorAll('.stats-view button')) {
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) continue;
+        if (r.width < 44 || r.height < 44) {
+          out.push({
+            text: (el.textContent || '').trim().slice(0, 40),
+            w: Math.round(r.width * 10) / 10,
+            h: Math.round(r.height * 10) / 10,
+          });
+        }
+      }
+      return out;
+    });
+    check(
+      `${pass}: stats tap targets stay 44px`,
+      audit.length === 0,
+      JSON.stringify(audit.slice(0, 4)),
+    );
+  }
+
+  // ---- Jump from a ranking row to that chat ---------------------------
+  await page.locator('.stats-chat-row').first().click();
+  await sleep(350);
+  const jumped = await page.evaluate(() => ({
+    open: document.querySelectorAll('.stats-view').length,
+    title: ((document.querySelector('.top-title') || {}).textContent || '').trim(),
+    active: localStorage.getItem('webchannel.activeChat'),
+  }));
+  check(
+    `${pass}: clicking a ranked chat opens it`,
+    jumped.open === 0 && jumped.title === 'Beta 会话' && jumped.active === 'chat-beta',
+    JSON.stringify(jumped),
+  );
+
+  // ---- Empty state (a real zero, not a missing field) ------------------
+  await openStatsView();
+  state.stats = JSON.parse(JSON.stringify(EMPTY_STATS));
+  await page.locator('.stats-icon-btn[aria-label="刷新用量统计"]').click();
+  await page.waitForSelector('.stats-empty', { timeout: 4000 });
+  await sleep(250);
+  const empty = await page.evaluate(() => ({
+    text: ((document.querySelector('.stats-empty') || {}).textContent || '').trim(),
+    cards: document.querySelectorAll('.stats-card').length,
+    bars: document.querySelectorAll('.stats-bar-col').length,
+    rows: document.querySelectorAll('.stats-chat-row').length,
+    basis: ((document.querySelector('.stats-basis') || {}).textContent || '').trim(),
+  }));
+  check(
+    `${pass}: empty stats shows an honest empty state`,
+    empty.text.includes('还没有可统计的用量') &&
+      empty.cards === 0 &&
+      empty.bars === 0 &&
+      empty.rows === 0,
+    JSON.stringify({ cards: empty.cards, bars: empty.bars, rows: empty.rows }),
+  );
+  check(
+    `${pass}: empty-state basis reports zero coverage`,
+    empty.basis.includes('0 个会话有可用数据'),
+    empty.basis.replace(/\s+/g, ' ').slice(0, 120),
+  );
+  await page.screenshot({ path: shot(pass, 'm24-stats-empty'), fullPage: false });
+
+  state.stats = JSON.parse(JSON.stringify(DEFAULT_STATS));
+  await page.keyboard.press('Escape');
+  await sleep(250);
+  const closed = await page.evaluate(() => document.querySelectorAll('.stats-view').length);
+  check(`${pass}: Escape closes the stats view`, closed === 0);
+}
+
+// ---------------------------------------------------------------------------
 // One pass (desktop or mobile)
 // ---------------------------------------------------------------------------
 
@@ -1814,6 +2070,9 @@ async function runPass(browser, pass, viewport, mobile) {
 
     // ---- 8. M23: tags, command palette, search jump ----------------------
     await runM23Checks(page, pass, mobile);
+
+    // ---- 9. M24: all-chats usage dashboard -------------------------------
+    await runM24Checks(page, pass, mobile);
 
     check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
   } finally {

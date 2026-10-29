@@ -6,6 +6,7 @@ it can be unit-tested without the host application installed.
 
 import base64
 import binascii
+import datetime
 import hashlib
 import json
 import math
@@ -1440,7 +1441,7 @@ class SessionUsageStore:
             entry = self._entry(path)
             if entry is None:
                 continue
-            identity, usage, last_turn = entry
+            identity, usage, last_turn, _summary = entry
             if identity:
                 # A file that names a session only ever answers for that one.
                 # Depending on the store version that name is the session id,
@@ -1457,6 +1458,57 @@ class SessionUsageStore:
         usage, last_turn = stem_match
         return dict(usage), _copy_turn(last_turn)
 
+    def stats_entries(
+        self, sessions_root, sender_id="web-user", channel="web",
+        chat_ids=None, chat_by_session=None, chat_by_spec=None,
+    ):
+        """Turn summaries of every usable session file, one entry per file.
+
+        Returns ``[{"path", "chat", "summary"}]`` for files that recorded at
+        least one turn. Malformed, empty and usage-less files are skipped
+        silently. The parse is shared with ``usage_for`` through the same
+        ``(mtime_ns, size)`` cache, so opening the dashboard re-stats cheap
+        files but never re-reads an unchanged one.
+
+        Every failure degrades to the entries collected so far; the stats
+        path must never raise.
+        """
+        try:
+            root = os.fspath(sessions_root)
+        except TypeError:
+            return []
+        known = (
+            set(chat for chat in chat_ids if isinstance(chat, str) and chat)
+            if isinstance(chat_ids, (list, tuple, set)) else None
+        )
+        entries = []
+        try:
+            with self._lock:
+                for path in self._paths(root):
+                    entry = self._entry(path)
+                    if entry is None:
+                        continue
+                    identity, _usage, _last_turn, summary = entry
+                    if not isinstance(summary, dict):
+                        continue
+                    turns = summary.get("turns")
+                    if not isinstance(turns, int) or turns <= 0:
+                        continue
+                    chat = session_file_chat(
+                        path, identity, sender_id, channel, known,
+                        chat_by_session, chat_by_spec,
+                    )
+                    if not chat:
+                        continue
+                    entries.append({
+                        "path": path,
+                        "chat": chat,
+                        "summary": _copy_turn_summary(summary),
+                    })
+        except Exception:  # noqa: BLE001 - best-effort, partial is fine
+            return entries
+        return entries
+
     @staticmethod
     def _paths(root):
         """Candidate ``*.json`` files, channel directory first."""
@@ -1472,7 +1524,7 @@ class SessionUsageStore:
         return paths
 
     def _entry(self, path):
-        """``(identity, usage, last_turn)`` for one file, cached by stat stamp."""
+        """``(identity, usage, last_turn, turn_summary)`` for one file, cached."""
         try:
             stat = os.stat(path)
         except OSError:
@@ -1482,7 +1534,7 @@ class SessionUsageStore:
         stamp = (stat.st_mtime_ns, stat.st_size)
         cached = self._cache.get(path)
         if cached is not None and cached[0] == stamp:
-            return cached[1], cached[2], cached[3]
+            return cached[1], cached[2], cached[3], cached[4]
 
         try:
             with open(path, "r", encoding="utf-8", errors="replace") as handle:
@@ -1490,17 +1542,20 @@ class SessionUsageStore:
         except (OSError, ValueError):
             # Mid-write or corrupt: remember the stamp so we do not retry it
             # until the file changes again.
-            self._cache[path] = (stamp, "", {}, None)
-            return "", {}, None
+            self._cache[path] = (
+                stamp, "", {}, None, _empty_turn_summary(),
+            )
+            return "", {}, None, _empty_turn_summary()
 
         identity = session_identity(data)
         messages = session_messages(data)
         usage = session_usage(messages)
         last_turn = session_last_turn(messages)
-        self._cache[path] = (stamp, identity, usage, last_turn)
+        summary = session_turn_summary(messages)
+        self._cache[path] = (stamp, identity, usage, last_turn, summary)
         if len(self._cache) > self._MAX_ENTRIES:
             self._prune()
-        return identity, usage, last_turn
+        return identity, usage, last_turn, summary
 
     def _prune(self):
         """Keep the cache bounded: drop missing files, then the oldest entries."""
@@ -1509,6 +1564,288 @@ class SessionUsageStore:
                 self._cache.pop(path, None)
         while len(self._cache) > self._MAX_ENTRIES:
             self._cache.pop(next(iter(self._cache)))
+
+
+# ---------------------------------------------------------------------------
+# M24 -- all-chats usage dashboard
+# ---------------------------------------------------------------------------
+
+# A dashboard is a summary, not a dump: only this many chats are sent.
+STATS_TOP_CHATS = 10
+
+
+def _empty_turn_summary():
+    """Zeroed per-file summary (the ``days`` map is owned by the caller)."""
+    return {"turns": 0, "days": {}, "undated_turns": 0}
+
+
+def _turn_day(message):
+    """Container-local ISO date of one message, or ``""`` when unknown.
+
+    QwenPaw (via AgentScope) stamps ``Msg.created_at`` with
+    ``datetime.now().isoformat()``: a **naive local wall-clock** value with no
+    offset. The date prefix is therefore the container's local calendar day,
+    which is what the dashboard's day buckets use. An offset-aware value
+    (some imports carry one) is converted to local time first;
+    ``finished_at`` is the fallback. Unparseable values are trusted only as a
+    date prefix when they at least look like one.
+    """
+    for key in ("created_at", "finished_at"):
+        raw = message.get(key)
+        if not isinstance(raw, str):
+            continue
+        text = raw.strip()
+        if not text:
+            continue
+        try:
+            parsed = datetime.datetime.fromisoformat(
+                text[:-1] + "+00:00" if text[-1] in ("Z", "z") else text,
+            )
+        except ValueError:
+            head = text[:10]
+            try:
+                datetime.date.fromisoformat(head)
+            except ValueError:
+                continue
+            return head
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone()
+        return parsed.date().isoformat()
+    return ""
+
+
+def _add_count(slot, key, value):
+    """Add a recorded token count to ``slot[key]``; ``None`` stays absent."""
+    if value is None:
+        return
+    slot[key] = slot.get(key, 0) + value
+
+
+def _copy_turn_summary(summary):
+    """Defensive copy of one cached per-file summary."""
+    copied = {
+        "turns": summary.get("turns", 0),
+        "days": {
+            day: dict(bucket) for day, bucket in summary.get("days", {}).items()
+        },
+        "undated_turns": summary.get("undated_turns", 0),
+    }
+    for key in ("input", "output"):
+        if key in summary:
+            copied[key] = summary[key]
+    return copied
+
+
+def session_turn_summary(messages):
+    """Turn totals + per-day buckets of one persisted session.
+
+    A **turn** is one assistant message carrying a usable
+    ``qwenpaw_turn_usage.usage`` receipt with at least one of
+    ``prompt_tokens`` / ``completion_tokens``. The result is::
+
+        {"turns": 3, "input": 120, "output": 30,
+         "days": {"2026-10-26": {"turns": 2, "input": 100, "output": 20}},
+         "undated_turns": 1}
+
+    ``input`` / ``output`` are absent when no turn recorded that side (a real
+    0 is kept), and the same rule applies per day. A turn without a timestamp
+    is counted in the totals but never in a made-up day bucket;
+    ``undated_turns`` says how many.
+    """
+    summary = _empty_turn_summary()
+    if not isinstance(messages, (list, tuple)):
+        return summary
+
+    for item in messages:
+        message = _message_dict(item)
+        if message is None:
+            continue
+        role = message.get("role")
+        role = getattr(role, "value", role)
+        if role != "assistant":
+            continue
+        usage = message_usage(message)
+        if usage is None:
+            continue
+        prompt = _token_count(usage.get("prompt_tokens"))
+        completion = _token_count(usage.get("completion_tokens"))
+        if prompt is None and completion is None:
+            continue
+
+        summary["turns"] += 1
+        _add_count(summary, "input", prompt)
+        _add_count(summary, "output", completion)
+
+        day = _turn_day(message)
+        if not day:
+            summary["undated_turns"] += 1
+            continue
+        bucket = summary["days"].setdefault(day, {"turns": 0})
+        bucket["turns"] += 1
+        _add_count(bucket, "input", prompt)
+        _add_count(bucket, "output", completion)
+    return summary
+
+
+def _session_file_stem(path):
+    """File name without its ``.json`` suffix."""
+    name = os.path.basename(path)
+    return name[:-5] if name.lower().endswith(".json") else os.path.splitext(name)[0]
+
+
+def session_file_chat(
+    path, identity="", sender_id="web-user", channel="web",
+    chat_ids=None, chat_by_session=None, chat_by_spec=None,
+):
+    """Chat id a session file belongs to, or ``""`` when unresolvable.
+
+    Resolution order:
+
+    1. the session id recorded inside the file, either as the channel form
+       (``web:web-user:<chat>``) or QwenPaw's filename-safe form
+       (``web--web-user--<chat>``);
+    2. an exact recorded identity that matches a known ChatSpec id, session
+       id or chat id (the caller supplies those maps from ``GET /api/chats``);
+    3. the QwenPaw file name, ``<sender>_<sanitized session id>.json`` --
+       ``web-user_web--web-user--<chat>.json``;
+    4. the bare file stem, for legacy stores that name a file after its chat.
+
+    The file name is usually the only usable mapping: QwenPaw stores an opaque
+    32-hex ``agent.state.session_id`` that is *not* the channel session id, so
+    ``session_identity`` deliberately ignores it.
+    """
+    stem = _session_file_stem(path)
+    prefixes = []
+    if isinstance(channel, str) and channel and isinstance(sender_id, str) and sender_id:
+        prefixes = [
+            "%s:%s:" % (channel, sender_id),
+            "%s--%s--" % (channel, sender_id),
+        ]
+
+    for value in (identity, stem):
+        if not isinstance(value, str) or not value:
+            continue
+        for prefix in prefixes:
+            if value.startswith(prefix) and len(value) > len(prefix):
+                return value[len(prefix):]
+
+    known = chat_ids if isinstance(chat_ids, (list, tuple, set)) else ()
+    for value in (identity, stem):
+        if not isinstance(value, str) or not value:
+            continue
+        if value in known:
+            return value
+        for mapping in (chat_by_session, chat_by_spec):
+            if not isinstance(mapping, dict):
+                continue
+            hit = mapping.get(value)
+            if isinstance(hit, str) and hit:
+                return hit
+
+    name_prefixes = []
+    if isinstance(sender_id, str) and sender_id and isinstance(channel, str) and channel:
+        name_prefixes.append("%s_%s--%s--" % (sender_id, channel, sender_id))
+    if prefixes:
+        name_prefixes.append(prefixes[1])
+    for prefix in name_prefixes:
+        if stem.startswith(prefix):
+            return stem[len(prefix):]
+    return stem
+
+
+def aggregate_usage_stats(entries, known_chats=None, titles=None):
+    """Fold per-file turn summaries into the M24 ``stats`` payload body.
+
+    *entries* is an iterable of ``{"chat", "summary"}`` dicts (see
+    ``session_turn_summary``). Returns::
+
+        {"totals": {"turns": 95, "input": 1648974, "output": 12314},
+         "covered_chats": 37,
+         "days": [{"date": "2026-10-26", "turns": 20, ...}, ...],
+         "chats": [{"chat": "...", "title": "...", "turns": 1, ...}, ...],
+         "uncovered_chats": 0}
+
+    ``uncovered_chats`` is the number of *known* chats (the server's web chat
+    list) that have no usable data. It is **omitted when the list is unknown**
+    (the API call failed): an unknown count must not be reported as 0. Top
+    chats are capped at ``STATS_TOP_CHATS`` and sorted by recorded tokens,
+    then turns, then chat id. ``undated_turns`` appears only when some counted
+    turn had no timestamp (such turns are in the totals but not in ``days``).
+    """
+    totals = {"turns": 0}
+    days = {}
+    chats = {}
+    covered = set()
+    undated = 0
+
+    for entry in entries or ():
+        if not isinstance(entry, dict):
+            continue
+        chat = entry.get("chat")
+        summary = entry.get("summary")
+        if not (isinstance(chat, str) and chat) or not isinstance(summary, dict):
+            continue
+        turns = _token_count(summary.get("turns"))
+        if turns is None or turns <= 0:
+            continue
+        covered.add(chat)
+        totals["turns"] += turns
+
+        item = chats.setdefault(chat, {"chat": chat, "turns": 0})
+        item["turns"] += turns
+        for key in ("input", "output"):
+            value = _token_count(summary.get(key))
+            if value is None:
+                continue
+            _add_count(totals, key, value)
+            _add_count(item, key, value)
+
+        undated += _token_count(summary.get("undated_turns")) or 0
+
+        buckets = summary.get("days")
+        if not isinstance(buckets, dict):
+            continue
+        for day, bucket in buckets.items():
+            if not isinstance(day, str) or not isinstance(bucket, dict):
+                continue
+            try:
+                datetime.date.fromisoformat(day)
+            except ValueError:
+                continue
+            day_turns = _token_count(bucket.get("turns"))
+            if day_turns is None or day_turns <= 0:
+                continue
+            target = days.setdefault(day, {"date": day, "turns": 0})
+            target["turns"] += day_turns
+            for key in ("input", "output"):
+                _add_count(target, key, _token_count(bucket.get(key)))
+
+    title_map = titles if isinstance(titles, dict) else {}
+    for chat, item in chats.items():
+        title = title_map.get(chat)
+        if isinstance(title, str) and title.strip():
+            item["title"] = title.strip()
+
+    def rank_key(item):
+        tokens = (item.get("input") or 0) + (item.get("output") or 0)
+        return (-tokens, -item["turns"], item["chat"])
+
+    top = sorted(chats.values(), key=rank_key)[:STATS_TOP_CHATS]
+    result = {
+        "totals": totals,
+        "covered_chats": len(covered),
+        "days": [days[day] for day in sorted(days)],
+        "chats": top,
+    }
+    if known_chats is not None:
+        known = {
+            chat for chat in known_chats
+            if isinstance(chat, str) and chat
+        }
+        result["uncovered_chats"] = len(known - covered)
+    if undated > 0:
+        result["undated_turns"] = undated
+    return result
 
 
 # ---------------------------------------------------------------------------

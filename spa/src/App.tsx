@@ -13,6 +13,7 @@ import hljs from 'highlight.js/lib/common';
 import {
   ArrowDown,
   AtSign,
+  BarChart3,
   BookmarkPlus,
   Check,
   ChevronUp,
@@ -95,6 +96,8 @@ import {
 import type { PaletteEntry } from './lib/palette';
 import { formatExact, formatTokens, turnTitle, turnUsageOf, usageOf } from './lib/usage';
 import type { ChatUsage, TurnUsage } from './lib/usage';
+import { statsBars, statsOf } from './lib/stats';
+import type { StatsBar, UsageStats } from './lib/stats';
 import {
   DEFAULT_SKILLS,
   FEYNMAN_AGENTS_MD,
@@ -166,6 +169,9 @@ type PromptFileName = (typeof PROMPT_FILE_TABS)[number];
 
 /** How long after a reply ends the usage refresh waits for the session file. */
 const USAGE_REFRESH_MS = 1200;
+
+/** M24: how long a `get_stats` reply may take before the view says so. */
+const STATS_TIMEOUT_MS = 15000;
 
 /**
  * The stored token, or null when it is missing or locally expired.
@@ -1169,6 +1175,234 @@ function ContextMeter({
   );
 }
 
+/** M24: pure-CSS per-day bar chart (no chart dependency). */
+function StatsChart({ bars }: { bars: StatsBar[] }) {
+  const max = bars.reduce((top, bar) => Math.max(top, bar.total), 0);
+  return (
+    <section className="stats-chart-wrap" aria-label="按天用量">
+      <div className="stats-section-head">
+        <span>按天用量</span>
+        <span>{max > 0 ? `峰值 ${formatTokens(max)} tokens` : '暂无 token 记录'}</span>
+      </div>
+      {bars.length === 0 ? (
+        <div className="stats-empty-line">还没有可用的按天数据</div>
+      ) : (
+        <div className="stats-chart">
+          {bars.map((bar) => {
+            const input = bar.input != null ? `输入 ${formatExact(bar.input)}` : '输入未记录';
+            const output = bar.output != null ? `输出 ${formatExact(bar.output)}` : '输出未记录';
+            return (
+              <div
+                className="stats-bar-col"
+                key={bar.date}
+                title={`${bar.date} · ${bar.turns} 轮 · ${input} · ${output}`}
+              >
+                <span className="stats-bar-value">
+                  {bar.total > 0 ? formatTokens(bar.total) : '—'}
+                </span>
+                <span className="stats-bar-track">
+                  <span
+                    className="stats-bar-fill"
+                    style={{
+                      height: bar.ratio > 0 ? `${Math.max(3, bar.ratio * 100)}%` : '0%',
+                    }}
+                  />
+                </span>
+                <span className="stats-bar-label">{bar.label}</span>
+                <span className="stats-bar-turns">{bar.turns} 轮</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** M24: the 用量统计 view, reachable from the sidebar. */
+function StatsView({
+  stats,
+  loading,
+  error,
+  onClose,
+  onRefresh,
+  onOpenChat,
+}: {
+  stats: UsageStats | null;
+  loading: boolean;
+  error: string | null;
+  onClose: () => void;
+  onRefresh: () => void;
+  onOpenChat: (chat: string) => void;
+}) {
+  const bars = stats ? statsBars(stats.days) : [];
+  const hasData = stats != null && (stats.totals.turns > 0 || stats.coveredChats > 0);
+  const input = stats?.totals.input;
+  const output = stats?.totals.output;
+  const covered = stats?.coveredChats ?? 0;
+  const uncovered = stats?.uncoveredChats;
+  const undated = stats?.undatedTurns ?? 0;
+
+  return (
+    <section
+      className="stats-view"
+      role="dialog"
+      aria-modal="true"
+      aria-label="用量统计"
+      onClick={(event) => event.stopPropagation()}
+    >
+      <div className="stats-head">
+        <div className="stats-title">
+          <BarChart3 size={17} />
+          <span>用量统计</span>
+          {stats?.dayTz ? <span className="stats-tz">{stats.dayTz} 本地日</span> : null}
+        </div>
+        <div className="stats-head-actions">
+          <button
+            className="stats-icon-btn"
+            type="button"
+            onClick={onRefresh}
+            aria-label="刷新用量统计"
+            title={loading ? '正在刷新…' : '刷新用量统计'}
+            disabled={loading}
+          >
+            <RefreshCw size={16} />
+          </button>
+          <button
+            className="stats-icon-btn"
+            type="button"
+            onClick={onClose}
+            aria-label="关闭用量统计"
+            title="关闭"
+          >
+            <X size={18} />
+          </button>
+        </div>
+      </div>
+
+      <div className="stats-body">
+        {error ? <div className="stats-error">{error}</div> : null}
+        {loading && !stats ? (
+          <div className="stats-loading">正在汇总全部会话的用量…</div>
+        ) : null}
+
+        {stats != null && !hasData ? (
+          <div className="stats-empty">
+            <BarChart3 size={26} />
+            <strong>还没有可统计的用量</strong>
+            <span>发一条消息，助手回复落盘后这里就会出现数据。</span>
+          </div>
+        ) : null}
+
+        {hasData ? (
+          <>
+            <div className="stats-cards">
+              <div className="stats-card">
+                <span className="stats-card-label">总轮次</span>
+                <strong className="stats-card-value">{formatExact(stats.totals.turns)}</strong>
+                <span className="stats-card-sub">有用量回执的助手轮次</span>
+              </div>
+              <div className="stats-card">
+                <span className="stats-card-label">输入 tokens</span>
+                <strong className="stats-card-value">
+                  {input != null ? formatTokens(input) : '—'}
+                </strong>
+                <span className="stats-card-sub" title={input != null ? formatExact(input) : ''}>
+                  {input != null ? `${formatExact(input)} 累计` : '未记录'}
+                </span>
+              </div>
+              <div className="stats-card">
+                <span className="stats-card-label">输出 tokens</span>
+                <strong className="stats-card-value">
+                  {output != null ? formatTokens(output) : '—'}
+                </strong>
+                <span className="stats-card-sub" title={output != null ? formatExact(output) : ''}>
+                  {output != null ? `${formatExact(output)} 累计` : '未记录'}
+                </span>
+              </div>
+              <div className="stats-card">
+                <span className="stats-card-label">覆盖会话</span>
+                <strong className="stats-card-value">{formatExact(covered)}</strong>
+                <span className="stats-card-sub">
+                  {uncovered != null ? `另有 ${uncovered} 个无数据` : '未覆盖数未知'}
+                </span>
+              </div>
+            </div>
+
+            <StatsChart bars={bars} />
+
+            <section className="stats-top" aria-label="会话用量排行">
+              <div className="stats-section-head">
+                <span>会话用量排行</span>
+                <span>
+                  共 {covered} 个会话有数据
+                  {stats.chats.length < covered ? `，显示前 ${stats.chats.length}` : ''}
+                </span>
+              </div>
+              {stats.chats.length === 0 ? (
+                <div className="stats-empty-line">暂无可排序的会话</div>
+              ) : (
+                <div className="stats-chat-list">
+                  {stats.chats.map((item, index) => (
+                    <button
+                      key={item.chat}
+                      type="button"
+                      className="stats-chat-row"
+                      onClick={() => onOpenChat(item.chat)}
+                      title={`打开会话 ${item.title ?? item.chat}`}
+                    >
+                      <span className="stats-chat-rank">{index + 1}</span>
+                      <span className="stats-chat-main">
+                        <span className="stats-chat-title">{item.title ?? item.chat}</span>
+                        <span className="stats-chat-id">{item.chat}</span>
+                      </span>
+                      <span className="stats-chat-turns">{item.turns} 轮</span>
+                      <span className="stats-chat-tokens">
+                        {item.input != null ? `↑${formatTokens(item.input)}` : ''}
+                        {item.input != null && item.output != null ? ' ' : ''}
+                        {item.output != null ? `↓${formatTokens(item.output)}` : ''}
+                      </span>
+                      <ChevronUp size={13} className="stats-chat-go" />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </section>
+          </>
+        ) : null}
+
+        <div className="stats-basis">
+          <div className="stats-basis-title">数据来源与覆盖范围</div>
+          <p>
+            来源：容器内 QwenPaw 会话历史（<code>sessions/web/*.json</code>）中每轮记录的
+            token 用量；按<strong>容器本地时区</strong>
+            {stats?.dayTz ? `（${stats.dayTz}）` : ''}的日历日分桶。
+          </p>
+          <p>
+            覆盖：
+            {stats == null
+              ? '等待插件返回统计。'
+              : (
+                <>
+                  {covered} 个会话有可用数据
+                  {uncovered != null
+                    ? `，另有 ${uncovered} 个已知会话没有可统计的用量`
+                    : '；会话列表不可用，无法判断未覆盖数量'}
+                  。
+                </>
+              )}
+            {undated > 0 ? ` 其中 ${undated} 轮没有时间戳，只计入合计、不在按天图中。` : ''}
+          </p>
+          <p>
+            仅统计已持久化的轮次：后端压缩掉的早期轮次、从未落盘的回复，以及没有会话文件的会话都不在数字里。
+            {stats && stats.chats.length < covered ? ' 排行只显示用量最高的前 10 个会话。' : ''}
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function LoginGate({
   httpUrl,
   onSuccess,
@@ -1333,6 +1567,11 @@ export default function App() {
   const [histTick, setHistTick] = useState(0);
   // M15: the usage panel is controlled so the command palette can open it.
   const [usageOpen, setUsageOpen] = useState(false);
+  // M24: the all-chats usage dashboard (sidebar entry, control frame).
+  const [statsOpen, setStatsOpen] = useState(false);
+  const [stats, setStats] = useState<UsageStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsError, setStatsError] = useState<string | null>(null);
   // M9: local choice per chat (restored first), plus what the server confirmed.
   const [effortLevels, setEffortLevels] = useState<Record<string, EffortLevel>>(persistedEfforts);
   const [effortMeta, setEffortMeta] = useState<Record<string, EffortMeta>>({});
@@ -1411,6 +1650,13 @@ export default function App() {
   const effortRetryTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   // M11: debounced usage refresh per chat (set after a reply finishes).
   const usageTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  // M24: the newest stats request; a late/duplicate reply must not overwrite
+  // a newer one, and the timeout only clears its own request.
+  const statsReqRef = useRef<{
+    id: string;
+    timer: ReturnType<typeof setTimeout> | null;
+  } | null>(null);
+  const statsReqSeq = useRef(0);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const runtimeOf = (chat: string): ChatRuntime => {
@@ -1505,6 +1751,35 @@ export default function App() {
 
   const requestUsage = (chat: string) => {
     clientRef.current?.send({ t: 'get_usage', chat, id: 'usage-get' });
+  };
+
+  /**
+   * M24: ask the plugin for the all-chats dashboard. `stats` is a control
+   * frame (no seq, never replayed), so every open/refresh is an explicit
+   * request. Only the newest request may settle the view; a send that fails
+   * because the socket is down reports it instead of hanging on the spinner.
+   */
+  const requestStats = () => {
+    const previous = statsReqRef.current;
+    if (previous?.timer != null) clearTimeout(previous.timer);
+    const id = `stats-${statsReqSeq.current + 1}`;
+    statsReqSeq.current += 1;
+    const pending = { id, timer: null as ReturnType<typeof setTimeout> | null };
+    statsReqRef.current = pending;
+    setStatsError(null);
+    setStatsLoading(true);
+    if (!clientRef.current?.send({ t: 'get_stats', id })) {
+      statsReqRef.current = null;
+      setStatsLoading(false);
+      setStatsError('未连接 — 正在重连，请稍后重试。');
+      return;
+    }
+    pending.timer = setTimeout(() => {
+      if (statsReqRef.current !== pending) return;
+      statsReqRef.current = null;
+      setStatsLoading(false);
+      setStatsError('统计请求超时，请稍后重试。');
+    }, STATS_TIMEOUT_MS);
   };
 
   /**
@@ -1961,6 +2236,15 @@ export default function App() {
     return () => document.removeEventListener('keydown', onKey);
   }, [helpOpen]);
 
+  useEffect(() => {
+    if (!statsOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setStatsOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [statsOpen]);
+
   // M19: global shortcuts. Neither key is claimed by the existing handlers
   // (panel Escape, composer Enter/Arrow) — the only conflict is the browser's
   // own Ctrl/⌘+K (address bar) and Ctrl/⌘+Shift+O (bookmarks), which the
@@ -2394,6 +2678,20 @@ export default function App() {
           setUsageByChat((prev) => ({ ...prev, [chat]: usageOf(frame) }));
           const lastTurn = turnUsageOf(frame.last_turn);
           if (lastTurn) attachLastTurn(chat, lastTurn);
+          break;
+        }
+
+        case 'stats': {
+          // Control frame: never replayed, so only the reply that answers the
+          // newest request may settle the view (a late one is stale).
+          const pending = statsReqRef.current;
+          const id = asString(frame.id);
+          if (pending && id && id !== pending.id) break;
+          if (pending?.timer != null) clearTimeout(pending.timer);
+          statsReqRef.current = null;
+          setStats(statsOf(frame));
+          setStatsLoading(false);
+          setStatsError(null);
           break;
         }
 
@@ -3150,6 +3448,21 @@ export default function App() {
     maybeRequestHist(id);
   };
 
+  /** M24: open the dashboard and ask for fresh numbers. */
+  const openStats = () => {
+    setSidebarOpen(false);
+    setStatsOpen(true);
+    requestStats();
+  };
+
+  /** M24: a ranking row jumps to that chat (adopting an archived-only id). */
+  const openStatsChat = (chat: string) => {
+    setStatsOpen(false);
+    if (!chatIds.includes(chat)) ensureChat(chat);
+    selectChat(chat);
+    requestUsage(chat);
+  };
+
   const deleteChat = (id: string) => {
     const title = titleOf(id);
     if (!window.confirm(`删除会话「${title}」？`)) return;
@@ -3832,6 +4145,11 @@ export default function App() {
             <span>新建会话</span>
           </span>
           <span className="new-chat-kbd">/new</span>
+        </button>
+
+        <button className="stats-open" type="button" onClick={openStats}>
+          <BarChart3 size={14} />
+          <span>用量统计</span>
         </button>
 
         <div className="search-wrap">
@@ -4623,6 +4941,19 @@ export default function App() {
           </div>
         </div>
       </main>
+
+      {statsOpen ? (
+        <div className="stats-overlay" onClick={() => setStatsOpen(false)}>
+          <StatsView
+            stats={stats}
+            loading={statsLoading}
+            error={statsError}
+            onClose={() => setStatsOpen(false)}
+            onRefresh={requestStats}
+            onOpenChat={openStatsChat}
+          />
+        </div>
+      ) : null}
 
       {promptDrawerOpen ? (
         <div className="drawer-overlay" onClick={() => setPromptDrawerOpen(false)}>
