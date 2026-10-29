@@ -46,8 +46,8 @@ a checklist with concrete commands/values where known. Facts you can rely on
 - Cloudflare access (updated 2026-10-27): the user's Cloudflare credential
   is connected as the `custom.cloudflare` connector and VERIFIED live
   (token verify → active, expires 2027-10-27). Account id
-  ` <cloudflare-account-id>` (account name
-  " <owner-email>'s Account") — this is the
+  `<cloudflare-account-id>` (account name
+  "<owner-email>'s Account") — this is the
   `CLOUDFLARE_ACCOUNT_ID` for deploys. Connector doc + read helper:
   `~/workspace/custom-connectors/custom.cloudflare/` (`bin/cf.py`:
   verify/accounts/get). Deploys will run THROUGH this connector. Caveat:
@@ -72,7 +72,7 @@ verify line):
    git; the user sets CF secrets themselves OR pastes values into the
    wrangler secret prompts.
 2. **Deploy relay-cf** via the `custom.cloudflare` connector (account id
-   ` <cloudflare-account-id>` = `CLOUDFLARE_ACCOUNT_ID`; credential
+   `<cloudflare-account-id>` = `CLOUDFLARE_ACCOUNT_ID`; credential
    already connected and verified — no `wrangler login` / browser OAuth
    needed from the user). First a deploy-time auth test: try wrangler
    with `CLOUDFLARE_API_TOKEN` supplied through the connector (surrogate)

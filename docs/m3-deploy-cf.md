@@ -20,9 +20,9 @@ Step 2a test PASSED: connector verified live first
 (`cf.py verify` → token `active`, expires 2027-10-27). The `hsurr:`
 surrogate from `dynamic_credentials.dynamic_credential_entry("custom.cloudflare")`
 was held only in a shell variable and passed as `CLOUDFLARE_API_TOKEN`
-(with `CLOUDFLARE_ACCOUNT_ID= <cloudflare-account-id>`):
+(with `CLOUDFLARE_ACCOUNT_ID=<cloudflare-account-id>`):
 `wrangler whoami` (wrangler 4.153.0) printed the account
-" <owner-email>'s Account" / ` <cloudflare-account-id>…`. So the REST fallback
+"<owner-email>'s Account" / `<cloudflare-account-id>`. So the REST fallback
 (2c) was **not** needed.
 
 Deploy: `npx wrangler deploy` from `relay-cf/` →

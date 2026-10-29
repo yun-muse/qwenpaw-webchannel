@@ -123,7 +123,7 @@ burst, 8 dropped, exactly one throttled `E_BUSY`.)
 The user's Cloudflare credential is now connected as the
 `custom.cloudflare` connector and **verified live** (token verify →
 active, expires 2027-10-27). Account id
-` <cloudflare-account-id>` (" <owner-email>'s
+`<cloudflare-account-id>` ("<owner-email>'s
 Account") is recorded in `docs/m3-plan.md` as the
 `CLOUDFLARE_ACCOUNT_ID`; connector doc + read helper live at
 `~/workspace/custom-connectors/custom.cloudflare/` (`bin/cf.py`).

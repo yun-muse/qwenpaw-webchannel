@@ -38,7 +38,7 @@ Required behaviour:
 - Redeploy to Cloudflare Pages: project qwenpaw-webchannel-spa,
   `wrangler pages deploy spa/dist --project-name qwenpaw-webchannel-spa --branch main`
   with the connector route (surrogate from dynamic_credentials in a shell var
-  as CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID= <cloudflare-account-id>;
+  as CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID=<cloudflare-account-id>;
   see ~/workspace/custom-connectors/custom.cloudflare/CONNECTOR.md).
   The build MUST carry the production relay env (VITE_RELAY_WS /
   VITE_RELAY_HTTP for qwenpaw-webchannel-relay.yxliwangsheng.workers.dev)

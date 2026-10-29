@@ -83,7 +83,7 @@ present, no `10MB`.
 - Connector re-verified first (`cf.py verify` → token `active`,
   expires 2027-10-27). Wrangler ran with the `hsurr:` surrogate from
   `dynamic_credentials` held only in a shell variable as
-  `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID= <cloudflare-account-id>…`:
+  `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID=<cloudflare-account-id>`:
   `wrangler pages deploy dist --project-name qwenpaw-webchannel-spa
   --branch main` → success, deployment
   `https://7ee24ef7.qwenpaw-webchannel-spa.pages.dev`.

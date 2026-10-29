@@ -12,7 +12,7 @@ Reference values (fixed for this plan):
 | Plugin install routes | `POST /api/plugins/upload` (multipart `file`, name must end `.zip`, `?force=true` to reinstall) and `POST /api/plugins/install` (`{source, force}`, source = local path or HTTP(S) ZIP URL) |
 | Archive contract | `plugin.json` at the ZIP root (or one top-level dir); extraction is Zip-Slip guarded |
 | Worker name | `qwenpaw-webchannel-relay` (from `relay-cf/wrangler.toml`) |
-| `CLOUDFLARE_ACCOUNT_ID` | ` <cloudflare-account-id>` (account " <owner-email>'s Account") |
+| `CLOUDFLARE_ACCOUNT_ID` | `<cloudflare-account-id>` (account "<owner-email>'s Account") |
 | Cloudflare credential | connected as the `custom.cloudflare` connector, verified live (token active, expires 2027-10-27); doc + read helper at `~/workspace/custom-connectors/custom.cloudflare/` (`bin/cf.py`: verify / accounts / get) |
 | Relay routes | `POST /api/login` `{password}` → `{token}` · `GET /ws/agent` (Bearer `AGENT_TOKEN`) · `GET /ws/client?token=…` · `GET /health` |
 | Plugin channel config keys | `relay_url`, `token` (both `required`, defaults point at localhost — they must be overwritten) |
@@ -60,12 +60,12 @@ connector does not populate it — **the wrangler-token route is untested.**
 
 ```bash
 cd relay-cf && npm install
-export CLOUDFLARE_ACCOUNT_ID= <cloudflare-account-id>
+export CLOUDFLARE_ACCOUNT_ID=<cloudflare-account-id>
 export CLOUDFLARE_API_TOKEN="<token value the connector surfaces>"
 npx wrangler whoami
 ```
 
-- **PASS** — prints the account (id ` <cloudflare-account-id>…` and/or the account name) →
+- **PASS** — prints the account (id `<cloudflare-account-id>` and/or the account name) →
   continue with 2b.
 - **FAIL / the connector exposes no raw token value** — do not fight it, and do
   not fall back to `wrangler login` (no browser). Go to 2c (REST fallback).
