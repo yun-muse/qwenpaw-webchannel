@@ -98,7 +98,7 @@ jobs:
           exit "$status"
 
   spa:
-    name: spa (build)
+    name: spa (build + unit tests)
     needs: changes
     if: needs.changes.outputs.spa == 'true'
     runs-on: ubuntu-latest
@@ -122,6 +122,35 @@ jobs:
       # provides that, and the config already falls back to "unknown".
       - name: Build
         run: npm run build
+
+      # Vitest over the pure helpers in src/lib/ (no DOM, no network).
+      - name: Unit tests
+        run: npm test
+
+  relay-node:
+    name: relay-node (smoke)
+    needs: changes
+    if: needs.changes.outputs.relay == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: relay-node
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: relay-node/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Self-contained: spawns server.js on an ephemeral local port and drives
+      # it with real WebSocket peers (routing, offline buffer, generations).
+      - name: Smoke test
+        run: npm test
 
   relay-cf:
     name: relay-cf (typecheck)

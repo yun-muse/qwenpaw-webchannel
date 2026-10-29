@@ -52,6 +52,22 @@ import { RelayClient } from './relay';
 import type { ConnState, ContentPart, Frame } from './relay';
 import { LOGIN_REQUIRED, RELAY_HTTP_URL, RELAY_WS_URL } from './config';
 import {
+  ACTIVE_KEY,
+  CHATS_KEY,
+  PINS_KEY,
+  newestServerChat,
+  newChatId,
+  persistedChats,
+  prunePins,
+  restoreSession,
+  togglePin as togglePinIn,
+} from './lib/chatState';
+import { EXPORT_ERROR_TEXT, base64Of, exportFileName, hexOf, verifyExport } from './lib/export';
+import { searchHitsOf, snippetParts } from './lib/search';
+import type { SearchHit } from './lib/search';
+import { formatExact, formatTokens, turnTitle, turnUsageOf, usageOf } from './lib/usage';
+import type { ChatUsage, TurnUsage } from './lib/usage';
+import {
   DEFAULT_SKILLS,
   FEYNMAN_AGENTS_MD,
   FEYNMAN_SOUL_MD,
@@ -95,12 +111,6 @@ const SEARCH_TIMEOUT_MS = 15_000;
 const TOKEN_KEY = 'webchannel.token';
 /** Expiry of TOKEN_KEY (Unix seconds, as answered by `POST /api/login`). */
 const TOKEN_EXPIRES_KEY = 'webchannel.tokenExpires';
-
-/** Chat list + visible chat from the previous visit (survives a reload). */
-const CHATS_KEY = 'webchannel.chats';
-const ACTIVE_KEY = 'webchannel.activeChat';
-/** Pinned chat ids, most recently pinned first (M19). */
-const PINS_KEY = 'webchannel.pinnedChats';
 
 /** User-given chat titles, keyed by chat id (M7). */
 const NAMES_KEY = 'webchannel.chatNames';
@@ -188,18 +198,6 @@ function storageSet(key: string, value: string): void {
   }
 }
 
-function persistedChats(key: string = CHATS_KEY): string[] {
-  const raw = storageGet(key);
-  if (!raw) return [];
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((id): id is string => typeof id === 'string' && id.length > 0);
-  } catch {
-    return [];
-  }
-}
-
 /** Per-chat thinking levels from the last visit; malformed entries are dropped. */
 function persistedEfforts(): Record<string, EffortLevel> {
   const raw = storageGet(EFFORT_KEY);
@@ -266,23 +264,6 @@ function initialTheme(): Theme {
   } catch {
     return 'light';
   }
-}
-
-/**
- * The chat list and the visible chat from the last visit. `restored` says the
- * pair came from localStorage (as opposed to a brand-new chat), which is what
- * tells the `chats` reply whether a missing active chat means "deleted on
- * another device" (M19).
- */
-function restoreSession(): { chats: string[]; active: string; restored: boolean } {
-  const chats = persistedChats();
-  if (chats.length > 0) {
-    const saved = storageGet(ACTIVE_KEY);
-    const active = saved && chats.includes(saved) ? saved : chats[0];
-    return { chats, active, restored: true };
-  }
-  const id = newChatId();
-  return { chats: [id], active: id, restored: false };
 }
 
 type Role = 'user' | 'assistant';
@@ -409,18 +390,6 @@ interface ExportJob {
   timer: ReturnType<typeof setTimeout> | null;
 }
 
-/** One archived message that matched a search (M13). */
-interface SearchHit {
-  chat: string;
-  title: string;
-  role: string;
-  snippet: string;
-  /** Match offset/length inside `snippet`, in UTF-16 code units (JS slices). */
-  matchStart: number;
-  matchLen: number;
-  ts: number | null;
-}
-
 /** One in-flight `search` request; a newer query supersedes it. */
 interface SearchJob {
   id: string;
@@ -454,10 +423,6 @@ let uploadCounter = 1;
 let exportCounter = 1;
 let searchCounter = 1;
 
-function newChatId(): string {
-  return `chat-${Date.now().toString(36)}`;
-}
-
 function asString(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
@@ -470,157 +435,13 @@ function fmtKb(bytes: number): string {
   return `${Math.round(bytes / 1024)} KB`;
 }
 
-/** Compact token count for the meter/receipt: 950, 12.3k, 1.2M. */
-function formatTokens(count: number): string {
-  if (count < 1000) return String(Math.round(count));
-  if (count < 1_000_000) {
-    return `${(count / 1000).toFixed(1).replace(/\.0$/, '')}k`;
-  }
-  return `${(count / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
-}
-
-/** Full grouped number for the meter's expanded panel. */
-function formatExact(count: number): string {
-  return Math.round(count).toLocaleString('zh-CN');
-}
-
-/** Per-chat usage as reported by the plugin's `usage` control frame (M11). */
-interface ChatUsage {
-  inputTotal?: number;
-  outputTotal?: number;
-  contextTokens?: number;
-  contextLimit?: number;
-}
-
-/**
- * One turn's token receipt (`hist.messages[].turn` / `usage.last_turn`, M15).
- *
- * No duration is modelled. The plugin stopped emitting `duration_ms` in M20:
- * QwenPaw's `finished_at` is stamped at the first REPLY_END, so the span was
- * always ~0 and never the turn's real duration. The SPA stopped showing one
- * in M17; an old plugin's extra field is simply ignored.
- */
-interface TurnUsage {
-  id: string;
-  input?: number;
-  output?: number;
-  total?: number;
-  estimated?: boolean;
-}
-
 const USAGE_TITLE =
   '本会话累计 ↑↓ 取自 QwenPaw 每轮 usage 元数据；上下文占用 ≈ 最近一轮最后一次模型调用的输入，工具调用轮次不再累加，仍可能与实时值略有偏差';
-
-function usageCount(raw: unknown): number | undefined {
-  return typeof raw === 'number' && Number.isFinite(raw) && raw >= 0
-    ? Math.round(raw)
-    : undefined;
-}
-
-/**
- * Parse one `turn` receipt. A receipt whose id is not a non-empty string, or
- * that carries any present-but-invalid numeric field, is dropped whole: a
- * half-parsed receipt would show numbers the server never sent.
- */
-function turnUsageOf(raw: unknown): TurnUsage | undefined {
-  if (!raw || typeof raw !== 'object') return undefined;
-  const record = raw as Record<string, unknown>;
-  const id = record.id;
-  if (typeof id !== 'string' || !id) return undefined;
-
-  const turn: TurnUsage = { id };
-  for (const key of ['input', 'output', 'total'] as const) {
-    const value = record[key];
-    if (value == null) continue;
-    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
-      return undefined;
-    }
-    turn[key] = Math.round(value);
-  }
-  // The plugin only emits a receipt when at least one token side is known.
-  if (turn.input == null && turn.output == null) return undefined;
-  if (record.estimated === true) turn.estimated = true;
-  return turn;
-}
-
-/** Tooltip for one receipt: exact numbers, total and the ≈ note. */
-function turnTitle(turn: TurnUsage): string {
-  const parts: string[] = [];
-  if (turn.input != null) parts.push(`输入 ${turn.input}`);
-  if (turn.output != null) parts.push(`输出 ${turn.output}`);
-  if (turn.total != null) parts.push(`合计 ${turn.total}`);
-  let text = `本轮用量${turn.estimated ? '（估算）' : ''}：${parts.join(' · ')}`;
-  if (turn.estimated) text += ' · 该轮 token 数为估算值';
-  return text;
-}
-
-/** Parse one `usage` frame; absent/invalid fields stay absent. */
-function usageOf(frame: Frame): ChatUsage {
-  const usage: ChatUsage = {};
-  const input = usageCount(frame.input_total);
-  const output = usageCount(frame.output_total);
-  const context = usageCount(frame.context_tokens);
-  const limit = usageCount(frame.context_limit);
-  if (input != null) usage.inputTotal = input;
-  if (output != null) usage.outputTotal = output;
-  if (context != null) usage.contextTokens = context;
-  if (limit != null && limit > 0) usage.contextLimit = limit;
-  return usage;
-}
-
-function hexOf(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  let hex = '';
-  for (let i = 0; i < bytes.length; i += 1) {
-    hex += bytes[i].toString(16).padStart(2, '0');
-  }
-  return hex;
-}
-
-function base64Of(bytes: Uint8Array): string {
-  const SLICE = 0x8000;
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += SLICE) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + SLICE));
-  }
-  return btoa(binary);
-}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
-}
-
-/** Decode one `export_chunk` payload; null when it is not valid base64. */
-function bytesOfBase64(data: string): Uint8Array | null {
-  try {
-    const binary = atob(data);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i += 1) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    return bytes;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * `<title>-<YYYY-MM-DD>.md` — illegal file-name characters are replaced and
- * the title is truncated by code point (never in the middle of a surrogate
- * pair), per M12.
- */
-function exportFileName(title: string, date: Date): string {
-  const cleaned = title
-    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ')
-    .replace(/[<>:"/\\|?*]/g, '_')
-    .replace(/\s+/g, ' ')
-    .trim();
-  const base =
-    Array.from(cleaned).slice(0, 50).join('').replace(/[. ]+$/, '') || 'chat';
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${base}-${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}.md`;
 }
 
 /** Hand one Blob to the browser's download machinery. */
@@ -744,83 +565,6 @@ function historyMessages(raw: unknown): HistoryMessage[] {
     out.push(message);
   }
   return out;
-}
-
-/**
- * Newest chat id carried by a `chats` frame: the largest parseable
- * `updated_at`, else the first id in server order (M19).
- */
-function newestServerChat(items: unknown[]): string | null {
-  let first: string | null = null;
-  let newest: string | null = null;
-  let newestAt = -Infinity;
-  for (const item of items) {
-    if (!item || typeof item !== 'object') continue;
-    const record = item as { chat?: unknown; updated_at?: unknown };
-    const id = asString(record.chat);
-    if (!id) continue;
-    if (first == null) first = id;
-    const at =
-      typeof record.updated_at === 'number'
-        ? record.updated_at
-        : Date.parse(asString(record.updated_at));
-    if (Number.isFinite(at) && at > newestAt) {
-      newestAt = at;
-      newest = id;
-    }
-  }
-  return newest ?? first;
-}
-
-/** Parse one `search_results` payload; malformed rows are dropped (M13). */
-function searchHitsOf(raw: unknown): SearchHit[] {
-  if (!Array.isArray(raw)) return [];
-  const out: SearchHit[] = [];
-  for (const entry of raw) {
-    if (!entry || typeof entry !== 'object') continue;
-    const record = entry as {
-      chat?: unknown;
-      title?: unknown;
-      role?: unknown;
-      snippet?: unknown;
-      match_start?: unknown;
-      match_len?: unknown;
-      ts?: unknown;
-    };
-    const chat = asString(record.chat);
-    if (!chat) continue;
-    const matchStart =
-      typeof record.match_start === 'number' && Number.isInteger(record.match_start)
-        ? record.match_start
-        : -1;
-    const matchLen =
-      typeof record.match_len === 'number' && Number.isInteger(record.match_len)
-        ? record.match_len
-        : 0;
-    out.push({
-      chat,
-      title: asString(record.title),
-      role: asString(record.role),
-      snippet: asString(record.snippet),
-      matchStart,
-      matchLen,
-      ts: typeof record.ts === 'number' && Number.isFinite(record.ts) ? record.ts : null,
-    });
-  }
-  return out;
-}
-
-/** Split a hit snippet on its match; slices are UTF-16 units, like the plugin. */
-function snippetParts(hit: SearchHit): { before: string; match: string; after: string } {
-  const { snippet, matchStart, matchLen } = hit;
-  if (matchStart < 0 || matchLen <= 0 || matchStart + matchLen > snippet.length) {
-    return { before: snippet, match: '', after: '' };
-  }
-  return {
-    before: snippet.slice(0, matchStart),
-    match: snippet.slice(matchStart, matchStart + matchLen),
-    after: snippet.slice(matchStart + matchLen),
-  };
 }
 
 function renderMarkdown(text: string): string {
@@ -1709,46 +1453,15 @@ export default function App() {
 
   /** Verify the collected chunks against `export_begin`, then save the Blob. */
   const finishExport = async (job: ExportJob) => {
-    if (!(job.chunks > 0) || !(job.bytes > 0) || !job.sha256) {
-      failExport(job, '导出失败：插件返回的文档信息不完整');
-      return;
-    }
-    const ordered: Uint8Array[] = [];
-    let total = 0;
-    for (let i = 0; i < job.chunks; i += 1) {
-      const raw = job.parts.get(i);
-      if (raw == null) {
-        failExport(job, '导出失败：分块缺失，请重试');
-        return;
-      }
-      const chunk = bytesOfBase64(raw);
-      if (!chunk) {
-        failExport(job, '导出失败：分块无法解码，请重试');
-        return;
-      }
-      ordered.push(chunk);
-      total += chunk.length;
-    }
-    if (total !== job.bytes) {
-      failExport(job, '导出校验失败：字节数不符，已丢弃');
-      return;
-    }
-    const buffer = new ArrayBuffer(total);
-    const merged = new Uint8Array(buffer);
-    let offset = 0;
-    for (const chunk of ordered) {
-      merged.set(chunk, offset);
-      offset += chunk.length;
-    }
-    let digest = '';
-    try {
-      digest = hexOf(await crypto.subtle.digest('SHA-256', buffer));
-    } catch {
-      failExport(job, '导出失败：无法计算校验值');
-      return;
-    }
-    if (digest !== job.sha256.toLowerCase()) {
-      failExport(job, '导出校验失败：内容不完整，已丢弃');
+    const result = await verifyExport(
+      job.parts,
+      job.chunks,
+      job.bytes,
+      job.sha256,
+      (buffer) => crypto.subtle.digest('SHA-256', buffer).then(hexOf),
+    );
+    if (!result.ok) {
+      failExport(job, EXPORT_ERROR_TEXT[result.reason]);
       return;
     }
     if (job.timer) {
@@ -1756,7 +1469,7 @@ export default function App() {
       job.timer = null;
     }
     const filename = exportFileName(job.title, new Date());
-    saveBlob(new Blob([buffer], { type: 'text/markdown;charset=utf-8' }), filename);
+    saveBlob(new Blob([result.buffer], { type: 'text/markdown;charset=utf-8' }), filename);
     // M17: verification passed and the browser download has started.
     showToastBriefly(`已导出：${filename}`, 'ok');
   };
@@ -2587,10 +2300,7 @@ export default function App() {
               // M19: pins for chats the server no longer lists are dropped
               // silently. An empty list is not trusted — the plugin also
               // answers [] when its own chat API fails.
-              setPins((prev) => {
-                const kept = prev.filter((id) => incomingIds.includes(id));
-                return kept.length === prev.length ? prev : kept;
-              });
+              setPins((prev) => prunePins(prev, incomingIds));
             }
 
             // M19: the chat restored from localStorage is only validated
@@ -2880,9 +2590,7 @@ export default function App() {
 
   /** Pin or unpin one chat; the newest pin sits first in the 置顶 group. */
   const togglePin = (id: string) => {
-    setPins((prev) =>
-      prev.includes(id) ? prev.filter((pin) => pin !== id) : [id, ...prev],
-    );
+    setPins((prev) => togglePinIn(prev, id));
   };
 
   const requestModels = () => {
