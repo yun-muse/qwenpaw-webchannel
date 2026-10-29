@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type {
   ChangeEvent,
   ClipboardEvent as ReactClipboardEvent,
@@ -32,6 +32,8 @@ import {
   Moon,
   MoreHorizontal,
   Paperclip,
+  Pin,
+  PinOff,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -97,6 +99,8 @@ const TOKEN_EXPIRES_KEY = 'webchannel.tokenExpires';
 /** Chat list + visible chat from the previous visit (survives a reload). */
 const CHATS_KEY = 'webchannel.chats';
 const ACTIVE_KEY = 'webchannel.activeChat';
+/** Pinned chat ids, most recently pinned first (M19). */
+const PINS_KEY = 'webchannel.pinnedChats';
 
 /** User-given chat titles, keyed by chat id (M7). */
 const NAMES_KEY = 'webchannel.chatNames';
@@ -184,8 +188,8 @@ function storageSet(key: string, value: string): void {
   }
 }
 
-function persistedChats(): string[] {
-  const raw = storageGet(CHATS_KEY);
+function persistedChats(key: string = CHATS_KEY): string[] {
+  const raw = storageGet(key);
   if (!raw) return [];
   try {
     const parsed: unknown = JSON.parse(raw);
@@ -264,15 +268,21 @@ function initialTheme(): Theme {
   }
 }
 
-function restoreSession(): { chats: string[]; active: string } {
+/**
+ * The chat list and the visible chat from the last visit. `restored` says the
+ * pair came from localStorage (as opposed to a brand-new chat), which is what
+ * tells the `chats` reply whether a missing active chat means "deleted on
+ * another device" (M19).
+ */
+function restoreSession(): { chats: string[]; active: string; restored: boolean } {
   const chats = persistedChats();
   if (chats.length > 0) {
     const saved = storageGet(ACTIVE_KEY);
     const active = saved && chats.includes(saved) ? saved : chats[0];
-    return { chats, active };
+    return { chats, active, restored: true };
   }
   const id = newChatId();
-  return { chats: [id], active: id };
+  return { chats: [id], active: id, restored: false };
 }
 
 type Role = 'user' | 'assistant';
@@ -737,6 +747,32 @@ function historyMessages(raw: unknown): HistoryMessage[] {
   return out;
 }
 
+/**
+ * Newest chat id carried by a `chats` frame: the largest parseable
+ * `updated_at`, else the first id in server order (M19).
+ */
+function newestServerChat(items: unknown[]): string | null {
+  let first: string | null = null;
+  let newest: string | null = null;
+  let newestAt = -Infinity;
+  for (const item of items) {
+    if (!item || typeof item !== 'object') continue;
+    const record = item as { chat?: unknown; updated_at?: unknown };
+    const id = asString(record.chat);
+    if (!id) continue;
+    if (first == null) first = id;
+    const at =
+      typeof record.updated_at === 'number'
+        ? record.updated_at
+        : Date.parse(asString(record.updated_at));
+    if (Number.isFinite(at) && at > newestAt) {
+      newestAt = at;
+      newest = id;
+    }
+  }
+  return newest ?? first;
+}
+
 /** Parse one `search_results` payload; malformed rows are dropped (M13). */
 function searchHitsOf(raw: unknown): SearchHit[] {
   if (!Array.isArray(raw)) return [];
@@ -912,7 +948,10 @@ function Markdown({ text, streaming }: { text: string; streaming?: boolean }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const html = useMemo(() => renderMarkdown(text), [text]);
 
-  useEffect(() => {
+  // Layout effect, not a passive one: `html` replaces every child of the
+  // container on each streaming frame, and the copy button must exist in the
+  // same paint (M19 — no frame may render a code block without its button).
+  useLayoutEffect(() => {
     const root = ref.current;
     if (!root) return;
 
@@ -945,7 +984,9 @@ function Markdown({ text, streaming }: { text: string; streaming?: boolean }) {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'pre-copy';
-        button.textContent = 'Copy';
+        button.textContent = '复制';
+        button.title = '复制代码';
+        button.setAttribute('aria-label', '复制代码');
         pre.appendChild(button);
       }
     });
@@ -1000,9 +1041,12 @@ function Markdown({ text, streaming }: { text: string; streaming?: boolean }) {
       const source = code?.textContent ?? pre.textContent ?? '';
       void copyText(source).then((ok) => {
         if (!ok) return;
-        preBtn.textContent = 'Copied';
+        preBtn.textContent = '已复制';
+        preBtn.classList.add('copied');
         window.setTimeout(() => {
-          preBtn.textContent = 'Copy';
+          // A streaming re-render may have replaced the node meanwhile.
+          preBtn.textContent = '复制';
+          preBtn.classList.remove('copied');
         }, 1200);
       });
       return;
@@ -1238,7 +1282,7 @@ function MessageView({
  * the tap-opened panel. Degrades to text-only rows when a part is missing and
  * renders nothing when only `context_limit` is known.
  */
-function ContextMeter({ usage }: { usage: ChatUsage | undefined }) {
+function ContextMeter({ usage, turns }: { usage: ChatUsage | undefined; turns: number }) {
   const [open, setOpen] = useState(false);
   if (!usage) return null;
 
@@ -1314,6 +1358,11 @@ function ContextMeter({ usage }: { usage: ChatUsage | undefined }) {
               本会话累计
               {inputTotal != null ? ` ↑${formatExact(inputTotal)}` : ''}
               {outputTotal != null ? ` ↓${formatExact(outputTotal)}` : ''}
+            </div>
+          ) : null}
+          {turns > 0 ? (
+            <div className="context-meter-turns">
+              轮次 {turns}（已加载历史中的用量回执）
             </div>
           ) : null}
           <div className="context-meter-note">{USAGE_TITLE}</div>
@@ -1464,6 +1513,8 @@ export default function App() {
   const [paletteIndex, setPaletteIndex] = useState(0);
   const [paletteMuted, setPaletteMuted] = useState<string | null>(null);
   const [chatNames, setChatNames] = useState<Record<string, string>>(persistedNames);
+  // M19: pinned chats, most recently pinned first (the 置顶 group's order).
+  const [pins, setPins] = useState<string[]>(() => persistedChats(PINS_KEY));
   // M9: local choice per chat (restored first), plus what the server confirmed.
   const [effortLevels, setEffortLevels] = useState<Record<string, EffortLevel>>(persistedEfforts);
   const [effortMeta, setEffortMeta] = useState<Record<string, EffortMeta>>({});
@@ -1511,7 +1562,14 @@ export default function App() {
   const modelWrapRef = useRef<HTMLDivElement | null>(null);
   const moreWrapRef = useRef<HTMLDivElement | null>(null);
   const nearBottomRef = useRef(true);
+  /** M19: a smooth jump to the bottom is settling; ignore its scroll events. */
+  const jumpRef = useRef(false);
   const lastChatRef = useRef<string>(session.active);
+  // M19: the chat restored from localStorage is validated once, against the
+  // first server chat list; a chat the user already touched is never yanked.
+  const restoredChatRef = useRef<string | null>(session.restored ? session.active : null);
+  const touchedChatsRef = useRef<Set<string>>(new Set());
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   // M9: onFrame runs outside React's render closure, so the effort state it
   // reads (and rolls back) lives in refs mirrored from the React state.
   const effortLevelsRef = useRef<Record<string, EffortLevel>>(effortLevels);
@@ -1901,6 +1959,10 @@ export default function App() {
   }, [chatNames]);
 
   useEffect(() => {
+    storageSet(PINS_KEY, JSON.stringify(pins));
+  }, [pins]);
+
+  useEffect(() => {
     // The ref is the write-through source for event handlers; every setter
     // (applyEffortLevel / forgetEffort) updates it together with the state.
     storageSet(EFFORT_KEY, JSON.stringify(effortLevels));
@@ -2045,6 +2107,34 @@ export default function App() {
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [helpOpen]);
+
+  // M19: global shortcuts. Neither key is claimed by the existing handlers
+  // (panel Escape, composer Enter/Arrow) — the only conflict is the browser's
+  // own Ctrl/⌘+K (address bar) and Ctrl/⌘+Shift+O (bookmarks), which the
+  // preventDefault below suppresses wherever the page is allowed to see it.
+  // Empty deps are safe: every callback below only touches setters and refs.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const mod = event.metaKey || event.ctrlKey;
+      if (!mod || event.altKey) return;
+      const key = event.key.toLowerCase();
+      if (key === 'k' && !event.shiftKey) {
+        event.preventDefault();
+        setSidebarOpen(true);
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        return;
+      }
+      if (key === 'o' && event.shiftKey) {
+        event.preventDefault();
+        newChat();
+        textareaRef.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- setters + refs only
+  }, []);
 
   useEffect(() => {
     if (needsLogin) return;
@@ -2495,6 +2585,35 @@ export default function App() {
               if (Object.keys(incomingTitles).length > 0) {
                 setChatNames((prev) => ({ ...incomingTitles, ...prev }));
               }
+              // M19: pins for chats the server no longer lists are dropped
+              // silently. An empty list is not trusted — the plugin also
+              // answers [] when its own chat API fails.
+              setPins((prev) => {
+                const kept = prev.filter((id) => incomingIds.includes(id));
+                return kept.length === prev.length ? prev : kept;
+              });
+            }
+
+            // M19: the chat restored from localStorage is only validated
+            // against this first server list. A chat deleted on another
+            // device would otherwise reopen empty forever.
+            const pending = restoredChatRef.current;
+            restoredChatRef.current = null;
+            if (
+              pending &&
+              !incomingIds.includes(pending) &&
+              activeRef.current === pending &&
+              !touchedChatsRef.current.has(pending)
+            ) {
+              const fallback = newestServerChat(frame.items);
+              if (fallback) {
+                ensureChat(fallback);
+                selectChat(fallback);
+                showToastBriefly('该会话已不在服务器列表中，已切换到最近的会话', 'info');
+              } else {
+                newChat();
+                showToastBriefly('该会话已不在服务器列表中，已新建会话', 'info');
+              }
             }
           }
           break;
@@ -2658,6 +2777,8 @@ export default function App() {
   const activeEffort = effortLevels[activeChat] ?? 'default';
   const activeEffortSupported = effortMeta[activeChat]?.supported ?? null;
   const activeUsage = usageByChat[activeChat];
+  // M19: one receipt per assistant turn the SPA has actually loaded.
+  const turnCount = messages.filter((m) => m.turn).length;
 
   useEffect(() => {
     const el = listRef.current;
@@ -2674,6 +2795,11 @@ export default function App() {
     const el = listRef.current;
     if (!el) return;
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
+    // M19: while a smooth jump to the bottom is in flight, every intermediate
+    // position would otherwise read as "the user scrolled up" and cancel the
+    // jump halfway (visible on mobile with a long list that keeps streaming).
+    if (atBottom) jumpRef.current = false;
+    else if (jumpRef.current) return;
     nearBottomRef.current = atBottom;
     setNearBottom(atBottom);
   };
@@ -2681,9 +2807,15 @@ export default function App() {
   const scrollToBottom = () => {
     const el = listRef.current;
     if (!el) return;
+    jumpRef.current = true;
     nearBottomRef.current = true;
     setNearBottom(true);
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    // The jump is short-lived; release the guard even if it never lands
+    // exactly on the bottom (a stream that keeps growing).
+    window.setTimeout(() => {
+      jumpRef.current = false;
+    }, 800);
   };
 
   const derivedTitle = (id: string): string => {
@@ -2741,6 +2873,18 @@ export default function App() {
   const visibleChats = query
     ? chatIds.filter((id) => titleOf(id).toLowerCase().includes(query))
     : chatIds;
+
+  // M19: pinned chats keep their pin order (newest first) in the 置顶 group.
+  const pinnedSet = new Set(pins);
+  const visiblePinned = pins.filter((id) => visibleChats.includes(id));
+  const visibleOthers = visibleChats.filter((id) => !pinnedSet.has(id));
+
+  /** Pin or unpin one chat; the newest pin sits first in the 置顶 group. */
+  const togglePin = (id: string) => {
+    setPins((prev) =>
+      prev.includes(id) ? prev.filter((pin) => pin !== id) : [id, ...prev],
+    );
+  };
 
   const requestModels = () => {
     clientRef.current?.send({ t: 'models' });
@@ -2968,6 +3112,8 @@ export default function App() {
       delete next[id];
       return next;
     });
+    // M19: a deleted chat cannot stay pinned.
+    setPins((prev) => (prev.includes(id) ? prev.filter((pin) => pin !== id) : prev));
     runtimes.current.delete(id);
     forgetEffort(id);
     setUsageByChat((prev) => {
@@ -3065,6 +3211,9 @@ export default function App() {
       setComposerError('未连接 — 正在重连，请稍后重试。');
       return;
     }
+    // M19: a chat the user has written in is never replaced by the stale-chat
+    // fallback, even if the server list predates this turn.
+    touchedChatsRef.current.add(chat);
     scheduleEffortReapply(chat);
     nearBottomRef.current = true;
     setNearBottom(true);
@@ -3112,6 +3261,9 @@ export default function App() {
       setComposerError('未连接 — 正在重连，请稍后重试。');
       return;
     }
+    // M19: a chat the user has written in is never replaced by the stale-chat
+    // fallback, even if the server list predates this turn.
+    touchedChatsRef.current.add(chat);
     scheduleEffortReapply(chat);
     nearBottomRef.current = true;
     setNearBottom(true);
@@ -3385,6 +3537,82 @@ export default function App() {
     );
   }
 
+  /** M19: one sidebar row, used by both the 置顶 group and the main list. */
+  const chatRow = (id: string) => {
+    const pinned = pinnedSet.has(id);
+    return (
+      <div
+        key={id}
+        className={`chat-item${id === activeChat ? ' active' : ''}${
+          renamingId === id ? ' renaming' : ''
+        }${pinned ? ' pinned' : ''}`}
+      >
+        {renamingId === id ? (
+          <input
+            className="chat-rename"
+            value={renameDraft}
+            autoFocus
+            aria-label="会话名称"
+            onChange={(e) => setRenameDraft(e.target.value)}
+            onBlur={commitRename}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                commitRename();
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                cancelRename();
+              }
+            }}
+          />
+        ) : (
+          <button
+            className="chat-title"
+            onClick={() => selectChat(id)}
+            onDoubleClick={() => startRename(id)}
+            title={titleOf(id)}
+          >
+            {pinned ? (
+              <Pin size={12} className="chat-pin-mark" />
+            ) : (
+              <MessageSquare size={13} style={{ flexShrink: 0, opacity: 0.65 }} />
+            )}
+            <span className="chat-title-text">{titleOf(id)}</span>
+          </button>
+        )}
+        <span className="chat-id">{id}</span>
+        <span className="chat-actions">
+          <button
+            className={`chat-act chat-pin${pinned ? ' on' : ''}`}
+            title={pinned ? '取消置顶' : '置顶会话'}
+            aria-label={pinned ? '取消置顶' : '置顶会话'}
+            aria-pressed={pinned}
+            onClick={() => togglePin(id)}
+          >
+            {pinned ? <PinOff size={12} /> : <Pin size={12} />}
+          </button>
+          <button
+            className="chat-act"
+            title="重命名"
+            aria-label="重命名会话"
+            onClick={() => startRename(id)}
+          >
+            <Edit3 size={12} />
+          </button>
+          <button
+            className="chat-act danger"
+            title="删除"
+            aria-label="删除会话"
+            onClick={() => deleteChat(id)}
+          >
+            <Trash2 size={12} />
+          </button>
+        </span>
+      </div>
+    );
+  };
+
   return (
     <div
       className={`app${sidebarOpen ? ' sidebar-open' : ''}`}
@@ -3439,6 +3667,7 @@ export default function App() {
           <input
             className="chat-search"
             type="search"
+            ref={searchInputRef}
             value={search}
             placeholder="搜索会话或正文…"
             aria-label="搜索会话与正文"
@@ -3461,64 +3690,14 @@ export default function App() {
           {visibleChats.length === 0 ? (
             <div className="chat-none">{chatIds.length === 0 ? '还没有会话' : '无匹配会话'}</div>
           ) : null}
-          {visibleChats.map((id) => (
-            <div
-              key={id}
-              className={`chat-item${id === activeChat ? ' active' : ''}${
-                renamingId === id ? ' renaming' : ''
-              }`}
-            >
-              {renamingId === id ? (
-                <input
-                  className="chat-rename"
-                  value={renameDraft}
-                  autoFocus
-                  aria-label="会话名称"
-                  onChange={(e) => setRenameDraft(e.target.value)}
-                  onBlur={commitRename}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      commitRename();
-                    } else if (e.key === 'Escape') {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      cancelRename();
-                    }
-                  }}
-                />
-              ) : (
-                <button
-                  className="chat-title"
-                  onClick={() => selectChat(id)}
-                  onDoubleClick={() => startRename(id)}
-                  title={titleOf(id)}
-                >
-                  <MessageSquare size={13} style={{ flexShrink: 0, opacity: 0.65 }} />
-                  <span className="chat-title-text">{titleOf(id)}</span>
-                </button>
-              )}
-              <span className="chat-id">{id}</span>
-              <span className="chat-actions">
-                <button
-                  className="chat-act"
-                  title="重命名"
-                  aria-label="重命名会话"
-                  onClick={() => startRename(id)}
-                >
-                  <Edit3 size={12} />
-                </button>
-                <button
-                  className="chat-act danger"
-                  title="删除"
-                  aria-label="删除会话"
-                  onClick={() => deleteChat(id)}
-                >
-                  <Trash2 size={12} />
-                </button>
-              </span>
-            </div>
-          ))}
+          {visiblePinned.length > 0 ? (
+            <div className="chat-group-label">置顶</div>
+          ) : null}
+          {visiblePinned.map(chatRow)}
+          {visiblePinned.length > 0 && visibleOthers.length > 0 ? (
+            <div className="chat-group-label">其他会话</div>
+          ) : null}
+          {visibleOthers.map(chatRow)}
         </nav>
 
         {query ? (
@@ -3895,7 +4074,7 @@ export default function App() {
 
           {composerError ? <div className="composer-error">{composerError}</div> : null}
 
-          <ContextMeter usage={activeUsage} />
+          <ContextMeter usage={activeUsage} turns={turnCount} />
 
           <div className="composer-card">
             {activeSkill || attachment ? (
@@ -4189,6 +4368,19 @@ export default function App() {
                   <em>{command.hint}</em>
                 </li>
               ))}
+            </ul>
+            <h4>键盘快捷键</h4>
+            <ul className="help-list">
+              <li>
+                <code>⌘/Ctrl + K</code>
+                <span>聚焦会话搜索</span>
+                <em>窄屏会自动打开会话列表；直接输入即可筛选标题与正文命中</em>
+              </li>
+              <li>
+                <code>⌘/Ctrl + Shift + O</code>
+                <span>新建会话</span>
+                <em>等价于左侧「新建会话」按钮，输入框随即可用</em>
+              </li>
             </ul>
             <h4>技能调用 (`@`)</h4>
             <p className="help-keys">

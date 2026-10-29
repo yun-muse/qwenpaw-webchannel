@@ -433,7 +433,8 @@ button:disabled {
 
 .chat-item:hover .chat-title,
 .chat-item:focus-within .chat-title {
-  padding-right: 48px;
+  /* M19: room for pin + rename + delete (3 × 22 px + gaps). */
+  padding-right: 78px;
 }
 
 .chat-rename {
@@ -490,6 +491,26 @@ button:disabled {
   font-size: 12.5px;
   color: var(--muted);
   text-align: center;
+}
+
+/* ---------- M19: pinned chats (置顶 group) ---------- */
+
+.chat-group-label {
+  flex: 0 0 auto;
+  padding: 8px 10px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.chat-pin-mark {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.chat-act.on {
+  color: var(--accent);
 }
 
 /* ---------- M13: archive full-text hits ---------- */
@@ -865,6 +886,9 @@ button:disabled {
 }
 
 .toast button {
+  /* M19: a long notice must wrap its text, never the 关闭 button glyphs. */
+  flex: 0 0 auto;
+  white-space: nowrap;
   font-size: 12px;
   font-weight: 600;
   color: var(--danger);
@@ -1388,6 +1412,11 @@ button:disabled {
 .md .pre-copy:hover {
   background: rgba(255, 255, 255, 0.18);
   color: #ffffff;
+}
+
+.md .pre-copy.copied {
+  color: #86efac;
+  border-color: rgba(134, 239, 172, 0.45);
 }
 
 .hljs-keyword,
@@ -2698,7 +2727,8 @@ button:disabled {
 
   .chat-title {
     min-height: 44px;
-    padding-right: 92px;
+    /* M19: three 44 px actions (pin / rename / delete) sit over the row. */
+    padding-right: 136px;
   }
 
   .chat-actions {
