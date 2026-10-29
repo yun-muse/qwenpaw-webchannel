@@ -2,14 +2,71 @@ name: CI
 
 on:
   push:
+    paths:
+      - "plugin/**"
+      - "spa/**"
+      - "relay-cf/**"
+      - "relay-node/**"
+      - "tests/**"
+      - "tools/**"
+      - "protocol/**"
+      - ".github/workflows/ci.yml"
   pull_request:
+    paths:
+      - "plugin/**"
+      - "spa/**"
+      - "relay-cf/**"
+      - "relay-node/**"
+      - "tests/**"
+      - "tools/**"
+      - "protocol/**"
+      - ".github/workflows/ci.yml"
 
 permissions:
   contents: read
 
 jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      plugin: ${{ steps.filter.outputs.plugin }}
+      spa: ${{ steps.filter.outputs.spa }}
+      relay: ${{ steps.filter.outputs.relay }}
+    steps:
+      # fetch-depth: 0 gives paths-filter the history it needs for git-based
+      # change detection on push; on pull_request it reads the PR diff via API.
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            plugin:
+              - 'plugin/**'
+              - 'tests/**'
+              - 'tools/**'
+              - 'protocol/**'
+              - '.github/workflows/ci.yml'
+            spa:
+              - 'spa/**'
+              - 'protocol/**'
+              - '.github/workflows/ci.yml'
+            relay:
+              - 'relay-cf/**'
+              - 'relay-node/**'
+              - 'protocol/**'
+              - '.github/workflows/ci.yml'
+
   plugin:
     name: plugin tests (python 3.12)
+    needs: changes
+    if: needs.changes.outputs.plugin == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -42,6 +99,8 @@ jobs:
 
   spa:
     name: spa (build)
+    needs: changes
+    if: needs.changes.outputs.spa == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -66,6 +125,8 @@ jobs:
 
   relay-cf:
     name: relay-cf (typecheck)
+    needs: changes
+    if: needs.changes.outputs.relay == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
