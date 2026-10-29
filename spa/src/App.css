@@ -3065,7 +3065,8 @@ button:disabled {
 
 /* ---------- M24: all-chats usage dashboard ---------- */
 
-.stats-open {
+.stats-open,
+.bulk-open {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -3078,10 +3079,89 @@ button:disabled {
   font-weight: 600;
 }
 
-.stats-open:hover {
+.stats-open:hover,
+.bulk-open:hover {
   border-color: var(--accent);
   color: var(--accent-dark);
   background: var(--hover-bg);
+}
+
+/* ---------- M25: bulk export (导出全部) ---------- */
+
+.bulk-open:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.bulk-waiting {
+  margin-left: auto;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.bulk-note {
+  margin: -4px 2px 0;
+  padding: 0 10px;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.bulk-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+}
+
+.bulk-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.bulk-cancel {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--danger);
+  text-decoration: underline;
+}
+
+.bulk-panel-title {
+  overflow: hidden;
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bulk-bar {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--chip-bg);
+}
+
+.bulk-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.bulk-panel-note {
+  font-size: 10.5px;
+  color: var(--muted);
 }
 
 .stats-overlay {
@@ -3894,6 +3974,16 @@ button:disabled {
   /* ===== M24: stats view fills the phone screen ========================= */
   .stats-open {
     min-height: 44px;
+  }
+
+  /* M25: the batch action and its cancel control are thumb-sized too. */
+  .bulk-open {
+    min-height: 44px;
+  }
+
+  .bulk-cancel {
+    min-height: 44px;
+    padding: 0 4px;
   }
 
   .stats-overlay {

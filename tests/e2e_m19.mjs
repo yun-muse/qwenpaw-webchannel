@@ -4,13 +4,14 @@
  * meter) plus the M22 SPA experience pack (dark theme, highlighting,
  * paste-to-attach, per-chat drafts, prompt library), the M23 pack (chat
  * tags, Ctrl/⌘+K command palette, archive search jump) and the M24 pack
- * (all-chats usage dashboard: totals, day chart, ranking, empty state).
+ * (all-chats usage dashboard: totals, day chart, ranking, empty state), and
+ * the M25 pack (导出全部: progress, failure accounting, cancel).
  * Runs entirely local against a production build:
  *
  *   1. `npm run build` in spa/ (fails the run if the build fails)
  *   2. relay-node on :8787 (the build's baked-in local relay URL)
  *   3. an in-process mock agent that speaks the frames the SPA needs
- *      (chats / hist / models / skills / usage / stats / effort / msg streaming)
+ *      (chats / hist / models / skills / usage / stats / effort / export / msg streaming)
  *   4. `vite preview` on :4173 serving spa/dist
  *
  * Two passes share the same server: desktop 1280x900 and iPhone 13
@@ -27,12 +28,19 @@
  *   M19_HEADED=1       visible browser
  *   OUT_DIR            screenshot directory; default ./m19-shots
  *
+ * The browser always runs with a UTF-8 locale (see UTF8_LOCALE), whatever the
+ * invoking shell exports: Chromium sanitizes `a[download]` names through the
+ * process locale, so under e.g. `LC_ALL=C` every CJK filename collapses to the
+ * literal "download" and the M25 filename assertions would test the shell
+ * rather than the SPA.
+ *
  * The process exits 1 on the first failing check summary; every check is
  * collected and printed so one run reports the whole pack.
  */
 
 import { chromium, devices } from 'playwright';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -47,6 +55,27 @@ const PREVIEW_PORT = Number(process.env.M19_PREVIEW_PORT || 4173);
 const RELAY_PORT = Number(process.env.M19_RELAY_PORT || 8787);
 const BASE = `http://127.0.0.1:${PREVIEW_PORT}/`;
 const HEADED = process.env.M19_HEADED === '1';
+
+/**
+ * Chromium converts an `a[download]` name into the *browser process* locale's
+ * charset before the download manager sees it. Under a non-UTF-8 locale
+ * (`LC_ALL=C`, the default of many plain/CI shells) the CJK titles are
+ * unrepresentable, the conversion yields nothing and Chromium falls back to
+ * its generic default name "download": the download still fires, only its
+ * name is lost. Nothing in the SPA can prevent that — the anchor's `download`
+ * attribute is already the exact title when click() runs — so the suite hands
+ * the browser an explicit UTF-8 locale instead of inheriting the shell's.
+ */
+const UTF8_LOCALE =
+  [process.env.LC_ALL, process.env.LC_CTYPE, process.env.LANG].find(
+    (value) => value && /utf-?8/i.test(value),
+  ) || 'C.UTF-8';
+const BROWSER_ENV = {
+  ...process.env,
+  LANG: UTF8_LOCALE,
+  LC_ALL: UTF8_LOCALE,
+  LC_CTYPE: UTF8_LOCALE,
+};
 
 const require = createRequire(join(ROOT, 'mock', 'package.json'));
 const WebSocket = require('ws');
@@ -203,6 +232,9 @@ const state = {
   usage: {},
   stats: JSON.parse(JSON.stringify(DEFAULT_STATS)),
   streaming: new Map(),
+  /** M25: chats whose mock export fails, and an artificial per-export delay. */
+  exportFail: [],
+  exportDelay: 0,
 };
 
 function resetState() {
@@ -221,8 +253,16 @@ function resetState() {
     'chat-beta': { input_total: 300, output_total: 42, context_tokens: 900, context_limit: 32768 },
   };
   state.stats = JSON.parse(JSON.stringify(DEFAULT_STATS));
+  state.exportFail = [];
+  state.exportDelay = 0;
   for (const timer of state.streaming.values()) clearInterval(timer);
   state.streaming.clear();
+}
+
+/** M25: a deterministic Markdown document per chat (what the plugin exports). */
+function exportDocFor(chat) {
+  const title = (state.chats.find((item) => item.chat === chat) || {}).title || chat;
+  return `# ${title}\n\n> mock export for ${chat}\n\n## 对话\n\n用户：你好\n\n助手：这是 ${chat} 的导出内容。\n`;
 }
 
 let agent = null;
@@ -289,6 +329,29 @@ function handleAgentFrame(frame) {
     case 'get_usage': {
       const chat = String(frame.chat || '');
       agentSend({ t: 'usage', chat, ...(state.usage[chat] || {}) });
+      break;
+    }
+    case 'export': {
+      const chat = String(frame.chat || '');
+      const id = String(frame.id || '');
+      const fail = state.exportFail.includes(chat);
+      setTimeout(() => {
+        if (fail) {
+          agentSend({
+            t: 'error',
+            chat,
+            id,
+            code: 'E_EXPORT',
+            detail: 'mock export refused',
+          });
+          return;
+        }
+        const body = Buffer.from(exportDocFor(chat), 'utf-8');
+        const sha256 = createHash('sha256').update(body).digest('hex');
+        agentSend({ t: 'export_begin', chat, id, bytes: body.length, chunks: 1, sha256 });
+        agentSend({ t: 'export_chunk', chat, id, i: 0, data: body.toString('base64') });
+        agentSend({ t: 'export_end', chat, id });
+      }, state.exportDelay);
       break;
     }
     case 'get_stats':
@@ -1567,6 +1630,215 @@ async function runM24Checks(page, pass, mobile) {
 }
 
 // ---------------------------------------------------------------------------
+// M25 — bulk export (导出全部)
+// ---------------------------------------------------------------------------
+
+/** Wait for a toast whose text contains `needle`, then return its text/tone. */
+async function waitToast(page, needle, timeout = 8000) {
+  await page.waitForFunction(
+    (text) => {
+      const el = document.querySelector('.toast');
+      return Boolean(el && (el.textContent || '').includes(text));
+    },
+    needle,
+    { timeout },
+  );
+  return page.evaluate(() => {
+    const el = document.querySelector('.toast');
+    return { text: (el.textContent || '').trim(), cls: el.className };
+  });
+}
+
+/** Close the current toast so the next wait cannot match a stale one. */
+async function dismissToast(page) {
+  // The mobile sidebar scrim sits above the toast: click the close control
+  // through the DOM instead of hit-testing, which the scrim would intercept.
+  await page.evaluate(() => {
+    const button = document.querySelector('.toast button');
+    if (button) button.click();
+  });
+  await page.waitForFunction(() => !document.querySelector('.toast'), null, {
+    timeout: 4000,
+  });
+}
+
+/** Node-side poll for asynchronous side effects (download events). */
+async function waitUntil(fn, timeout = 5000) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    if (await fn()) return true;
+    await sleep(50);
+  }
+  return false;
+}
+
+/**
+ * Prove once that this browser really can name a non-ASCII download (see
+ * UTF8_LOCALE). Without the guard the same environment bug reappears as four
+ * unrelated M25 failures whose detail is only ["download","download"].
+ * Returns an empty string when naming works, otherwise the diagnosis.
+ */
+async function probeDownloadNames(browser) {
+  const expected = '导出检查-2026-01-01.md';
+  const context = await browser.newContext();
+  try {
+    const page = await context.newPage();
+    await page.setContent('<!doctype html><html><body></body></html>');
+    const event = page.waitForEvent('download', { timeout: 8000 }).catch(() => null);
+    await page.evaluate((name) => {
+      const url = URL.createObjectURL(
+        new Blob(['probe'], { type: 'text/markdown;charset=utf-8' }),
+      );
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = name;
+      link.rel = 'noopener';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }, expected);
+    const download = await event;
+    if (!download) return 'blob download produced no download event';
+    const suggested = download.suggestedFilename();
+    if (suggested !== expected) {
+      return (
+        `browser named a non-ASCII download ${JSON.stringify(suggested)} instead of ` +
+        `${JSON.stringify(expected)} — its locale ${JSON.stringify(UTF8_LOCALE)} is not ` +
+        'UTF-8, so every CJK filename would collapse to "download"'
+      );
+    }
+    return '';
+  } catch (err) {
+    return `non-ASCII download probe failed: ${err && err.message ? err.message : err}`;
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
+async function runM25Checks(page, pass, mobile) {
+  if (mobile && !(await page.locator('.app.sidebar-open').count())) {
+    await page.locator('.hamburger').click();
+    await sleep(350);
+  }
+
+  const note = ((await page.locator('.bulk-note').textContent()) || '').trim();
+  check(
+    `${pass}: bulk export states its scope next to the action`,
+    note.includes('服务器') && note.includes('100') && note.includes('归档'),
+    note,
+  );
+  const button = ((await page.locator('.bulk-open').textContent()) || '').trim();
+  check(`${pass}: 导出全部 shows the server chat count`, button.includes('（2）'), button);
+
+  const downloads = [];
+  const warnings = [];
+  page.on('download', (download) => downloads.push(download.suggestedFilename()));
+  page.on('console', (msg) => {
+    if (msg.type() === 'warning') warnings.push(msg.text());
+  });
+
+  // ---- 1. both chats export, one at a time, with progress ---------------
+  state.exportFail = [];
+  state.exportDelay = 300;
+  await page.locator('.bulk-open').click();
+  await page.waitForSelector('.bulk-panel', { timeout: 4000 });
+  await page.waitForFunction(
+    () => {
+      const el = document.querySelector('.bulk-panel-head');
+      return Boolean(el && (el.textContent || '').includes('/2'));
+    },
+    null,
+    { timeout: 4000 },
+  );
+  const panel = await page.evaluate(() => ({
+    head: ((document.querySelector('.bulk-panel-head') || {}).textContent || '').trim(),
+    title: ((document.querySelector('.bulk-panel-title') || {}).textContent || '').trim(),
+  }));
+  check(
+    `${pass}: bulk progress shows n/N and the current title`,
+    panel.head.includes('1/2') && panel.title.startsWith('Alpha'),
+    JSON.stringify(panel),
+  );
+  await page.screenshot({ path: shot(pass, 'm25-bulk-progress'), fullPage: false });
+
+  let toast = await waitToast(page, '批量导出完成');
+  await waitUntil(() => downloads.length === 2);
+  check(
+    `${pass}: bulk export summary counts both chats`,
+    toast.text.includes('成功 2') && toast.text.includes('失败 0') && toast.cls.includes('toast-ok'),
+    toast.text,
+  );
+  check(
+    `${pass}: bulk export downloaded two Markdown files in order`,
+    downloads.length === 2 &&
+      /Alpha 会话.*\.md$/.test(downloads[0]) &&
+      /Beta 会话.*\.md$/.test(downloads[1]),
+    JSON.stringify(downloads),
+  );
+  const panelGone = await page.evaluate(
+    () => document.querySelectorAll('.bulk-panel').length,
+  );
+  check(`${pass}: the progress panel closes when the batch ends`, panelGone === 0);
+
+  // ---- 2. a failed chat is counted, named and logged --------------------
+  await dismissToast(page);
+  state.exportFail = ['chat-beta'];
+  state.exportDelay = 120;
+  await page.locator('.bulk-open').click();
+  toast = await waitToast(page, '批量导出完成');
+  await waitUntil(() => downloads.length === 3);
+  check(
+    `${pass}: partial failure is counted and names the chat`,
+    toast.text.includes('成功 1') &&
+      toast.text.includes('失败 1') &&
+      toast.text.includes('Beta 会话') &&
+      toast.cls.includes('toast-danger'),
+    toast.text,
+  );
+  check(
+    `${pass}: the failed chat is logged with its reason`,
+    warnings.some((line) => line.includes('[bulk-export] 失败 Beta 会话') && line.includes('E_EXPORT')),
+    warnings.slice(-3).join(' | '),
+  );
+  check(
+    `${pass}: the failed chat produced no download`,
+    downloads.length === 3 && /Alpha 会话/.test(downloads[2]),
+    JSON.stringify(downloads),
+  );
+
+  // ---- 3. cancel drops the in-flight file and leaves the rest ----------
+  await dismissToast(page);
+  state.exportFail = [];
+  state.exportDelay = 700;
+  const beforeCancel = downloads.length;
+  await page.locator('.bulk-open').click();
+  await page.waitForFunction(
+    () => {
+      const el = document.querySelector('.bulk-panel-head');
+      return Boolean(el && (el.textContent || '').includes('1/2'));
+    },
+    null,
+    { timeout: 4000 },
+  );
+  await page.locator('.bulk-cancel').click();
+  toast = await waitToast(page, '批量导出已取消');
+  check(
+    `${pass}: cancel stops the batch and reports the remainder`,
+    toast.text.includes('成功 0') && toast.text.includes('剩余 2 个未导出'),
+    toast.text,
+  );
+  check(
+    `${pass}: cancel dropped the in-flight download`,
+    downloads.length === beforeCancel,
+    JSON.stringify(downloads.slice(beforeCancel)),
+  );
+
+  state.exportDelay = 0;
+  state.exportFail = [];
+}
+
+// ---------------------------------------------------------------------------
 // One pass (desktop or mobile)
 // ---------------------------------------------------------------------------
 
@@ -2074,6 +2346,9 @@ async function runPass(browser, pass, viewport, mobile) {
     // ---- 9. M24: all-chats usage dashboard -------------------------------
     await runM24Checks(page, pass, mobile);
 
+    // ---- 10. M25: bulk export (progress, failures, cancel) ----------------
+    await runM25Checks(page, pass, mobile);
+
     check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
   } finally {
     await context.close().catch(() => {});
@@ -2128,8 +2403,11 @@ async function main() {
   );
   await waitHttp(BASE, 'vite preview');
 
-  const browser = await chromium.launch({ headless: !HEADED });
+  const browser = await chromium.launch({ headless: !HEADED, env: BROWSER_ENV });
   try {
+    const namingProblem = await probeDownloadNames(browser);
+    check('browser can name a non-ASCII download (UTF-8 locale)', !namingProblem, namingProblem);
+    if (namingProblem) throw new Error(namingProblem);
     await runPass(browser, 'desktop', { width: 1280, height: 900 }, false);
     await runPass(browser, 'mobile', { width: 390, height: 844 }, true);
   } finally {

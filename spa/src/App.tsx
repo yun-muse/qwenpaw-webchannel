@@ -77,6 +77,8 @@ import type { ChatTags } from './lib/chatState';
 import { draftOf, loadDrafts, saveDrafts, setDraft } from './lib/drafts';
 import type { Drafts } from './lib/drafts';
 import { EXPORT_ERROR_TEXT, base64Of, exportFileName, hexOf, verifyExport } from './lib/export';
+import { bulkSummaryText, planBulk, runBulkExport } from './lib/bulkExport';
+import type { BulkRunResult, BulkTarget } from './lib/bulkExport';
 import {
   addPrompt,
   loadPrompts,
@@ -132,6 +134,8 @@ const MAX_EXPORT_BYTES = 10 * 1024 * 1024;
 const MAX_EXPORT_CHUNKS = Math.ceil(MAX_EXPORT_BYTES / CHUNK_BYTES);
 /** M12 — give up when no complete export arrives (10 MB ≈ 4–5 s of chunks). */
 const EXPORT_TIMEOUT_MS = 120_000;
+/** M25 — how long 导出全部 waits for the server chat list before giving up. */
+const CHATS_WAIT_MS = 6_000;
 
 /** M13 — wait this long after the last keystroke before asking the plugin. */
 const SEARCH_DEBOUNCE_MS = 300;
@@ -422,15 +426,24 @@ interface Upload {
   timer: ReturnType<typeof setTimeout> | null;
 }
 
+/** The terminal result of one export request (M25: batches await these). */
+type ExportOutcome = { ok: true; filename: string } | { ok: false; reason: string };
+
 /** One in-flight `export` request; chunks are keyed by their 0-based index. */
 interface ExportJob {
   id: string;
+  chat: string;
   title: string;
   bytes: number;
   chunks: number;
   sha256: string;
   parts: Map<number, string>;
   timer: ReturnType<typeof setTimeout> | null;
+  /** Resolved exactly once — frames and the timeout race, so guard it. */
+  settled: boolean;
+  /** `export_end` arrived; verification is in flight (ignore duplicates). */
+  finishing: boolean;
+  settle: (outcome: ExportOutcome) => void;
 }
 
 /** One in-flight `search` request; a newer query supersedes it. */
@@ -1598,6 +1611,16 @@ export default function App() {
   const [draggingFile, setDraggingFile] = useState(false);
   // M12: one export at a time; the button shows "导出中…" while it runs.
   const [exporting, setExporting] = useState(false);
+  // M25: the last server chat list (导出全部 targets) and its batch state.
+  const [serverChats, setServerChats] = useState<BulkTarget[]>([]);
+  const [bulkActive, setBulkActive] = useState(false);
+  const [bulkPending, setBulkPending] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<{
+    total: number;
+    index: number;
+    title: string;
+    skipped: number;
+  } | null>(null);
 
   // Persona / Prompt Drawer state
   const [promptDrawerOpen, setPromptDrawerOpen] = useState(false);
@@ -1623,6 +1646,13 @@ export default function App() {
   const uploadRef = useRef<Upload | null>(null);
   // M12: the export being collected (chunks arrive as control frames).
   const exportRef = useRef<ExportJob | null>(null);
+  // M25: server list cache + cooperative cancel for 导出全部. The waiter is
+  // installed by the click handler, so it always closes over fresh state.
+  const serverChatsRef = useRef<BulkTarget[]>([]);
+  const bulkRunningRef = useRef(false);
+  const bulkCancelRef = useRef(false);
+  const chatsWaiterRef = useRef<((targets: BulkTarget[]) => void) | null>(null);
+  const chatsWaitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // M13: the archive search in flight (debounce is local to its effect).
   const searchRef = useRef<SearchJob | null>(null);
   const modelsRequested = useRef(false);
@@ -1819,7 +1849,13 @@ export default function App() {
   };
 
   // ---- M12: conversation export (chunked control frames) ----
-  const failExport = (job: ExportJob, message: string) => {
+  /**
+   * Finish one export request exactly once. Frames, the timeout and a bulk
+   * cancel all race for this; the first result wins and clears the slot.
+   */
+  const settleExport = (job: ExportJob, outcome: ExportOutcome) => {
+    if (job.settled) return;
+    job.settled = true;
     if (job.timer) {
       clearTimeout(job.timer);
       job.timer = null;
@@ -1828,7 +1864,11 @@ export default function App() {
       exportRef.current = null;
       setExporting(false);
     }
-    showToastBriefly(message);
+    job.settle(outcome);
+  };
+
+  const failExport = (job: ExportJob, message: string) => {
+    settleExport(job, { ok: false, reason: message });
   };
 
   /** Verify the collected chunks against `export_begin`, then save the Blob. */
@@ -1844,14 +1884,162 @@ export default function App() {
       failExport(job, EXPORT_ERROR_TEXT[result.reason]);
       return;
     }
-    if (job.timer) {
-      clearTimeout(job.timer);
-      job.timer = null;
-    }
+    // A cancel during verification drops the file instead of downloading it.
+    if (job.settled) return;
     const filename = exportFileName(job.title, new Date());
     saveBlob(new Blob([result.buffer], { type: 'text/markdown;charset=utf-8' }), filename);
-    // M17: verification passed and the browser download has started.
-    showToastBriefly(`已导出：${filename}`, 'ok');
+    settleExport(job, { ok: true, filename });
+  };
+
+  /**
+   * Ask the plugin for one chat's Markdown. The caller decides how to report
+   * the outcome — a single export toasts it, a batch counts it (M25).
+   */
+  const requestExport = (chat: string, title: string): Promise<ExportOutcome> => {
+    const client = clientRef.current;
+    if (exportRef.current || !client) {
+      return Promise.resolve({ ok: false, reason: '未连接 — 无法导出' });
+    }
+    const nonce = Math.random().toString(36).slice(2, 6);
+    return new Promise<ExportOutcome>((resolve) => {
+      const job: ExportJob = {
+        id: `export-${Date.now().toString(36)}-${exportCounter++}-${nonce}`,
+        chat,
+        title,
+        bytes: 0,
+        chunks: 0,
+        sha256: '',
+        parts: new Map(),
+        timer: null,
+        settled: false,
+        finishing: false,
+        settle: resolve,
+      };
+      exportRef.current = job;
+      setExporting(true);
+      job.timer = setTimeout(
+        () => failExport(job, '导出超时：插件未返回完整文档'),
+        EXPORT_TIMEOUT_MS,
+      );
+      let sent = false;
+      try {
+        sent = client.send({ t: 'export', chat, id: job.id });
+      } catch {
+        sent = false;
+      }
+      if (!sent) {
+        failExport(job, '未连接 — 无法导出');
+      }
+    });
+  };
+
+  // ---- M25: bulk export over the server chat list ----
+  const runBulk = async (targets: BulkTarget[]) => {
+    if (bulkRunningRef.current) return;
+    bulkRunningRef.current = true;
+    bulkCancelRef.current = false;
+    setBulkActive(true);
+    setBulkProgress(null);
+    const { planned, skipped } = planBulk(targets);
+    let result: BulkRunResult | null = null;
+    try {
+      result = await runBulkExport(
+        targets,
+        (target) => requestExport(target.chat, target.title),
+        {
+          shouldCancel: () => bulkCancelRef.current,
+          onProgress: (progress) =>
+            setBulkProgress({ ...progress, skipped }),
+        },
+      );
+    } catch (error) {
+      console.error('[bulk-export] 批量导出中断', error);
+      showToastBriefly('批量导出中断：内部错误');
+    } finally {
+      bulkRunningRef.current = false;
+      bulkCancelRef.current = false;
+      setBulkActive(false);
+      setBulkProgress(null);
+    }
+    if (!result) return;
+    // Failed titles are never silently dropped: every one is logged with its
+    // reason, and the summary names as many as fit in a toast.
+    for (const failure of result.failed) {
+      console.warn(
+        `[bulk-export] 失败 ${failure.title}（${failure.chat}）— ${failure.reason}`,
+      );
+    }
+    if (result.skipped > 0) {
+      console.warn(
+        `[bulk-export] 仅导出前 ${planned.length} 个会话（共 ${result.total} 个），其余 ${result.skipped} 个未导出`,
+      );
+    }
+    if (result.cancelled) {
+      console.info(
+        `[bulk-export] 已取消：成功 ${result.succeeded}，失败 ${result.failed.length}，未处理 ${result.planned - result.attempted} 个`,
+      );
+    }
+    const tone: ToastTone =
+      result.failed.length > 0 ? 'danger' : result.cancelled ? 'info' : 'ok';
+    showToastBriefly(bulkSummaryText(result), tone);
+  };
+
+  /** Start 导出全部; without a server list yet, ask once and wait for it. */
+  const startBulkExport = () => {
+    if (bulkRunningRef.current || bulkPending) return;
+    if (exportRef.current) {
+      showToastBriefly('正在导出当前会话 — 请稍后再导出全部', 'info');
+      return;
+    }
+    const targets = serverChatsRef.current;
+    if (targets.length > 0) {
+      void runBulk(targets);
+      return;
+    }
+    const client = clientRef.current;
+    if (!client) {
+      showToastBriefly('未连接 — 无法导出');
+      return;
+    }
+    setBulkPending(true);
+    showToastBriefly('正在获取服务器会话列表…', 'info');
+    chatsWaiterRef.current = (incoming) => {
+      chatsWaiterRef.current = null;
+      if (chatsWaitTimerRef.current) {
+        clearTimeout(chatsWaitTimerRef.current);
+        chatsWaitTimerRef.current = null;
+      }
+      setBulkPending(false);
+      if (incoming.length === 0) {
+        showToastBriefly('服务器没有可导出的会话', 'info');
+        return;
+      }
+      void runBulk(incoming);
+    };
+    chatsWaitTimerRef.current = setTimeout(() => {
+      chatsWaiterRef.current = null;
+      chatsWaitTimerRef.current = null;
+      setBulkPending(false);
+      showToastBriefly('获取会话列表超时，请重试', 'info');
+    }, CHATS_WAIT_MS);
+    if (!client.send({ t: 'chats' })) {
+      chatsWaiterRef.current = null;
+      if (chatsWaitTimerRef.current) {
+        clearTimeout(chatsWaitTimerRef.current);
+        chatsWaitTimerRef.current = null;
+      }
+      setBulkPending(false);
+      showToastBriefly('未连接 — 无法导出');
+    }
+  };
+
+  /** Cancel the batch: drop the in-flight file and stop before the next. */
+  const cancelBulkExport = () => {
+    if (!bulkRunningRef.current) return;
+    bulkCancelRef.current = true;
+    const job = exportRef.current;
+    if (job) failExport(job, '已取消');
+    showToastBriefly('正在取消批量导出…', 'info');
   };
 
   const requestHist = (chat: string) => {
@@ -2121,6 +2309,10 @@ export default function App() {
       usageTimers.current.clear();
       const exportJob = exportRef.current;
       if (exportJob?.timer) clearTimeout(exportJob.timer);
+      // M25: stop a batch between chats and drop a pending list request.
+      bulkCancelRef.current = true;
+      chatsWaiterRef.current = null;
+      if (chatsWaitTimerRef.current) clearTimeout(chatsWaitTimerRef.current);
       const searchJob = searchRef.current;
       if (searchJob?.timer) clearTimeout(searchJob.timer);
       searchRef.current = null;
@@ -2606,14 +2798,11 @@ export default function App() {
         case 'export_end': {
           const job = exportRef.current;
           if (!job || asString(frame.id) !== job.id) break;
-          // Detach before the async verification so a duplicated end frame
-          // cannot start a second save.
-          exportRef.current = null;
-          setExporting(false);
-          if (job.timer) {
-            clearTimeout(job.timer);
-            job.timer = null;
-          }
+          // The job stays in the slot while it is verified: a duplicated end
+          // frame is ignored, and a batch cancel can still settle it (which
+          // drops the file instead of downloading it).
+          if (job.finishing) break;
+          job.finishing = true;
           void finishExport(job);
           break;
         }
@@ -2760,12 +2949,39 @@ export default function App() {
               if (Object.keys(incomingTitles).length > 0) {
                 setChatNames((prev) => ({ ...incomingTitles, ...prev }));
               }
+              // M25: 导出全部 iterates exactly this list, in server order.
+              // An empty reply is not trusted (the plugin answers [] when its
+              // own chat API fails), so the previous list survives it.
+              const serverTargets = incomingIds.map((cid) => ({
+                chat: cid,
+                title: incomingTitles[cid] || cid,
+              }));
+              serverChatsRef.current = serverTargets;
+              setServerChats(serverTargets);
               // M19: pins for chats the server no longer lists are dropped
               // silently. An empty list is not trusted — the plugin also
               // answers [] when its own chat API fails.
               setPins((prev) => prunePins(prev, incomingIds));
               // M23: tags follow the same rule as pins.
               setChatTagsState((prev) => pruneChatTags(prev, incomingIds));
+            }
+
+            // M25: a click on 导出全部 before the first `chats` reply arrives
+            // waits here; this frame starts the batch (even when empty, so the
+            // waiter can report it instead of hanging).
+            const waiter = chatsWaiterRef.current;
+            if (waiter) {
+              chatsWaiterRef.current = null;
+              if (chatsWaitTimerRef.current) {
+                clearTimeout(chatsWaitTimerRef.current);
+                chatsWaitTimerRef.current = null;
+              }
+              waiter(
+                incomingIds.map((cid) => ({
+                  chat: cid,
+                  title: incomingTitles[cid] || cid,
+                })),
+              );
             }
 
             // M19: the chat restored from localStorage is only validated
@@ -3060,38 +3276,24 @@ export default function App() {
   };
 
   /** Ask the plugin for the visible chat's Markdown export (M12). */
-  const startExport = () => {
+  const startExport = async () => {
+    if (bulkRunningRef.current) {
+      showToastBriefly('批量导出进行中 — 请先等待或取消', 'info');
+      return;
+    }
     if (exportRef.current) return;
-    const client = clientRef.current;
-    if (!client) {
-      showToastBriefly('未连接 — 无法导出');
-      return;
-    }
     const chat = activeChat;
-    const nonce = Math.random().toString(36).slice(2, 6);
-    const job: ExportJob = {
-      id: `export-${Date.now().toString(36)}-${exportCounter++}-${nonce}`,
-      title: titleOf(chat),
-      bytes: 0,
-      chunks: 0,
-      sha256: '',
-      parts: new Map(),
-      timer: null,
-    };
-    exportRef.current = job;
-    setExporting(true);
-    job.timer = setTimeout(
-      () => failExport(job, '导出超时：插件未返回完整文档'),
-      EXPORT_TIMEOUT_MS,
-    );
-    if (!client.send({ t: 'export', chat, id: job.id })) {
-      failExport(job, '未连接 — 无法导出');
-      return;
-    }
     // M17: the desktop button also flips to "导出中…", but on narrow screens
     // that button is hidden behind the (already closed) overflow menu, so the
     // status line is the only progress signal.
     showToastBriefly('正在导出当前会话…', 'info');
+    const outcome = await requestExport(chat, titleOf(chat));
+    if (outcome.ok) {
+      // M17: verification passed and the browser download has started.
+      showToastBriefly(`已导出：${outcome.filename}`, 'ok');
+    } else {
+      showToastBriefly(outcome.reason);
+    }
   };
 
   const query = search.trim().toLowerCase();
@@ -4152,6 +4354,58 @@ export default function App() {
           <span>用量统计</span>
         </button>
 
+        <button
+          className="bulk-open"
+          type="button"
+          onClick={startBulkExport}
+          disabled={bulkActive || bulkPending}
+          title="把服务器列表中的会话逐个导出为 Markdown（最多 100 个）"
+        >
+          <Download size={14} />
+          <span>
+            导出全部
+            {serverChats.length > 0 ? `（${serverChats.length}）` : ''}
+          </span>
+          {bulkPending ? <span className="bulk-waiting">获取列表…</span> : null}
+        </button>
+        <p className="bulk-note">
+          仅服务器列表中的会话 · 最多 100 个 · 仅归档的会话不在列表，无法导出
+        </p>
+
+        {bulkActive ? (
+          <div className="bulk-panel" role="status" aria-live="polite">
+            <div className="bulk-panel-head">
+              <span>
+                {bulkProgress
+                  ? `导出中 ${bulkProgress.index}/${bulkProgress.total}`
+                  : '导出中…'}
+              </span>
+              <button className="bulk-cancel" type="button" onClick={cancelBulkExport}>
+                取消
+              </button>
+            </div>
+            <div className="bulk-panel-title" title={bulkProgress?.title}>
+              {bulkProgress?.title ?? '等待插件响应…'}
+            </div>
+            <div className="bulk-bar" aria-hidden="true">
+              <i
+                style={{
+                  width: `${
+                    bulkProgress
+                      ? Math.round(((bulkProgress.index - 1) / bulkProgress.total) * 100)
+                      : 0
+                  }%`,
+                }}
+              />
+            </div>
+            {bulkProgress && bulkProgress.skipped > 0 ? (
+              <div className="bulk-panel-note">
+                仅前 {bulkProgress.total} 个（共 {bulkProgress.total + bulkProgress.skipped} 个）
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         <div className="search-wrap">
           <Search size={13} className="search-icon" />
           <input
@@ -4332,7 +4586,7 @@ export default function App() {
               <button
                 className="icon-btn"
                 onClick={startExport}
-                disabled={exporting}
+                disabled={exporting || bulkActive || bulkPending}
                 title="导出当前会话为 Markdown（含思考过程与工具调用）"
                 aria-label="导出当前会话"
               >
@@ -4401,7 +4655,7 @@ export default function App() {
                   <button
                     type="button"
                     role="menuitem"
-                    disabled={exporting}
+                    disabled={exporting || bulkActive || bulkPending}
                     onClick={() => {
                       setMoreOpen(false);
                       startExport();
