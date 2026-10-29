@@ -1419,6 +1419,30 @@ button:disabled {
   border-color: rgba(134, 239, 172, 0.45);
 }
 
+/* M22: on phones and any coarse pointer the block chrome becomes a real 44 px
+   thumb target in both themes; the desktop block keeps its compact 30 px bar.
+   (Theme does not matter here: the code surface is dark in both themes.) */
+@media (max-width: 720px), (pointer: coarse) {
+  .md pre {
+    padding-top: 52px;
+  }
+
+  .md .pre-lang {
+    height: 44px;
+    padding-right: 72px; /* a long language name never slides under 复制 */
+  }
+
+  .md .pre-copy {
+    top: 0;
+    right: 0;
+    height: 44px;
+    min-width: 44px;
+    padding: 0 12px;
+    border-radius: 0 10px 0 10px;
+    font-size: 12px;
+  }
+}
+
 .hljs-keyword,
 .hljs-selector-tag,
 .hljs-literal,
@@ -2178,6 +2202,184 @@ button:disabled {
   text-align: center;
 }
 
+/* ---------- M22: prompt library (composer popover, opens upwards) ---------- */
+
+.prompt-lib-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.prompt-lib-btn.open {
+  border-color: var(--accent);
+  color: var(--text);
+  background: var(--panel-2);
+}
+
+.prompt-lib {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 46;
+  display: flex;
+  flex-direction: column;
+  width: min(380px, calc(100vw - 48px));
+  max-height: min(420px, 60vh);
+  padding: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 13px;
+  background: var(--card);
+  box-shadow: var(--shadow-lg);
+}
+
+.prompt-lib-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 4px 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.prompt-save {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 2px 6px;
+}
+
+.prompt-save input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.prompt-save input:focus {
+  border-color: var(--focus-border);
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+
+.prompt-save-btn {
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 9px;
+  border-radius: 7px;
+  background: var(--primary-btn);
+  color: var(--primary-btn-text);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.prompt-lib-status {
+  padding: 2px 4px 6px;
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.prompt-lib-empty {
+  padding: 12px 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.prompt-lib-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.prompt-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 9px;
+}
+
+.prompt-row:hover {
+  background: var(--panel);
+}
+
+.prompt-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 7px 8px;
+  border-radius: 9px;
+  text-align: left;
+}
+
+.prompt-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.prompt-preview {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.prompt-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding-right: 2px;
+}
+
+.prompt-act {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--muted);
+}
+
+.prompt-act:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
+
+.prompt-act.danger:hover {
+  color: var(--danger);
+}
+
+.prompt-rename {
+  width: 100%;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid var(--focus-border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+
 /* Thinking effort (M9): a compact segmented control beside the model button */
 
 .effort-wrap {
@@ -2821,6 +3023,46 @@ button:disabled {
     right: 0;
     width: min(calc(100vw - 48px), 330px);
     min-width: 0;
+  }
+
+  /* M22: the prompt library is thumb-sized too, and anchored to the composer
+     (not the narrow toolbar button) so a 390 px screen never clips it. */
+  .prompt-lib-wrap {
+    position: static;
+  }
+
+  .prompt-lib {
+    left: 8px;
+    right: 8px;
+    width: auto;
+    max-height: 50vh;
+    padding: 8px;
+  }
+
+  .prompt-save input {
+    height: 44px;
+    font-size: 16px; /* iOS Safari zooms in on focused fields below 16px */
+  }
+
+  .prompt-save-btn {
+    height: 44px;
+    padding: 0 12px;
+    font-size: 12px;
+  }
+
+  .prompt-main {
+    min-height: 44px;
+    padding: 6px 10px;
+  }
+
+  .prompt-act {
+    width: 44px;
+    height: 44px;
+  }
+
+  .prompt-rename {
+    height: 44px;
+    font-size: 16px;
   }
 
   .effort-wrap {

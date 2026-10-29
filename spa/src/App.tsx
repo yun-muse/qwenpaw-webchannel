@@ -13,6 +13,7 @@ import hljs from 'highlight.js/lib/common';
 import {
   ArrowDown,
   AtSign,
+  BookmarkPlus,
   Check,
   ChevronUp,
   Cloud,
@@ -62,7 +63,18 @@ import {
   restoreSession,
   togglePin as togglePinIn,
 } from './lib/chatState';
+import { draftOf, loadDrafts, saveDrafts, setDraft } from './lib/drafts';
+import type { Drafts } from './lib/drafts';
 import { EXPORT_ERROR_TEXT, base64Of, exportFileName, hexOf, verifyExport } from './lib/export';
+import {
+  addPrompt,
+  loadPrompts,
+  promptNameOf,
+  removePrompt,
+  renamePrompt,
+  savePrompts,
+} from './lib/promptLibrary';
+import type { SavedPrompt } from './lib/promptLibrary';
 import { searchHitsOf, snippetParts } from './lib/search';
 import type { SearchHit } from './lib/search';
 import { formatExact, formatTokens, turnTitle, turnUsageOf, usageOf } from './lib/usage';
@@ -121,6 +133,8 @@ const EFFORT_KEY = 'webchannel.effort';
 const EFFORT_REAPPLY_MS = 1200;
 /** 'light' | 'dark' (M7). */
 const THEME_KEY = 'webchannel.theme';
+/** The PWA status bar follows the active theme (M22). */
+const THEME_COLORS: Record<Theme, string> = { light: '#faf8f4', dark: '#0a0b0e' };
 /** Optional endpoint override ('local' | 'cloud') for dev preview convenience. */
 const ENDPOINT_KEY = 'webchannel.endpoint';
 
@@ -266,6 +280,12 @@ function initialTheme(): Theme {
   }
 }
 
+/** Keep the browser/PWA chrome in step with the CSS variables (M22). */
+function applyThemeColor(theme: Theme): void {
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', THEME_COLORS[theme]);
+}
+
 type Role = 'user' | 'assistant';
 
 interface ApprovalMeta {
@@ -339,6 +359,7 @@ const COMMANDS: CommandSpec[] = [
   { id: 'rename', label: '重命名当前会话', hint: '自定义当前对话标题' },
   { id: 'delete', label: '删除当前会话', hint: '同步移除当前对话记录' },
   { id: 'clear', label: '清空当前屏幕', hint: '仅清空本地显示的聊天气泡' },
+  { id: 'library', label: '提示词库', hint: '保存当前输入或插入已保存的常用提示词' },
   { id: 'theme', label: '切换深浅色主题', hint: 'Claude 暖陶纸本 ↔ Cursor 曜石暗黑' },
   { id: 'help', label: '快捷键与帮助', hint: '查看全部斜杠命令与 @ 技能说明' },
 ];
@@ -1218,7 +1239,8 @@ export default function App() {
     for (const id of session.chats) out[id] = [];
     return out;
   });
-  const [input, setInput] = useState('');
+  const [drafts, setDrafts] = useState<Drafts>(loadDrafts);
+  const [input, setInput] = useState<string>(() => draftOf(drafts, session.active));
   const [attachment, setAttachment] = useState<Attachment | null>(null);
   const [composerError, setComposerError] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastNotice | null>(null);
@@ -1273,6 +1295,13 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // M22: named prompts, plus the composer panel that saves/inserts them.
+  const [prompts, setPrompts] = useState<SavedPrompt[]>(loadPrompts);
+  const [promptLibOpen, setPromptLibOpen] = useState(false);
+  const [promptName, setPromptName] = useState('');
+  const [promptLibStatus, setPromptLibStatus] = useState('');
+  const [renamingPromptId, setRenamingPromptId] = useState<string | null>(null);
+  const [promptRenameDraft, setPromptRenameDraft] = useState('');
   const [nearBottom, setNearBottom] = useState(true);
   const [draggingFile, setDraggingFile] = useState(false);
   // M12: one export at a time; the button shows "导出中…" while it runs.
@@ -1291,6 +1320,9 @@ export default function App() {
 
   const clientRef = useRef<RelayClient | null>(null);
   const activeRef = useRef<string>(session.active);
+  // M22: write-through mirror of `drafts` so a chat switch in the same event
+  // (type → click another chat) always reads the newest text.
+  const draftsRef = useRef<Drafts>(drafts);
   const runtimes = useRef<Map<string, ChatRuntime>>(new Map());
   const listRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -1304,6 +1336,7 @@ export default function App() {
   const modelsRequested = useRef(false);
   const modelWrapRef = useRef<HTMLDivElement | null>(null);
   const moreWrapRef = useRef<HTMLDivElement | null>(null);
+  const promptLibRef = useRef<HTMLDivElement | null>(null);
   const nearBottomRef = useRef(true);
   /** M19: a smooth jump to the bottom is settling; ignore its scroll events. */
   const jumpRef = useRef(false);
@@ -1339,6 +1372,21 @@ export default function App() {
   const ensureChat = (chat: string) => {
     setChatIds((prev) => (prev.includes(chat) ? prev : [...prev, chat]));
     setMessagesByChat((prev) => (chat in prev ? prev : { ...prev, [chat]: [] }));
+  };
+
+  // ---- M22: per-chat composer drafts ----
+  /** Update one chat's draft in state and in the write-through ref. */
+  const rememberDraft = (chat: string, text: string) => {
+    const next = setDraft(draftsRef.current, chat, text);
+    if (next === draftsRef.current) return;
+    draftsRef.current = next;
+    setDrafts(next);
+  };
+
+  /** Composer edits always belong to the visible chat. */
+  const setComposer = (text: string) => {
+    setInput(text);
+    rememberDraft(activeRef.current, text);
   };
 
   // ---- M9: thinking effort (per chat, server is authoritative) ----
@@ -1754,8 +1802,16 @@ export default function App() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    storageSet(THEME_KEY, theme);
+    applyThemeColor(theme);
   }, [theme]);
+
+  useEffect(() => {
+    saveDrafts(drafts);
+  }, [drafts]);
+
+  useEffect(() => {
+    savePrompts(prompts);
+  }, [prompts]);
 
   useEffect(() => {
     setPaletteIndex(0);
@@ -1810,6 +1866,25 @@ export default function App() {
       document.removeEventListener('keydown', onKey);
     };
   }, [moreOpen]);
+
+  useEffect(() => {
+    if (!promptLibOpen) return;
+    const onDown = (event: MouseEvent) => {
+      const wrap = promptLibRef.current;
+      if (wrap && event.target instanceof Node && !wrap.contains(event.target)) {
+        setPromptLibOpen(false);
+      }
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPromptLibOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [promptLibOpen]);
 
   useEffect(() => {
     if (!helpOpen) return;
@@ -2674,10 +2749,10 @@ export default function App() {
     setActiveSkill(skill);
     setInlineSubMode(null);
     // Strip trailing `@query` or leading `/skill` from input
-    setInput((prev) => {
-      if (prev.startsWith('/skill')) return '';
-      return prev.replace(/(?:^|\s)@[a-zA-Z0-9_-]*$/, '');
-    });
+    const next = input.startsWith('/skill')
+      ? ''
+      : input.replace(/(?:^|\s)@[a-zA-Z0-9_-]*$/, '');
+    setComposer(next);
     textareaRef.current?.focus();
   };
 
@@ -2759,7 +2834,76 @@ export default function App() {
   };
 
   const toggleTheme = () => {
-    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+    // Only an explicit choice is persisted: until then the OS preference
+    // keeps deciding on every load (M22).
+    setTheme((prev) => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      storageSet(THEME_KEY, next);
+      return next;
+    });
+  };
+
+  // ---- M22: prompt library ----
+  const openPromptLibrary = (seedName: string = promptNameOf(input)) => {
+    setPromptLibStatus('');
+    setRenamingPromptId(null);
+    setPromptName(seedName);
+    setPromptLibOpen(true);
+  };
+
+  const saveCurrentAsPrompt = () => {
+    const next = addPrompt(prompts, promptName, input);
+    if (!next) {
+      setPromptLibStatus('请先输入提示词内容，并给它起个名字。');
+      return;
+    }
+    setPrompts(next);
+    setPromptLibStatus('已保存到本机提示词库。');
+    setPromptName('');
+  };
+
+  /** Insert at the caret (or replace the selection), then close the panel. */
+  const insertPromptText = (text: string) => {
+    const node = textareaRef.current;
+    const start = node?.selectionStart ?? input.length;
+    const end = node?.selectionEnd ?? input.length;
+    const before = input.slice(0, start);
+    const after = input.slice(end);
+    const lead = before && !/\s$/.test(before) ? ' ' : '';
+    const trail = after && !/^\s/.test(after) ? ' ' : '';
+    const insertion = `${lead}${text}${trail}`;
+    setComposer(`${before}${insertion}${after}`);
+    setPromptLibOpen(false);
+    window.setTimeout(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      const caret = before.length + lead.length + text.length;
+      el.setSelectionRange(caret, caret);
+    }, 0);
+  };
+
+  const startPromptRename = (entry: SavedPrompt) => {
+    setRenamingPromptId(entry.id);
+    setPromptRenameDraft(entry.name);
+  };
+
+  const commitPromptRename = () => {
+    const id = renamingPromptId;
+    if (!id) return;
+    setPrompts((prev) => renamePrompt(prev, id, promptRenameDraft));
+    setRenamingPromptId(null);
+    setPromptRenameDraft('');
+  };
+
+  const cancelPromptRename = () => {
+    setRenamingPromptId(null);
+    setPromptRenameDraft('');
+  };
+
+  const deleteSavedPrompt = (id: string) => {
+    setPrompts((prev) => removePrompt(prev, id));
+    if (renamingPromptId === id) cancelPromptRename();
   };
 
   const selectChat = (id: string) => {
@@ -2770,6 +2914,7 @@ export default function App() {
     cancelUpload();
     setComposerError(null);
     setAttachment(null);
+    setInput(draftOf(draftsRef.current, id));
     maybeRequestHist(id);
   };
 
@@ -2798,6 +2943,7 @@ export default function App() {
     cancelUpload();
     setComposerError(null);
     setAttachment(null);
+    setInput(draftOf(draftsRef.current, id));
     maybeRequestHist(id);
   };
 
@@ -2821,6 +2967,8 @@ export default function App() {
     });
     // M19: a deleted chat cannot stay pinned.
     setPins((prev) => (prev.includes(id) ? prev.filter((pin) => pin !== id) : prev));
+    // M22: its unsent draft goes with it.
+    rememberDraft(id, '');
     runtimes.current.delete(id);
     forgetEffort(id);
     setUsageByChat((prev) => {
@@ -2850,45 +2998,49 @@ export default function App() {
     switch (id) {
       case 'model':
         // Stay right above the input box in inline model selection mode!
-        setInput('');
+        setComposer('');
         if (modelItems.length === 0) requestModels();
         setInlineSubMode('model');
         break;
       case 'skill':
-        setInput('');
+        setComposer('');
         clientRef.current?.send({ t: 'skills' });
         setInlineSubMode('skill');
         break;
       case 'new':
-        setInput('');
+        // M22: the old chat keeps its unsent draft; the new one starts empty.
         newChat();
         break;
       case 'stop':
-        setInput('');
+        setComposer('');
         stop();
         break;
       case 'prompt':
-        setInput('');
+        setComposer('');
         openPromptDrawer();
         break;
+      case 'library':
+        setComposer('');
+        openPromptLibrary('');
+        break;
       case 'rename':
-        setInput('');
+        setComposer('');
         startRename(activeChat);
         break;
       case 'delete':
-        setInput('');
+        setComposer('');
         deleteChat(activeChat);
         break;
       case 'clear':
-        setInput('');
+        setComposer('');
         updateChat(activeChat, () => []);
         break;
       case 'theme':
-        setInput('');
+        setComposer('');
         toggleTheme();
         break;
       case 'help':
-        setInput('');
+        setComposer('');
         setHelpOpen(true);
         break;
       default:
@@ -2986,6 +3138,7 @@ export default function App() {
       },
     ]);
     setInput('');
+    rememberDraft(chat, '');
     setAttachment(null);
     setActiveSkill(null);
     setComposerError(null);
@@ -3005,7 +3158,7 @@ export default function App() {
   };
 
   const handleEditResend = (userMsg: ChatMessage) => {
-    setInput(userMsg.text);
+    setComposer(userMsg.text);
     textareaRef.current?.focus();
   };
 
@@ -3122,7 +3275,7 @@ export default function App() {
         } else if (activePaletteMode === 'model') {
           const item = filteredModels[paletteCursor];
           if (item) {
-            setInput('');
+            setComposer('');
             chooseModel(item);
           }
         } else if (activePaletteMode === 'skill') {
@@ -3604,6 +3757,7 @@ export default function App() {
                   <button
                     type="button"
                     role="menuitem"
+                    aria-label={theme === 'dark' ? '切换到浅色主题' : '切换到暗黑主题'}
                     onClick={() => {
                       setMoreOpen(false);
                       toggleTheme();
@@ -3652,7 +3806,7 @@ export default function App() {
                             const found = skills.find((s) => s.id === item.skill);
                             if (found) setActiveSkill(found);
                           }
-                          setInput(item.prompt);
+                          setComposer(item.prompt);
                           textareaRef.current?.focus();
                         }}
                       >
@@ -3749,7 +3903,7 @@ export default function App() {
                       onMouseEnter={() => setPaletteIndex(index)}
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => {
-                        setInput('');
+                        setComposer('');
                         chooseModel(item);
                       }}
                     >
@@ -3842,7 +3996,7 @@ export default function App() {
                     ? '输入问题…（敲 @ 调用技能，敲 / 呼出指令与模型切换，支持粘贴截图）'
                     : '正在连接 Relay 节点…'
                 }
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(e) => setComposer(e.target.value)}
                 onKeyDown={onKeyDown}
                 onPaste={onPaste}
               />
@@ -3872,6 +4026,135 @@ export default function App() {
                   <AtSign size={13} />
                   <span>技能</span>
                 </button>
+
+                {/* M22: save the composer text, or insert a saved prompt. */}
+                <div className="prompt-lib-wrap" ref={promptLibRef}>
+                  <button
+                    className={`tool-pill prompt-lib-btn${promptLibOpen ? ' open' : ''}`}
+                    onClick={() => (promptLibOpen ? setPromptLibOpen(false) : openPromptLibrary())}
+                    aria-haspopup="dialog"
+                    aria-expanded={promptLibOpen}
+                    title="提示词库：保存当前输入，或插入已保存的提示词"
+                  >
+                    <BookmarkPlus size={13} />
+                    <span>提示词</span>
+                  </button>
+                  {promptLibOpen ? (
+                    <div className="prompt-lib" role="dialog" aria-label="提示词库">
+                      <div className="prompt-lib-head">
+                        <span>提示词库 ({prompts.length})</span>
+                        <button
+                          type="button"
+                          className="chat-act"
+                          onClick={() => setPromptLibOpen(false)}
+                          aria-label="关闭提示词库"
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
+
+                      <form
+                        className="prompt-save"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          saveCurrentAsPrompt();
+                        }}
+                      >
+                        <input
+                          value={promptName}
+                          onChange={(e) => setPromptName(e.target.value)}
+                          placeholder="给这段提示词起个名字…"
+                          aria-label="提示词名称"
+                        />
+                        <button
+                          className="prompt-save-btn"
+                          type="submit"
+                          disabled={!input.trim() || !promptName.trim()}
+                        >
+                          保存当前输入
+                        </button>
+                      </form>
+
+                      {promptLibStatus ? (
+                        <div className="prompt-lib-status" role="status">
+                          {promptLibStatus}
+                        </div>
+                      ) : null}
+
+                      {prompts.length === 0 ? (
+                        <div className="prompt-lib-empty">
+                          还没有保存的提示词。先在输入框写下内容，再回到这里命名保存。
+                        </div>
+                      ) : (
+                        <div className="prompt-lib-list">
+                          {prompts.map((entry) => (
+                            <div
+                              className={`prompt-row${
+                                renamingPromptId === entry.id ? ' renaming' : ''
+                              }`}
+                              key={entry.id}
+                            >
+                              {renamingPromptId === entry.id ? (
+                                <input
+                                  className="prompt-rename"
+                                  value={promptRenameDraft}
+                                  autoFocus
+                                  aria-label="提示词名称"
+                                  onChange={(e) => setPromptRenameDraft(e.target.value)}
+                                  onBlur={commitPromptRename}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      commitPromptRename();
+                                    } else if (e.key === 'Escape') {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      cancelPromptRename();
+                                    }
+                                  }}
+                                />
+                              ) : (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="prompt-main"
+                                    onClick={() => insertPromptText(entry.text)}
+                                    title={entry.text}
+                                  >
+                                    <span className="prompt-name">{entry.name}</span>
+                                    <span className="prompt-preview">
+                                      {entry.text.replace(/\s+/g, ' ')}
+                                    </span>
+                                  </button>
+                                  <span className="prompt-actions">
+                                    <button
+                                      type="button"
+                                      className="prompt-act"
+                                      onClick={() => startPromptRename(entry)}
+                                      aria-label="重命名提示词"
+                                      title="重命名"
+                                    >
+                                      <Edit3 size={12} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="prompt-act danger"
+                                      onClick={() => deleteSavedPrompt(entry.id)}
+                                      aria-label="删除提示词"
+                                      title="删除"
+                                    >
+                                      <Trash2 size={12} />
+                                    </button>
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
 
                 {/* Model Selector anchored right in the Composer Toolbar (pops UPWARDS!) */}
                 <div className="model-wrap" ref={modelWrapRef}>

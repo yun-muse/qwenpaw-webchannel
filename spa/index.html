@@ -3,7 +3,25 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#c96442" />
+    <meta name="theme-color" content="#faf8f4" />
+    <script>
+      // M22: paint the stored theme (or the OS preference) before the first
+      // frame, so neither theme flashes the other and the PWA chrome matches.
+      (function () {
+        try {
+          var stored = localStorage.getItem('webchannel.theme');
+          var dark =
+            stored === 'dark' ||
+            (stored !== 'light' &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches);
+          document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute('content', dark ? '#0a0b0e' : '#faf8f4');
+        } catch (e) {
+          /* storage blocked — the React effect applies the default */
+        }
+      })();
+    </script>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="icon" type="image/png" href="/icons/icon-192.png" />
