@@ -3441,9 +3441,25 @@ button:disabled {
   line-height: 1.6;
 }
 
+/* M28: one compact line of context above the cards (轮次 / 会话 / 未覆盖). */
+.stats-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  padding: 0 2px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.stats-summary strong {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
 .stats-cards {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -3479,8 +3495,35 @@ button:disabled {
   text-overflow: ellipsis;
 }
 
+/* M28: the hit-rate card carries a big percent plus a thin bar. */
+.stats-card-rate {
+  gap: 5px;
+}
+
+.stats-card-rate-value {
+  font-size: 23px;
+}
+
+.stats-rate {
+  display: block;
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+
+.stats-rate-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--accent-dark));
+  transition: width 0.2s ease;
+}
+
 .stats-chart-wrap,
-.stats-top {
+.stats-top,
+.stats-models {
   padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -3551,6 +3594,31 @@ button:disabled {
   width: 100%;
   border-radius: 5px 5px 2px 2px;
   background: linear-gradient(180deg, var(--accent), var(--accent-dark));
+}
+
+/* M28: the thin strip under a bar is that day's cache hit rate. It is drawn
+   against `cache_eligible` (not `input`), so a partially covered day stays
+   truthful; days without any reported turn leave it empty. */
+.stats-bar-cache {
+  display: flex;
+  width: 100%;
+  height: 3px;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.stats-bar-cache-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  opacity: 0.55;
+}
+
+.stats-chart-legend {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
 }
 
 .stats-bar-label {
@@ -3632,6 +3700,90 @@ button:disabled {
 .stats-chat-go {
   color: var(--muted);
   transform: rotate(90deg);
+}
+
+/* ---------- M28: per-model rows --------------------------------------- */
+
+.stats-model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+}
+
+.stats-model-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 108px;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  padding: 6px;
+  border-radius: 8px;
+}
+
+.stats-model-row:hover {
+  background: var(--hover-bg);
+}
+
+.stats-model-name {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.stats-model-provider {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.stats-model-title {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.stats-model-nums {
+  display: flex;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.stats-model-rate {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.stats-model-rate .stats-rate {
+  width: 60px;
+  flex: 0 0 60px;
+}
+
+.stats-model-rate-value {
+  min-width: 40px;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.stats-model-rate-none {
+  color: var(--muted);
+}
+
+.stats-models-note {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.6;
 }
 
 .stats-basis {
@@ -4201,6 +4353,11 @@ button:disabled {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  /* M28: the hit-rate card gets the full row for its big percent + bar. */
+  .stats-card-rate {
+    grid-column: 1 / -1;
+  }
+
   .stats-card {
     padding: 10px 12px;
   }
@@ -4209,8 +4366,40 @@ button:disabled {
     font-size: 18px;
   }
 
+  .stats-card-rate-value {
+    font-size: 22px;
+  }
+
   .stats-chart {
     height: 160px;
+  }
+
+  /* M28: name + rate on the first line, the four numbers wrap below. */
+  .stats-model-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 3px;
+    padding: 8px 4px;
+  }
+
+  .stats-model-nums {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+  }
+
+  .stats-model-rate {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .stats-model-rate .stats-rate {
+    width: 44px;
+    flex: 0 0 44px;
+  }
+
+  .stats-model-rate-value {
+    min-width: 36px;
   }
 
   .stats-chat-row {

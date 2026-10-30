@@ -98,8 +98,8 @@ import {
 import type { PaletteEntry } from './lib/palette';
 import { formatExact, formatTokens, turnTitle, turnUsageOf, usageOf } from './lib/usage';
 import type { ChatUsage, TurnUsage } from './lib/usage';
-import { statsBars, statsOf } from './lib/stats';
-import type { StatsBar, UsageStats } from './lib/stats';
+import { formatRate, statsBars, statsOf } from './lib/stats';
+import type { StatsBar, StatsCache, StatsModel, UsageStats } from './lib/stats';
 import {
   effortErrorAction,
   effortNeedsApply,
@@ -1191,9 +1191,56 @@ function ContextMeter({
   );
 }
 
+/** M28: a small horizontal cache-hit-rate bar (totals card + model rows). */
+function RateBar({ rate }: { rate: number }) {
+  const width = Math.min(100, Math.max(0, rate));
+  return (
+    <span className="stats-rate" aria-hidden="true">
+      <span className="stats-rate-fill" style={{ width: `${width}%` }} />
+    </span>
+  );
+}
+
+/** One model row: name, turns/tokens, cache hit and its rate bar (M28). */
+function StatsModelRow({ item }: { item: StatsModel }) {
+  const cache = item.cache;
+  const title = cache
+    ? `${item.provider ? `${item.provider} / ` : ''}${item.model} · ${item.turns} 轮 · `
+      + `输入 ${formatExact(item.input ?? 0)} · 输出 ${formatExact(item.output ?? 0)} · `
+      + `缓存命中 ${formatExact(cache.hit)} / 可缓存 ${formatExact(cache.eligible)}`
+    : `${item.provider ? `${item.provider} / ` : ''}${item.model} · ${item.turns} 轮 · `
+      + `输入 ${formatExact(item.input ?? 0)} · 输出 ${formatExact(item.output ?? 0)} · `
+      + '该模型没有上报缓存用量';
+  return (
+    <div className="stats-model-row" title={title}>
+      <span className="stats-model-name">
+        {item.provider ? <span className="stats-model-provider">{item.provider} /</span> : null}
+        <span className="stats-model-title">{item.model}</span>
+      </span>
+      <span className="stats-model-nums">
+        <span>{item.turns} 轮</span>
+        <span>入 {item.input != null ? formatTokens(item.input) : '—'}</span>
+        <span>出 {item.output != null ? formatTokens(item.output) : '—'}</span>
+        <span>命中 {cache ? formatTokens(cache.hit) : '—'}</span>
+      </span>
+      <span className="stats-model-rate">
+        {cache ? (
+          <>
+            <RateBar rate={cache.rate} />
+            <span className="stats-model-rate-value">{formatRate(cache.rate)}</span>
+          </>
+        ) : (
+          <span className="stats-model-rate-value stats-model-rate-none">—</span>
+        )}
+      </span>
+    </div>
+  );
+}
+
 /** M24: pure-CSS per-day bar chart (no chart dependency). */
 function StatsChart({ bars }: { bars: StatsBar[] }) {
   const max = bars.reduce((top, bar) => Math.max(top, bar.total), 0);
+  const withCache = bars.filter((bar) => bar.hitRate != null).length;
   return (
     <section className="stats-chart-wrap" aria-label="按天用量">
       <div className="stats-section-head">
@@ -1207,11 +1254,14 @@ function StatsChart({ bars }: { bars: StatsBar[] }) {
           {bars.map((bar) => {
             const input = bar.input != null ? `输入 ${formatExact(bar.input)}` : '输入未记录';
             const output = bar.output != null ? `输出 ${formatExact(bar.output)}` : '输出未记录';
+            const cache = bar.cache
+              ? ` · 缓存 ${formatExact(bar.cache.hit)}/${formatExact(bar.cache.eligible)}（${formatRate(bar.hitRate)}）`
+              : ' · 缓存未上报';
             return (
               <div
                 className="stats-bar-col"
                 key={bar.date}
-                title={`${bar.date} · ${bar.turns} 轮 · ${input} · ${output}`}
+                title={`${bar.date} · ${bar.turns} 轮 · ${input} · ${output}${cache}`}
               >
                 <span className="stats-bar-value">
                   {bar.total > 0 ? formatTokens(bar.total) : '—'}
@@ -1224,6 +1274,16 @@ function StatsChart({ bars }: { bars: StatsBar[] }) {
                     }}
                   />
                 </span>
+                {/* M28: the thin strip is the day's cache hit rate, drawn
+                    against `cache_eligible`, not against `input`. */}
+                <span className="stats-bar-cache">
+                  {bar.hitRate != null ? (
+                    <span
+                      className="stats-bar-cache-fill"
+                      style={{ width: `${Math.min(100, bar.hitRate)}%` }}
+                    />
+                  ) : null}
+                </span>
                 <span className="stats-bar-label">{bar.label}</span>
                 <span className="stats-bar-turns">{bar.turns} 轮</span>
               </div>
@@ -1231,11 +1291,16 @@ function StatsChart({ bars }: { bars: StatsBar[] }) {
           })}
         </div>
       )}
+      {withCache > 0 ? (
+        <div className="stats-chart-legend">
+          细条为当日缓存命中率（{withCache}/{bars.length} 天有上报，按可缓存输入计算）
+        </div>
+      ) : null}
     </section>
   );
 }
 
-/** M24: the 用量统计 view, reachable from the sidebar. */
+/** M24: the 用量统计 view, reachable from the sidebar. M28: cache + models. */
 function StatsView({
   stats,
   loading,
@@ -1255,9 +1320,11 @@ function StatsView({
   const hasData = stats != null && (stats.totals.turns > 0 || stats.coveredChats > 0);
   const input = stats?.totals.input;
   const output = stats?.totals.output;
+  const cache: StatsCache | undefined = stats?.totals.cache;
   const covered = stats?.coveredChats ?? 0;
   const uncovered = stats?.uncoveredChats;
   const undated = stats?.undatedTurns ?? 0;
+  const models = stats?.byModel ?? [];
 
   return (
     <section
@@ -1312,12 +1379,15 @@ function StatsView({
 
         {hasData ? (
           <>
+            <div className="stats-summary">
+              <span><strong>{formatExact(stats.totals.turns)}</strong> 轮</span>
+              <span><strong>{formatExact(covered)}</strong> 个会话有数据</span>
+              <span>
+                {uncovered != null ? `另有 ${uncovered} 个无数据` : '未覆盖数未知'}
+              </span>
+            </div>
+
             <div className="stats-cards">
-              <div className="stats-card">
-                <span className="stats-card-label">总轮次</span>
-                <strong className="stats-card-value">{formatExact(stats.totals.turns)}</strong>
-                <span className="stats-card-sub">有用量回执的助手轮次</span>
-              </div>
               <div className="stats-card">
                 <span className="stats-card-label">输入 tokens</span>
                 <strong className="stats-card-value">
@@ -1337,13 +1407,61 @@ function StatsView({
                 </span>
               </div>
               <div className="stats-card">
-                <span className="stats-card-label">覆盖会话</span>
-                <strong className="stats-card-value">{formatExact(covered)}</strong>
+                <span className="stats-card-label">缓存命中</span>
+                <strong className="stats-card-value">
+                  {cache ? formatTokens(cache.hit) : '—'}
+                </strong>
+                <span className="stats-card-sub" title={cache ? formatExact(cache.hit) : ''}>
+                  {cache ? `来自 ${formatTokens(cache.eligible)} 可缓存输入` : 'provider 未上报'}
+                </span>
+              </div>
+              <div className="stats-card">
+                <span className="stats-card-label">缓存未命中</span>
+                <strong className="stats-card-value">
+                  {cache ? formatTokens(cache.miss) : '—'}
+                </strong>
+                <span className="stats-card-sub" title={cache ? formatExact(cache.miss) : ''}>
+                  {cache ? '可缓存输入 − 缓存命中' : 'provider 未上报'}
+                </span>
+              </div>
+              <div className="stats-card stats-card-rate">
+                <span className="stats-card-label">缓存命中率</span>
+                <strong className="stats-card-value stats-card-rate-value">
+                  {cache ? formatRate(cache.rate) : '—'}
+                </strong>
+                <RateBar rate={cache?.rate ?? 0} />
                 <span className="stats-card-sub">
-                  {uncovered != null ? `另有 ${uncovered} 个无数据` : '未覆盖数未知'}
+                  {cache
+                    ? `命中 ${formatTokens(cache.hit)} / 可缓存 ${formatTokens(cache.eligible)}`
+                    : '没有轮次上报缓存'}
                 </span>
               </div>
             </div>
+
+            <section className="stats-models" aria-label="按模型统计">
+              <div className="stats-section-head">
+                <span>按模型</span>
+                <span>
+                  {models.length > 0 ? `共 ${models.length} 个模型` : '暂无模型记录'}
+                </span>
+              </div>
+              {models.length === 0 ? (
+                <div className="stats-empty-line">没有可拆分的模型记录</div>
+              ) : (
+                <div className="stats-model-list">
+                  {models.map((item) => (
+                    <StatsModelRow
+                      key={`${item.provider ?? ''}\u001f${item.model}`}
+                      item={item}
+                    />
+                  ))}
+                </div>
+              )}
+              <div className="stats-models-note">
+                缓存列只统计 provider 明确上报缓存的轮次；显示「—」表示该模型没有上报，而不是 0%
+                命中。模型归属取每轮实际调用的 provider / model。
+              </div>
+            </section>
 
             <StatsChart bars={bars} />
 
@@ -1393,6 +1511,16 @@ function StatsView({
             来源：容器内 QwenPaw 会话历史（<code>sessions/web/*.json</code>）中每轮记录的
             token 用量；按<strong>容器本地时区</strong>
             {stats?.dayTz ? `（${stats.dayTz}）` : ''}的日历日分桶。
+          </p>
+          <p>
+            缓存：只统计 provider 明确上报缓存的轮次，未上报的轮次不计入分子和分母，也不当作 0%；
+            命中率按 Σ命中 ÷ Σ可缓存输入 重新计算，不对逐轮百分比取平均。
+            缓存分母是「可缓存输入」（Anthropic 的 prompt 不含缓存 token），因此
+            命中 + 未命中 不一定等于「输入」。
+          </p>
+          <p>
+            模型：归属取每轮实际记录的 provider / model，缺失或为 unknown 的轮次归入「未知模型」，
+            但照常计入合计与模型行；不会用会话当前模型回填历史轮次。
           </p>
           <p>
             覆盖：

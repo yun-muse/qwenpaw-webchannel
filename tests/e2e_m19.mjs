@@ -4,12 +4,13 @@
  * meter) plus the M22 SPA experience pack (dark theme, highlighting,
  * paste-to-attach, per-chat drafts, prompt library), the M23 pack (chat
  * tags, Ctrl/⌘+K command palette, archive search jump) and the M24 pack
- * (all-chats usage dashboard: totals, day chart, ranking, empty state), and
- * the M25 pack (导出全部: progress, failure accounting, cancel), the M26
- * pack (compact sidebar rows, the per-row ⋯ menu on phone + desktop, and
- * BEFORE/AFTER drawer evidence), and the M27 pack (a thinking level chosen
- * before the chat's ChatSpec exists: silent 404, applied after the first turn,
- * while a real 422 stays visible).
+ * (all-chats usage dashboard: totals, day chart, ranking, empty state), the
+ * M28 pack (cache hit/miss/rate cards, the per-model breakdown with its
+ * `—` case, and the day cache strip), the M25 pack (导出全部: progress,
+ * failure accounting, cancel), the M26 pack (compact sidebar rows, the
+ * per-row ⋯ menu on phone + desktop, and BEFORE/AFTER drawer evidence), and
+ * the M27 pack (a thinking level chosen before the chat's ChatSpec exists:
+ * silent 404, applied after the first turn, while a real 422 stays visible).
  * Runs entirely local against a production build:
  *
  *   1. `npm run build` in spa/ (fails the run if the build fails)
@@ -149,17 +150,47 @@ const ARCHIVED_HIT = {
 };
 
 /**
- * M24: the plugin's `stats` payload. Same shape the real handler builds, with
- * the numbers the local probe produced (95 turns over two container-local
- * days, 37 covered chats, 2 known chats without data).
+ * M24/M28: the plugin's `stats` payload. Same shape the real handler builds,
+ * with the numbers the local probe produced (95 turns over two
+ * container-local days from two Kilo models) plus one unknown-model bucket,
+ * so the cache columns, the hit-rate bar and the `—` case all render.
+ *
+ * Internally consistent: the model rows and the day buckets each add up to
+ * the totals, and the second day reports cache for only part of its input
+ * (eligible < input), which is the real-world case.
  */
 const DEFAULT_STATS = {
-  totals: { turns: 95, input: 1648974, output: 12314 },
+  totals: {
+    turns: 98, input: 1_708_974, output: 12_714,
+    cache_hit: 341_141, cache_miss: 1_307_833,
+    cache_eligible: 1_648_974, cache_hit_rate: 20.69,
+  },
+  by_model: [
+    {
+      provider: 'kilo', model: 'openrouter/free', turns: 52,
+      input: 892_049, output: 6_330, cache_hit: 26_038,
+      cache_miss: 866_011, cache_eligible: 892_049, cache_hit_rate: 2.92,
+    },
+    {
+      provider: 'kilo', model: 'kilo-auto/free', turns: 43,
+      input: 756_925, output: 5_984, cache_hit: 315_103,
+      cache_miss: 441_822, cache_eligible: 756_925, cache_hit_rate: 41.63,
+    },
+    { model: '未知模型', turns: 3, input: 60_000, output: 400 },
+  ],
   covered_chats: 37,
   uncovered_chats: 2,
   days: [
-    { date: '2026-10-26', turns: 20, input: 406196, output: 4556 },
-    { date: '2026-10-27', turns: 75, input: 1242778, output: 7758 },
+    {
+      date: '2026-10-26', turns: 20, input: 406_196, output: 4_556,
+      cache_hit: 12_000, cache_miss: 394_196, cache_eligible: 406_196,
+      cache_hit_rate: 2.95,
+    },
+    {
+      date: '2026-10-27', turns: 78, input: 1_302_778, output: 8_158,
+      cache_hit: 329_141, cache_miss: 913_637, cache_eligible: 1_242_778,
+      cache_hit_rate: 26.48,
+    },
   ],
   chats: [
     { chat: 'chat-beta', title: 'Beta 会话', turns: 40, input: 900000, output: 6000 },
@@ -169,9 +200,10 @@ const DEFAULT_STATS = {
   day_tz: 'UTC',
 };
 
-/** M24 empty dashboard: real zeros, no days, no ranked chats. */
+/** M24 empty dashboard: real zeros, no days, no ranked chats, no models. */
 const EMPTY_STATS = {
   totals: { turns: 0 },
+  by_model: [],
   covered_chats: 0,
   uncovered_chats: 2,
   days: [],
@@ -1558,10 +1590,25 @@ async function runM24Checks(page, pass, mobile) {
 
   const view = await page.evaluate(() => {
     const text = (sel) => (document.querySelector(sel) || {}).textContent || '';
+    const ratioOf = (track, fill) => {
+      if (!track || !fill) return null;
+      const t = track.getBoundingClientRect();
+      const f = fill.getBoundingClientRect();
+      return t.width > 0 ? Math.round((f.width / t.width) * 1000) / 1000 : null;
+    };
     const cards = [...document.querySelectorAll('.stats-card')].map((el) => ({
       label: (el.querySelector('.stats-card-label') || {}).textContent || '',
       value: (el.querySelector('.stats-card-value') || {}).textContent || '',
       sub: (el.querySelector('.stats-card-sub') || {}).textContent || '',
+      bar: ratioOf(el.querySelector('.stats-rate'), el.querySelector('.stats-rate-fill')),
+    }));
+    const models = [...document.querySelectorAll('.stats-model-row')].map((el) => ({
+      name: (el.querySelector('.stats-model-title') || {}).textContent || '',
+      provider: (el.querySelector('.stats-model-provider') || {}).textContent || '',
+      nums: ((el.querySelector('.stats-model-nums') || {}).textContent || '').trim(),
+      rate: (el.querySelector('.stats-model-rate-value') || {}).textContent || '',
+      hasBar: Boolean(el.querySelector('.stats-rate, .stats-rate-fill')),
+      bar: ratioOf(el.querySelector('.stats-rate'), el.querySelector('.stats-rate-fill')),
     }));
     const bars = [...document.querySelectorAll('.stats-bar-col')].map((el) => {
       const fill = el.querySelector('.stats-bar-fill');
@@ -1575,6 +1622,12 @@ async function runM24Checks(page, pass, mobile) {
       return {
         label: (el.querySelector('.stats-bar-label') || {}).textContent || '',
         turns: (el.querySelector('.stats-bar-turns') || {}).textContent || '',
+        title: el.getAttribute('title') || '',
+        strip: Boolean(el.querySelector('.stats-bar-cache-fill')),
+        stripRatio: ratioOf(
+          el.querySelector('.stats-bar-cache'),
+          el.querySelector('.stats-bar-cache-fill'),
+        ),
         ratio,
       };
     });
@@ -1588,10 +1641,15 @@ async function runM24Checks(page, pass, mobile) {
     const rect = box ? box.getBoundingClientRect() : null;
     return {
       cards,
+      models,
       bars,
       rows,
       head: text('.stats-title'),
+      summary: text('.stats-summary'),
+      modelsHead: text('.stats-models .stats-section-head'),
+      modelsNote: text('.stats-models-note'),
       chartHead: text('.stats-chart-wrap .stats-section-head'),
+      chartLegend: text('.stats-chart-legend'),
       topHead: text('.stats-top .stats-section-head'),
       basis: text('.stats-basis'),
       dialog: rect ? { w: Math.round(rect.width), h: Math.round(rect.height) } : null,
@@ -1602,22 +1660,80 @@ async function runM24Checks(page, pass, mobile) {
 
   check(`${pass}: stats view opens from the sidebar`, view.dialog != null, JSON.stringify(view.dialog));
   check(
-    `${pass}: stats has four totals cards`,
-    view.cards.length === 4,
+    `${pass}: stats has five totals cards`,
+    view.cards.length === 5,
     view.cards.map((c) => `${c.label}=${c.value}`).join(' · '),
   );
   check(
-    `${pass}: totals show turns / input / output / covered chats`,
-    view.cards[0].value === '95' &&
-      view.cards[1].value === '1.6M' &&
-      view.cards[2].value === '12.3k' &&
-      view.cards[3].value === '37',
+    `${pass}: totals show input / output / cached / uncached / hit rate`,
+    view.cards.map((c) => c.label).join('|') ===
+      '输入 tokens|输出 tokens|缓存命中|缓存未命中|缓存命中率',
+    view.cards.map((c) => c.label).join(' · '),
+  );
+  check(
+    `${pass}: cache totals come from the frame`,
+    view.cards[0].value === '1.7M' &&
+      view.cards[1].value === '12.7k' &&
+      view.cards[2].value === '341.1k' &&
+      view.cards[3].value === '1.3M' &&
+      view.cards[4].value === '20.7%',
     view.cards.map((c) => c.value).join(','),
   );
   check(
-    `${pass}: exact input total and uncovered count are stated`,
-    view.cards[1].sub.includes('1,648,974') && view.cards[3].sub.includes('另有 2 个无数据'),
-    `${view.cards[1].sub} | ${view.cards[3].sub}`,
+    `${pass}: hit-rate card draws the 20.69% bar`,
+    view.cards[4].bar != null && Math.abs(view.cards[4].bar - 0.207) < 0.02,
+    JSON.stringify(view.cards[4].bar),
+  );
+  check(
+    `${pass}: exact input total and hit-rate basis are stated`,
+    view.cards[0].sub.includes('1,708,974') &&
+      view.cards[4].sub.includes('341.1k') &&
+      view.cards[4].sub.includes('1.6M'),
+    `${view.cards[0].sub} | ${view.cards[4].sub}`,
+  );
+  check(
+    `${pass}: summary line keeps turns / coverage counts`,
+    view.summary.includes('98') &&
+      view.summary.includes('37') &&
+      view.summary.includes('另有 2 个无数据'),
+    view.summary.replace(/\s+/g, ' ').trim(),
+  );
+  check(
+    `${pass}: model rows are sorted by input with turns and tokens`,
+    view.models.length === 3 &&
+      view.models[0].name === 'openrouter/free' &&
+      view.models[0].provider.includes('kilo') &&
+      view.models[0].nums.includes('52 轮') &&
+      view.models[0].nums.includes('入 892k') &&
+      view.models[0].nums.includes('出 6.3k') &&
+      view.models[0].nums.includes('命中 26k') &&
+      view.models[1].name === 'kilo-auto/free' &&
+      view.models[2].name === '未知模型',
+    JSON.stringify(view.models),
+  );
+  check(
+    `${pass}: model rows show the hit-rate bar`,
+    view.models[0].rate === '2.9%' &&
+      view.models[0].hasBar &&
+      view.models[1].rate === '41.6%' &&
+      view.models[1].bar != null &&
+      Math.abs(view.models[1].bar - 0.416) < 0.03,
+    JSON.stringify(view.models.map((m) => [m.rate, m.bar])),
+  );
+  check(
+    `${pass}: a model without cache data shows a dash, not 0%`,
+    view.models[2].rate === '—' &&
+      view.models[2].hasBar === false &&
+      view.models[2].nums.includes('3 轮') &&
+      view.models[2].nums.includes('入 60k'),
+    JSON.stringify(view.models[2]),
+  );
+  check(
+    `${pass}: model header and basis note explain the dash`,
+    view.modelsHead.includes('共 3 个模型') &&
+      view.modelsNote.includes('没有上报') &&
+      view.modelsNote.includes('而不是 0%'),
+    `${view.modelsHead} | ${view.modelsNote}`,
   );
   check(
     `${pass}: day chart has one bar per day, ascending`,
@@ -1627,19 +1743,36 @@ async function runM24Checks(page, pass, mobile) {
   check(
     `${pass}: bars scale to the peak day`,
     view.bars[0].ratio != null &&
-      Math.abs(view.bars[0].ratio - 0.328) < 0.02 &&
+      Math.abs(view.bars[0].ratio - 0.313) < 0.02 &&
       Math.abs(view.bars[1].ratio - 1) < 0.01,
     JSON.stringify(view.bars.map((b) => b.ratio)),
   );
   check(
     `${pass}: every bar keeps its turn count`,
-    view.bars[0].turns === '20 轮' && view.bars[1].turns === '75 轮',
+    view.bars[0].turns === '20 轮' && view.bars[1].turns === '78 轮',
     JSON.stringify(view.bars.map((b) => b.turns)),
   );
   check(
-    `${pass}: chart header names the peak`,
-    view.chartHead.includes('峰值') && view.chartHead.includes('1.3M'),
-    view.chartHead.trim(),
+    `${pass}: each day carries a cache strip and its exact numbers`,
+    view.bars[0].strip &&
+      view.bars[1].strip &&
+      view.bars[0].title.includes('缓存 12,000/406,196（3.0%）') &&
+      view.bars[1].title.includes('缓存 329,141/1,242,778（26.5%）'),
+    `${view.bars[0].title} | ${view.bars[1].title}`,
+  );
+  check(
+    `${pass}: day cache strip is drawn against eligible input`,
+    view.bars[0].stripRatio != null &&
+      Math.abs(view.bars[0].stripRatio - 0.03) < 0.02 &&
+      Math.abs(view.bars[1].stripRatio - 0.265) < 0.03,
+    JSON.stringify(view.bars.map((b) => b.stripRatio)),
+  );
+  check(
+    `${pass}: chart header names the peak and the cache legend`,
+    view.chartHead.includes('峰值') &&
+      view.chartHead.includes('1.3M') &&
+      view.chartLegend.includes('2/2 天有上报'),
+    `${view.chartHead.trim()} | ${view.chartLegend.trim()}`,
   );
   check(
     `${pass}: top chats are ranked with titles`,
@@ -1657,11 +1790,14 @@ async function runM24Checks(page, pass, mobile) {
     view.topHead.trim(),
   );
   check(
-    `${pass}: basis note states source, coverage and timezone`,
+    `${pass}: basis note states source, cache rules, models and coverage`,
     view.basis.includes('数据来源与覆盖范围') &&
       view.basis.includes('sessions/web/*.json') &&
       view.basis.includes('容器本地时区') &&
       view.basis.includes('（UTC）') &&
+      view.basis.includes('未上报的轮次不计入分子和分母') &&
+      view.basis.includes('Σ命中') &&
+      view.basis.includes('未知模型') &&
       view.basis.includes('37 个会话有可用数据') &&
       view.basis.includes('2 个已知会话没有可统计的用量'),
     view.basis.replace(/\s+/g, ' ').slice(0, 160),
@@ -1719,6 +1855,65 @@ async function runM24Checks(page, pass, mobile) {
     JSON.stringify(jumped),
   );
 
+  // ---- M28 evidence: the phone layout in both themes -------------------
+  // Screenshots: <OUT_DIR>/m28-stats-<pass>-<theme>.png
+  if (mobile) {
+    // The ranking jump above leaves chat-beta open. Its history is plain text,
+    // while waitForHistory() proves a restored page by the rendered code block,
+    // so reloading chat-beta would time out on the fence. Restore a chat whose
+    // history has one instead. This goes through localStorage (same route as
+    // the M26 evidence block) because M23's archive search may still filter the
+    // sidebar down to no rows.
+    await page.evaluate(() => localStorage.setItem('webchannel.activeChat', 'chat-alpha'));
+    const previousTheme = await page.evaluate(
+      () => localStorage.getItem('webchannel.theme') || '',
+    );
+    for (const theme of ['dark', 'light']) {
+      await page.evaluate((mode) => localStorage.setItem('webchannel.theme', mode), theme);
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await waitForHistory(page);
+      await sleep(400);
+      await openStatsView();
+      const shotState = await page.evaluate(() => {
+        const body = document.querySelector('.stats-body');
+        const card = document.querySelector('.stats-card-rate');
+        const rect = card ? card.getBoundingClientRect() : null;
+        return {
+          theme: document.documentElement.dataset.theme || '',
+          cards: document.querySelectorAll('.stats-card').length,
+          models: document.querySelectorAll('.stats-model-row').length,
+          pageOverflowX:
+            document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          bodyOverflowX: body ? body.scrollWidth - body.clientWidth : 0,
+          rateCard: rect ? { w: Math.round(rect.width), h: Math.round(rect.height) } : null,
+        };
+      });
+      check(
+        `${pass}: M28 ${theme} stats renders cards, models and no overflow`,
+        shotState.theme === theme &&
+          shotState.cards === 5 &&
+          shotState.models === 3 &&
+          shotState.pageOverflowX <= 0 &&
+          shotState.bodyOverflowX <= 0 &&
+          shotState.rateCard != null &&
+          shotState.rateCard.w >= shotState.rateCard.h,
+        JSON.stringify(shotState),
+      );
+      const path = join(OUT_DIR, `m28-stats-${pass}-${theme}.png`);
+      await page.screenshot({ path, fullPage: false });
+      log(`${pass}: M28 ${theme} evidence → ${path}`);
+      await page.keyboard.press('Escape');
+      await sleep(200);
+    }
+    await page.evaluate((mode) => {
+      if (mode) localStorage.setItem('webchannel.theme', mode);
+      else localStorage.removeItem('webchannel.theme');
+    }, previousTheme);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await waitForHistory(page);
+    await sleep(300);
+  }
+
   // ---- Empty state (a real zero, not a missing field) ------------------
   await openStatsView();
   state.stats = JSON.parse(JSON.stringify(EMPTY_STATS));
@@ -1728,6 +1923,7 @@ async function runM24Checks(page, pass, mobile) {
   const empty = await page.evaluate(() => ({
     text: ((document.querySelector('.stats-empty') || {}).textContent || '').trim(),
     cards: document.querySelectorAll('.stats-card').length,
+    models: document.querySelectorAll('.stats-model-row').length,
     bars: document.querySelectorAll('.stats-bar-col').length,
     rows: document.querySelectorAll('.stats-chat-row').length,
     basis: ((document.querySelector('.stats-basis') || {}).textContent || '').trim(),
@@ -1736,9 +1932,12 @@ async function runM24Checks(page, pass, mobile) {
     `${pass}: empty stats shows an honest empty state`,
     empty.text.includes('还没有可统计的用量') &&
       empty.cards === 0 &&
+      empty.models === 0 &&
       empty.bars === 0 &&
       empty.rows === 0,
-    JSON.stringify({ cards: empty.cards, bars: empty.bars, rows: empty.rows }),
+    JSON.stringify({
+      cards: empty.cards, models: empty.models, bars: empty.bars, rows: empty.rows,
+    }),
   );
   check(
     `${pass}: empty-state basis reports zero coverage`,

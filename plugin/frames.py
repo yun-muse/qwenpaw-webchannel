@@ -429,8 +429,35 @@ def _stats_count(value):
     return None
 
 
+def _stats_cache(raw):
+    """Validated cache group of one stats row, or ``None``.
+
+    All three integer sums must be present and consistent
+    (``cache_hit + cache_miss == cache_eligible > 0``). ``cache_hit_rate`` is
+    **recomputed** from them, so a per-turn average can never reach the wire;
+    a sent rate is advisory only. An incomplete or contradictory group is
+    dropped whole -- "the provider did not report cache usage" must stay
+    absent, never become 0% (protocol/frames.md §14.5).
+    """
+    if not isinstance(raw, dict):
+        return None
+    hit = _stats_count(raw.get("cache_hit"))
+    miss = _stats_count(raw.get("cache_miss"))
+    eligible = _stats_count(raw.get("cache_eligible"))
+    if hit is None or miss is None or eligible is None:
+        return None
+    if eligible <= 0 or hit + miss != eligible:
+        return None
+    return {
+        "cache_hit": hit,
+        "cache_miss": miss,
+        "cache_eligible": eligible,
+        "cache_hit_rate": round(hit / eligible * 100, 2),
+    }
+
+
 def _stats_totals(raw):
-    """Cleaned ``{turns, input?, output?}`` object, or ``None``."""
+    """Cleaned ``{turns, input?, output?, cache_*?}`` object, or ``None``."""
     if not isinstance(raw, dict):
         return None
     cleaned = {}
@@ -441,12 +468,60 @@ def _stats_totals(raw):
         value = _stats_count(raw.get(key))
         if value is not None:
             cleaned[key] = value
+    cache = _stats_cache(raw)
+    if cache is not None:
+        cleaned.update(cache)
     return cleaned or None
+
+
+def _stats_models(raw):
+    """Cleaned, ``input``-descending ``by_model`` rows, or ``None``.
+
+    A row without a non-empty ``model`` or a ``turns`` count is dropped; the
+    unknown-model bucket arrives as the literal ``未知模型`` from
+    ``util.STATS_UNKNOWN_MODEL`` and is kept like any other row.
+    """
+    if not isinstance(raw, (list, tuple)):
+        return None
+    rows = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        model = item.get("model")
+        if not isinstance(model, str) or not model.strip():
+            continue
+        turns = _stats_count(item.get("turns"))
+        if turns is None:
+            continue
+        row = {"model": model.strip(), "turns": turns}
+        provider = item.get("provider")
+        if isinstance(provider, str) and provider.strip():
+            row["provider"] = provider.strip()
+        for key in ("input", "output"):
+            value = _stats_count(item.get(key))
+            if value is not None:
+                row[key] = value
+        cache = _stats_cache(item)
+        if cache is not None:
+            row.update(cache)
+        rows.append(row)
+    rows.sort(key=_stats_model_rank)
+    return rows
+
+
+def _stats_model_rank(row):
+    """Contract order of ``by_model``: input desc, turns desc, model, provider."""
+    return (
+        -(row.get("input") or 0),
+        -row["turns"],
+        row["model"],
+        row.get("provider") or "",
+    )
 
 
 def stats_frame(
     req_id=None, totals=None, days=None, chats=None, covered_chats=None,
-    uncovered_chats=None, undated_turns=None, day_tz=None,
+    uncovered_chats=None, undated_turns=None, day_tz=None, by_model=None,
 ):
     """All-chats usage dashboard: ``{t:"stats", id?, totals, days[], chats[]}``.
 
@@ -454,15 +529,20 @@ def stats_frame(
     never replayed on ``resume`` (protocol/frames.md §14). The payload is a
     summary of every chat that has usable persisted turns:
 
-    - ``totals`` — ``{turns, input?, output?}``; a missing token side means
-      "no turn recorded it", never 0.
+    - ``totals`` — ``{turns, input?, output?}`` plus, when at least one turn
+      reported cache usage, ``{cache_hit, cache_miss, cache_eligible,
+      cache_hit_rate}``. A missing token side means "no turn recorded it",
+      never 0.
+    - ``by_model`` — ``[{provider?, model, turns, input?, output?, cache_*?}]``
+      sorted by ``input`` descending, including the ``未知模型`` bucket so
+      the rows sum to the totals (§14.6).
     - ``covered_chats`` — how many chats contribute to the numbers (a real 0
       when there is no data yet).
     - ``uncovered_chats`` — known web chats with no usable data. Omitted when
       the server chat list could not be read: unknown is not 0.
-    - ``days`` — ``[{date, turns, input?, output?}]`` ascending by ISO date,
-      bucketed by the **container's local calendar day** (``created_at`` is a
-      naive local wall clock).
+    - ``days`` — ``[{date, turns, input?, output?, cache_*?}]`` ascending by
+      ISO date, bucketed by the **container's local calendar day**
+      (``created_at`` is a naive local wall clock).
     - ``chats`` — top chats by recorded tokens, capped at
       ``STATS_TOP_CHATS``; ``title`` appears only when the chat list resolved
       one.
@@ -480,6 +560,10 @@ def stats_frame(
     cleaned_totals = _stats_totals(totals)
     if cleaned_totals is not None:
         frame["totals"] = cleaned_totals
+
+    cleaned_models = _stats_models(by_model)
+    if cleaned_models is not None:
+        frame["by_model"] = cleaned_models
 
     if isinstance(days, (list, tuple)):
         cleaned_days = []
@@ -501,6 +585,9 @@ def stats_frame(
                 value = _stats_count(raw.get(key))
                 if value is not None:
                     item[key] = value
+            cache = _stats_cache(raw)
+            if cache is not None:
+                item.update(cache)
             cleaned_days.append(item)
         frame["days"] = cleaned_days
 

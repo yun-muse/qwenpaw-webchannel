@@ -697,7 +697,8 @@ replayed on `resume`. Reconnect and re-issue the `search` with a new `id` instea
 ## 14. Protocol v9 — all-chats usage dashboard
 
 Aggregates the per-turn receipts of §11 across every persisted web chat, so the SPA's 用量统计
-view can show totals, a per-day series and a top-chats ranking. The relay needs **no changes**;
+view can show totals, cache hit/miss (§14.5), a per-model breakdown (§14.6), a per-day series and
+a top-chats ranking. The relay needs **no changes**;
 both frames are forwarded verbatim.
 
 ### 14.1 Wire format
@@ -712,20 +713,36 @@ Agent → client:
 
 ```json
 {"t":"stats","id":"stats-1",
- "totals":{"turns":95,"input":1648974,"output":12314},
+ "totals":{"turns":95,"input":1648974,"output":12314,
+           "cache_hit":341141,"cache_miss":1307833,
+           "cache_eligible":1648974,"cache_hit_rate":20.69},
+ "by_model":[
+   {"provider":"kilo","model":"openrouter/free","turns":52,"input":892049,
+    "output":6330,"cache_hit":26038,"cache_miss":866011,
+    "cache_eligible":892049,"cache_hit_rate":2.92},
+   {"provider":"kilo","model":"kilo-auto/free","turns":43,"input":756925,
+    "output":5984,"cache_hit":315103,"cache_miss":441822,
+    "cache_eligible":756925,"cache_hit_rate":41.63}],
  "covered_chats":37,"uncovered_chats":0,
- "days":[{"date":"2026-10-26","turns":20,"input":406196,"output":4556}],
+ "days":[{"date":"2026-10-26","turns":20,"input":406196,"output":4556,
+          "cache_hit":234486,"cache_miss":171710,"cache_eligible":406196,
+          "cache_hit_rate":57.73}],
  "chats":[{"chat":"m2file","title":"…","turns":10,"input":273651,"output":1271}],
  "day_basis":"container-local","day_tz":"UTC"}
 {"t":"stats"}
 ```
 
-- `totals` — `{turns, input?, output?}` across all covered chats. A missing token side means **no
-  turn recorded it**; it is never sent as 0. `turns` is present even when it is 0.
+- `totals` — `{turns, input?, output?, cache_hit?, cache_miss?, cache_eligible?,
+  cache_hit_rate?}` across all covered chats. A missing token side means **no turn recorded it**;
+  it is never sent as 0. `turns` is present even when it is 0. The four cache keys appear as one
+  group, only when at least one turn reported cache usage (§14.5).
+- `by_model[]` — `{provider?, model, turns, input?, output?, cache_*?}`, one row per
+  `(provider_id, model_name)` plus the `未知模型` bucket, sorted by `input` descending (§14.6).
 - `covered_chats` — how many chats contributed at least one usable turn. Real `0` is sent.
 - `uncovered_chats` — known web chats (the `GET /api/chats?channel=web` list) that contributed no
   usable data. **Omitted when the chat list could not be read**: unknown is not 0.
-- `days[]` — `{date, turns, input?, output?}`, ascending by ISO `YYYY-MM-DD`.
+- `days[]` — `{date, turns, input?, output?, cache_*?}`, ascending by ISO `YYYY-MM-DD`. The cache
+  group follows the same rule as `totals` and can cover fewer turns than the day's `input`.
 - `chats[]` — top chats by `input + output` (then `turns`, then chat id), **capped at 10**.
   `title` appears only when the chat list resolved one.
 - `undated_turns` — present only when counted turns had no usable timestamp. Those turns are in
@@ -763,3 +780,82 @@ files but only re-parses those that changed.
 
 `stats` carries **no `seq`**, belongs to no chat stream, and is never ring-buffered or replayed on
 `resume`. A reconnecting client re-issues `get_stats` with a new `id`.
+
+### 14.5 Cache accounting (M28)
+
+Every turn's receipt (`qwenpaw_turn_usage.usage`, §11.1) already carries **normalised** cache
+numbers: the plugin never parses a provider response. QwenPaw converts the raw fields like this
+(`qwenpaw-ref/src/qwenpaw/providers/adapters/usage.py`, `token_usage/model_wrapper.py`):
+
+| provider family | raw field the model adapter reads | normalised to |
+|---|---|---|
+| DeepSeek | `usage.prompt_cache_hit_tokens` (prompt = hit + miss) | `cache_read_tokens`; eligible = `prompt_tokens` |
+| OpenAI-compatible chat (OpenAI, Kilo, OpenCode chat models, OpenRouter, compatible endpoints) | `usage.prompt_tokens_details.cached_tokens` (also `input_tokens_details.cached_tokens`) | same |
+| OpenAI Responses | `usage.input_tokens_details.cached_tokens` | same |
+| Anthropic (incl. OpenCode models routed to the anthropic protocol) | `usage.cache_read_input_tokens`, `usage.cache_creation_input_tokens`; **`input_tokens` excludes both** | read/write split; eligible = `prompt + read + write` |
+| DashScope / Moonshot / Volcengine | `usage.prompt_tokens_details.cached_tokens` | same as OpenAI |
+| Gemini | `usage.cached_content_token_count` | same as OpenAI |
+| xAI | `usage.cached_prompt_text_tokens` | same as OpenAI |
+| adapter outside QwenPaw's cache-usage whitelist | none | `cache_observed=false`, read/write forced to 0 |
+
+`prompt_cache_miss_tokens` is **never read** by QwenPaw or AgentScope, so a miss is always derived.
+Per turn, the plugin applies exactly:
+
+```text
+observed = usage.cache_observed is True          # false / missing => not reported
+hit      = usage.cache_read_tokens               # int >= 0
+eligible = usage.cache_eligible_input_tokens     # must be > 0
+miss     = eligible - hit                        # never prompt_tokens - hit
+rate     = hit / eligible * 100                  # 0-100, never 0-1
+```
+
+Rules that are part of the contract:
+
+- A turn contributes to `cache_hit` / `cache_miss` / `cache_eligible` **only** when
+  `observed` is `true` and `eligible > 0`. Everything else contributes **nothing** — a missing flag
+  (legacy receipt), `cache_observed=false`, a zero denominator, or `hit > eligible`. Such turns are
+  still counted in `turns`, `input` and `output`.
+- `0` is a real value: a reported turn with `cache_read_tokens=0` is a 0% hit and stays in the
+  denominator. **"Not reported" and "0%" are different**; the first omits the group, the second
+  sends zeros.
+- The group is all-or-nothing: `cache_hit`, `cache_miss`, `cache_eligible` and `cache_hit_rate`
+  are present together or absent together, and `cache_hit + cache_miss == cache_eligible`.
+- `cache_hit_rate` is always recomputed as `Σhit / Σeligible * 100` (rounded to 2 decimals) from
+  the integer sums — **per-turn rates are never averaged**, because a large turn must weigh more.
+  The plugin recomputes it at both the aggregation and the frame-building boundary; a received
+  rate that contradicts the sums is discarded.
+- `session_cache_read_tokens` / `session_cache_eligible_input_tokens` /
+  `session_cache_hit_rate` are **cumulative session snapshots**, not per-turn increments. They are
+  never summed and never used to derive a rate; adding them would count early turns again and
+  again.
+- `input` keeps the M24 meaning: `Σ prompt_tokens`. `cache_eligible` is a separate denominator.
+  For OpenAI/DeepSeek `cache_eligible == input`; for Anthropic `prompt_tokens` excludes cache
+  reads/writes, so `cache_eligible > input` **for that model** and, when other turns did not report
+  cache at all, `totals.cache_eligible` may be *smaller* than `totals.input`. Clients must not
+  assume `hit + miss == input`; draw cache shares against `cache_eligible`.
+
+### 14.6 Per-model breakdown (M28)
+
+`by_model` answers "which model actually spent these tokens". The attribution is the **turn's own**
+`usage.provider_id` / `usage.model_name`, recorded from the model instance that was called. It is
+never back-filled from the chat's current model: one chat's history can span several models
+(`m2main`: 6 turns on `kilo-auto/free`, then 4 on `openrouter/free`, while the chat's active model
+is only the latter).
+
+- Grouping key is `(provider_id, model_name)`; a row is
+  `{provider?, model, turns, input?, output?, cache_hit?, cache_miss?, cache_eligible?,
+  cache_hit_rate?}`. `provider` is omitted when the receipt has none.
+- A turn whose `model_name` is missing, empty or the literal `"unknown"` (QwenPaw's fallback when
+  the model object has no name) goes to the single bucket `model:"未知模型"` with no `provider`.
+  Those turns **still count** in `totals` and in the row's `turns`/`input`/`output`; the UI states
+  that the model is unknown rather than inventing one.
+- Rows are sorted by `input` descending, then `turns` descending, then `model` ascending, then
+  `provider` ascending. There is no cap.
+- Consistency guarantee: `Σ by_model.turns == totals.turns`, and for every present field
+  `Σ by_model.input == totals.input`, `Σ by_model.output == totals.output`, plus the same identity
+  for `cache_hit` / `cache_miss` / `cache_eligible`. The unknown bucket is what makes this exact.
+- A turn that made several model calls is one row: the token sums cover all calls while the model
+  label is the **last** call's model (QwenPaw merges the receipt this way), so a mid-turn model
+  switch cannot be seen in the data.
+- Cache keys follow §14.5 per row: a model with no observed turn shows no cache fields (the UI
+  prints `—`), which is **not** a 0% hit rate.

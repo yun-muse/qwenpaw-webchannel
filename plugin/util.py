@@ -1107,6 +1107,19 @@ TURN_USAGE_META_KEY = "qwenpaw_turn_usage"
 # Sessions of this channel live in ``<workspace>/sessions/web/*.json``.
 _SESSION_CHANNEL = "web"
 
+# M28: cache accounting. A turn contributes to the cache numerator and
+# denominator only when the provider actually reported cache usage
+# (``cache_observed is True``) **and** its eligible-input denominator is
+# positive. Every other turn is "not reported": it must not add a fake 0 hit
+# or miss, and it must not dilute a hit rate. ``session_cache_*`` is a
+# cumulative snapshot of the whole session (turn_usage.py) and is never read
+# here -- summing it would square the numbers.
+_CACHE_KEYS = ("cache_hit", "cache_miss", "cache_eligible")
+
+# Display name of the bucket that collects turns whose model is missing,
+# empty or the literal "unknown" (probe: docs/m28-report.md §3.3).
+STATS_UNKNOWN_MODEL = "未知模型"
+
 
 def _token_count(value):
     """Non-negative int from one usage field, else ``None``.
@@ -1166,6 +1179,47 @@ def message_usage(message):
         return None
     usage = turn.get("usage")
     return usage if isinstance(usage, dict) else None
+
+
+def _turn_cache(usage):
+    """``(hit, miss, eligible)`` of one turn, or ``None`` when unusable.
+
+    Conversion rules (protocol/frames.md §14.5, probe §5.1):
+
+    - only ``cache_observed is True`` counts -- a missing flag (legacy record)
+      or ``false`` means the provider did not report cache usage, so the turn
+      contributes **nothing** (not a 0 hit and not a 0 miss);
+    - ``eligible`` must be positive, otherwise there is no denominator;
+    - ``miss = eligible - hit``: never ``prompt_tokens - hit``, because
+      Anthropic's ``prompt_tokens`` excludes cache reads/writes while
+      OpenAI/DeepSeek include them (probe §2.2);
+    - a hit larger than the denominator is not trustworthy and is dropped.
+    """
+    if not isinstance(usage, dict) or usage.get("cache_observed") is not True:
+        return None
+    hit = _token_count(usage.get("cache_read_tokens"))
+    eligible = _token_count(usage.get("cache_eligible_input_tokens"))
+    if hit is None or eligible is None or eligible <= 0 or hit > eligible:
+        return None
+    return hit, eligible - hit, eligible
+
+
+def _turn_model(usage):
+    """``(provider, model)`` of one turn; ``("", "")`` means "unknown model".
+
+    QwenPaw records the model instance that was actually called, so this is
+    the turn's own attribution -- never the chat's current model. A missing,
+    empty or literal ``"unknown"`` model (the wrapper's fallback when the
+    model object has no name) is not a real name and goes to the unknown
+    bucket instead of being displayed as fact (probe §3.3).
+    """
+    provider = usage.get("provider_id") if isinstance(usage, dict) else None
+    model = usage.get("model_name") if isinstance(usage, dict) else None
+    provider = provider.strip() if isinstance(provider, str) else ""
+    model = model.strip() if isinstance(model, str) else ""
+    if not model or model.lower() == "unknown":
+        return "", ""
+    return provider, model
 
 
 def session_messages(session_data):
@@ -1575,8 +1629,8 @@ STATS_TOP_CHATS = 10
 
 
 def _empty_turn_summary():
-    """Zeroed per-file summary (the ``days`` map is owned by the caller)."""
-    return {"turns": 0, "days": {}, "undated_turns": 0}
+    """Zeroed per-file summary (the ``days`` / ``models`` maps own their keys)."""
+    return {"turns": 0, "days": {}, "models": {}, "undated_turns": 0}
 
 
 def _turn_day(message):
@@ -1621,36 +1675,97 @@ def _add_count(slot, key, value):
     slot[key] = slot.get(key, 0) + value
 
 
+def _add_cache(slot, cache):
+    """Add one usable turn's ``(hit, miss, eligible)`` to ``slot``.
+
+    ``None`` (not reported / unusable) leaves the keys absent, so a bucket
+    with no observed turn never claims a 0% hit rate.
+    """
+    if cache is None:
+        return
+    hit, miss, eligible = cache
+    _add_count(slot, "cache_hit", hit)
+    _add_count(slot, "cache_miss", miss)
+    _add_count(slot, "cache_eligible", eligible)
+
+
+def _cache_rate(slot):
+    """Hit rate (percent, 0-100) recomputed from integer sums, or ``None``.
+
+    Never averages the per-turn ``cache_hit_rate``: a large turn must weigh
+    more than a small one (probe §2.5). ``None`` means "no usable
+    denominator", which callers omit instead of reporting 0.
+    """
+    hit = _token_count(slot.get("cache_hit"))
+    eligible = _token_count(slot.get("cache_eligible"))
+    if hit is None or eligible is None or eligible <= 0:
+        return None
+    return round(hit / eligible * 100, 2)
+
+
+def _set_cache_rate(slot):
+    """Add ``cache_hit_rate`` to ``slot`` when its integer sums support it."""
+    rate = _cache_rate(slot)
+    if rate is not None:
+        slot["cache_hit_rate"] = rate
+    return slot
+
+
+def _model_bucket(summary, provider, model):
+    """Per-model accumulator inside one file summary, created on demand."""
+    models = summary["models"]
+    key = (provider, model)
+    bucket = models.get(key)
+    if bucket is None:
+        bucket = {"turns": 0, "model": model}
+        if provider:
+            bucket["provider"] = provider
+        models[key] = bucket
+    return bucket
+
+
 def _copy_turn_summary(summary):
     """Defensive copy of one cached per-file summary."""
+    buckets = summary.get("days")
+    models = summary.get("models")
     copied = {
         "turns": summary.get("turns", 0),
         "days": {
-            day: dict(bucket) for day, bucket in summary.get("days", {}).items()
-        },
+            day: dict(bucket) for day, bucket in buckets.items()
+        } if isinstance(buckets, dict) else {},
+        "models": {
+            key: dict(bucket) for key, bucket in models.items()
+        } if isinstance(models, dict) else {},
         "undated_turns": summary.get("undated_turns", 0),
     }
-    for key in ("input", "output"):
+    for key in ("input", "output") + _CACHE_KEYS:
         if key in summary:
             copied[key] = summary[key]
     return copied
 
 
 def session_turn_summary(messages):
-    """Turn totals + per-day buckets of one persisted session.
+    """Turn totals, per-day buckets and per-model buckets of one session.
 
     A **turn** is one assistant message carrying a usable
     ``qwenpaw_turn_usage.usage`` receipt with at least one of
     ``prompt_tokens`` / ``completion_tokens``. The result is::
 
         {"turns": 3, "input": 120, "output": 30,
-         "days": {"2026-10-26": {"turns": 2, "input": 100, "output": 20}},
+         "cache_hit": 40, "cache_miss": 60, "cache_eligible": 100,
+         "days": {"2026-10-26": {"turns": 2, "input": 100, "output": 20,
+                                 "cache_hit": 40, "cache_miss": 60,
+                                 "cache_eligible": 100}},
+         "models": {("kilo", "openrouter/free"): {"turns": 2, ..., "model": ...}},
          "undated_turns": 1}
 
     ``input`` / ``output`` are absent when no turn recorded that side (a real
-    0 is kept), and the same rule applies per day. A turn without a timestamp
-    is counted in the totals but never in a made-up day bucket;
-    ``undated_turns`` says how many.
+    0 is kept), and the same rule applies per day and per model. Cache keys
+    exist only when at least one turn actually reported cache usage (§14.5).
+    A turn without a timestamp is counted in the totals but never in a
+    made-up day bucket; ``undated_turns`` says how many. Model keys are the
+    normalised ``(provider_id, model_name)`` pair, ``("", "")`` for the
+    unknown bucket.
     """
     summary = _empty_turn_summary()
     if not isinstance(messages, (list, tuple)):
@@ -1672,9 +1787,18 @@ def session_turn_summary(messages):
         if prompt is None and completion is None:
             continue
 
+        cache = _turn_cache(usage)
         summary["turns"] += 1
         _add_count(summary, "input", prompt)
         _add_count(summary, "output", completion)
+        _add_cache(summary, cache)
+
+        provider, model = _turn_model(usage)
+        model_bucket = _model_bucket(summary, provider, model)
+        model_bucket["turns"] += 1
+        _add_count(model_bucket, "input", prompt)
+        _add_count(model_bucket, "output", completion)
+        _add_cache(model_bucket, cache)
 
         day = _turn_day(message)
         if not day:
@@ -1684,6 +1808,7 @@ def session_turn_summary(messages):
         bucket["turns"] += 1
         _add_count(bucket, "input", prompt)
         _add_count(bucket, "output", completion)
+        _add_cache(bucket, cache)
     return summary
 
 
@@ -1753,13 +1878,64 @@ def session_file_chat(
     return stem
 
 
+def _summary_models(summary):
+    """``[((provider, model), bucket)]`` of one file summary.
+
+    Keys are re-normalised here so a hand-built summary cannot smuggle an
+    empty model or the literal ``"unknown"`` into a real model row: those
+    turns land in the unknown bucket and still count in the totals.
+    """
+    buckets = summary.get("models")
+    if not isinstance(buckets, dict):
+        return []
+    pairs = []
+    for bucket in buckets.values():
+        if not isinstance(bucket, dict):
+            continue
+        provider = bucket.get("provider")
+        provider = provider.strip() if isinstance(provider, str) else ""
+        model = bucket.get("model")
+        model = model.strip() if isinstance(model, str) else ""
+        if not model or model.lower() == "unknown":
+            provider, model = "", ""
+        pairs.append(((provider, model), bucket))
+    return pairs
+
+
+def _add_cache_fields(slot, source):
+    """Fold the cache triple of *source* into *slot*, all three or nothing.
+
+    An incomplete triple (one field missing) is dropped whole, so a consumer
+    can never see ``cache_hit`` without the denominator or rate that explains
+    it. ``_set_cache_rate`` later derives the rate from these integer sums.
+    """
+    values = [_token_count(source.get(key)) for key in _CACHE_KEYS]
+    if any(value is None for value in values):
+        return
+    for key, value in zip(_CACHE_KEYS, values):
+        _add_count(slot, key, value)
+
+
+def _model_rank(item):
+    """Stable ``by_model`` order: input desc, turns desc, model, provider."""
+    return (
+        -(item.get("input") or 0),
+        -(item.get("turns") or 0),
+        item.get("model") or "",
+        item.get("provider") or "",
+    )
+
+
 def aggregate_usage_stats(entries, known_chats=None, titles=None):
-    """Fold per-file turn summaries into the M24 ``stats`` payload body.
+    """Fold per-file turn summaries into the ``stats`` payload body.
 
     *entries* is an iterable of ``{"chat", "summary"}`` dicts (see
     ``session_turn_summary``). Returns::
 
-        {"totals": {"turns": 95, "input": 1648974, "output": 12314},
+        {"totals": {"turns": 95, "input": 1648974, "output": 12314,
+                    "cache_hit": 341141, "cache_miss": 1307833,
+                    "cache_eligible": 1648974, "cache_hit_rate": 20.69},
+         "by_model": [{"provider": "kilo", "model": "openrouter/free", ...}],
          "covered_chats": 37,
          "days": [{"date": "2026-10-26", "turns": 20, ...}, ...],
          "chats": [{"chat": "...", "title": "...", "turns": 1, ...}, ...],
@@ -1771,10 +1947,18 @@ def aggregate_usage_stats(entries, known_chats=None, titles=None):
     chats are capped at ``STATS_TOP_CHATS`` and sorted by recorded tokens,
     then turns, then chat id. ``undated_turns`` appears only when some counted
     turn had no timestamp (such turns are in the totals but not in ``days``).
+
+    Cache keys are folded **only from turns that reported cache usage**
+    (§14.5): totals/days/models without any observed turn simply lack them.
+    Every hit rate is recomputed from the integer sums -- per-turn rates are
+    never averaged. ``by_model`` is sorted by ``input`` descending (then
+    turns, model, provider) and includes the 未知模型 bucket, so
+    ``Σ by_model.input/output/turns == totals`` always holds.
     """
     totals = {"turns": 0}
     days = {}
     chats = {}
+    models = {}
     covered = set()
     undated = 0
 
@@ -1799,6 +1983,20 @@ def aggregate_usage_stats(entries, known_chats=None, titles=None):
                 continue
             _add_count(totals, key, value)
             _add_count(item, key, value)
+        _add_cache_fields(totals, summary)
+
+        for model_key, model_bucket in _summary_models(summary):
+            bucket_turns = _token_count(model_bucket.get("turns"))
+            if bucket_turns is None or bucket_turns <= 0:
+                continue
+            provider, model = model_key
+            target = models.setdefault(model_key, {"turns": 0, "model": model})
+            if provider:
+                target["provider"] = provider
+            target["turns"] += bucket_turns
+            for field in ("input", "output"):
+                _add_count(target, field, _token_count(model_bucket.get(field)))
+            _add_cache_fields(target, model_bucket)
 
         undated += _token_count(summary.get("undated_turns")) or 0
 
@@ -1819,12 +2017,29 @@ def aggregate_usage_stats(entries, known_chats=None, titles=None):
             target["turns"] += day_turns
             for key in ("input", "output"):
                 _add_count(target, key, _token_count(bucket.get(key)))
+            _add_cache_fields(target, bucket)
+
+    _set_cache_rate(totals)
+    for target in days.values():
+        _set_cache_rate(target)
 
     title_map = titles if isinstance(titles, dict) else {}
     for chat, item in chats.items():
         title = title_map.get(chat)
         if isinstance(title, str) and title.strip():
             item["title"] = title.strip()
+
+    by_model = []
+    for (provider, model), item in models.items():
+        entry = {"model": model or STATS_UNKNOWN_MODEL, "turns": item["turns"]}
+        if provider:
+            entry["provider"] = provider
+        for key in ("input", "output") + _CACHE_KEYS:
+            if key in item:
+                entry[key] = item[key]
+        _set_cache_rate(entry)
+        by_model.append(entry)
+    by_model.sort(key=_model_rank)
 
     def rank_key(item):
         tokens = (item.get("input") or 0) + (item.get("output") or 0)
@@ -1833,6 +2048,7 @@ def aggregate_usage_stats(entries, known_chats=None, titles=None):
     top = sorted(chats.values(), key=rank_key)[:STATS_TOP_CHATS]
     result = {
         "totals": totals,
+        "by_model": by_model,
         "covered_chats": len(covered),
         "days": [days[day] for day in sorted(days)],
         "chats": top,

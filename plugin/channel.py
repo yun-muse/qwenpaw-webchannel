@@ -1506,12 +1506,13 @@ class WebChannel(BaseChannel):
         Class 1 (per-file parse) lives in ``SessionUsageStore.stats_entries``:
         every ``sessions/web/*.json`` file is summarised once, cached by
         ``(mtime_ns, size)``, and malformed/usage-less files are skipped.
-        Class 2 (cross-file) is ``aggregate_usage_stats``: totals, per-day
-        buckets in the container's local calendar day, top chats, and the
-        uncovered count. The chat list is read first so titles can be
-        attached and "known but no data" chats can be counted; if that call
-        fails the numbers still come from the files and
-        ``uncovered_chats`` is omitted instead of pretending to be 0.
+        Class 2 (cross-file) is ``aggregate_usage_stats``: totals, per-model
+        rows (M28), per-day buckets in the container's local calendar day,
+        top chats, and the uncovered count. Cache keys ride along only when
+        the provider reported them (protocol/frames.md §14.5). The chat list
+        is read first so titles can be attached and "known but no data" chats
+        can be counted; if that call fails the numbers still come from the
+        files and ``uncovered_chats`` is omitted instead of pretending to be 0.
 
         Like ``get_usage`` this is a control frame: no ``seq``, not
         ring-buffered, never replayed. It always answers -- at worst

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Frame } from '../src/relay';
-import { dayLabel, statsBars, statsOf } from '../src/lib/stats';
+import { dayLabel, formatRate, statsBars, statsOf } from '../src/lib/stats';
 
 function frame(extra: Record<string, unknown> = {}): Frame {
   return { t: 'stats', ...extra };
@@ -43,6 +43,7 @@ describe('statsOf', () => {
   it('treats a bare frame as an empty dashboard', () => {
     expect(statsOf(frame())).toEqual({
       totals: { turns: 0 },
+      byModel: [],
       days: [],
       chats: [],
       coveredChats: 0,
@@ -116,6 +117,108 @@ describe('statsOf', () => {
   });
 });
 
+describe('M28 cache + models', () => {
+  it('parses the cache group and recomputes the rate from the integer sums', () => {
+    const stats = statsOf(frame({
+      totals: {
+        turns: 2, input: 1100, output: 2,
+        cache_hit: 901, cache_miss: 199, cache_eligible: 1100,
+        // A per-turn average would be 45.5; the sums are what count.
+        cache_hit_rate: 45.5,
+      },
+      days: [{
+        date: '2026-10-26', turns: 2, input: 1100, output: 2,
+        cache_hit: 901, cache_miss: 199, cache_eligible: 1100,
+      }],
+      by_model: [{
+        provider: 'kilo', model: 'openrouter/free', turns: 2,
+        input: 1100, output: 2, cache_hit: 901, cache_miss: 199,
+        cache_eligible: 1100, cache_hit_rate: 45.5,
+      }],
+    }));
+    expect(stats.totals.cache).toEqual({
+      hit: 901, miss: 199, eligible: 1100, rate: 81.91,
+    });
+    expect(stats.days[0].cache?.rate).toBe(81.91);
+    expect(stats.byModel[0].cache).toEqual({
+      hit: 901, miss: 199, eligible: 1100, rate: 81.91,
+    });
+  });
+
+  it('drops an incomplete or contradictory cache triple instead of faking 0', () => {
+    const incomplete = statsOf(frame({
+      totals: { turns: 1, input: 100, cache_hit: 10 },
+      days: [{ date: '2026-10-26', turns: 1, cache_hit: 10, cache_miss: 90 }],
+      by_model: [{ model: 'm', turns: 1, cache_hit: 10, cache_miss: 5, cache_eligible: 20 }],
+    }));
+    expect('cache' in incomplete.totals).toBe(false);
+    expect('cache' in incomplete.days[0]).toBe(false);
+    expect('cache' in incomplete.byModel[0]).toBe(false);
+  });
+
+  it('keeps a reported 0 hit as a real 0% rate', () => {
+    const stats = statsOf(frame({
+      totals: {
+        turns: 1, input: 100, output: 1,
+        cache_hit: 0, cache_miss: 100, cache_eligible: 100,
+      },
+    }));
+    expect(stats.totals.cache).toEqual({
+      hit: 0, miss: 100, eligible: 100, rate: 0,
+    });
+    expect(formatRate(stats.totals.cache?.rate)).toBe('0.0%');
+  });
+
+  it('parses model rows, keeps the unknown bucket and sorts by input', () => {
+    const stats = statsOf(frame({
+      by_model: [
+        { model: '未知模型', turns: 3, input: 60_000, output: 400 },
+        { provider: 'kilo', model: 'small', turns: 1, input: 10 },
+        {
+          provider: 'kilo', model: 'openrouter/free', turns: 52,
+          input: 892_049, output: 6_330, cache_hit: 26_038,
+          cache_miss: 866_011, cache_eligible: 892_049, cache_hit_rate: 2.92,
+        },
+        { model: '  ', turns: 9, input: 999 },
+        { model: 'no-turns', input: 999 },
+        'junk',
+      ],
+    }));
+    expect(stats.byModel.map((row) => row.model)).toEqual([
+      'openrouter/free', '未知模型', 'small',
+    ]);
+    expect(stats.byModel[0].provider).toBe('kilo');
+    expect(stats.byModel[0].cache?.rate).toBe(2.92);
+    // The unknown bucket has no cache data: absent, never 0%.
+    expect('cache' in stats.byModel[1]).toBe(false);
+    expect('provider' in stats.byModel[1]).toBe(false);
+    expect('input' in stats.byModel[2]).toBe(true);
+  });
+
+  it('merges duplicate day rows and combines their cache sums', () => {
+    const stats = statsOf(frame({
+      days: [
+        { date: '2026-10-26', turns: 1, input: 100, cache_hit: 10, cache_miss: 90, cache_eligible: 100 },
+        { date: '2026-10-26', turns: 1, input: 300, cache_hit: 90, cache_miss: 210, cache_eligible: 300 },
+      ],
+    }));
+    expect(stats.days).toEqual([{
+      date: '2026-10-26', turns: 2, input: 400,
+      cache: { hit: 100, miss: 300, eligible: 400, rate: 25 },
+    }]);
+  });
+});
+
+describe('formatRate', () => {
+  it('renders one decimal and a dash for unknown rates', () => {
+    expect(formatRate(20.69)).toBe('20.7%');
+    expect(formatRate(0)).toBe('0.0%');
+    expect(formatRate(100)).toBe('100.0%');
+    expect(formatRate(undefined)).toBe('—');
+    expect(formatRate(Number.NaN)).toBe('—');
+  });
+});
+
 describe('statsBars', () => {
   it('computes token totals, ratios and short labels', () => {
     const bars = statsBars([
@@ -141,6 +244,19 @@ describe('statsBars', () => {
 
   it('handles an empty series', () => {
     expect(statsBars([])).toEqual([]);
+  });
+
+  it('carries a hit rate only for days that reported cache', () => {
+    const bars = statsBars([
+      {
+        date: '2026-10-26', turns: 1, input: 100,
+        cache: { hit: 40, miss: 60, eligible: 100, rate: 40 },
+      },
+      { date: '2026-10-27', turns: 1, input: 200 },
+    ]);
+    expect(bars[0].hitRate).toBe(40);
+    expect(bars[1].hitRate).toBeUndefined();
+    expect(bars.map((bar) => bar.ratio)).toEqual([0.5, 1]);
   });
 });
 
