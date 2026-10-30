@@ -16,9 +16,10 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
 } from 'react';
-import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import hljs from 'highlight.js/lib/common';
+import { md } from './lib/markdown';
+import { hydrateMath } from './lib/mathRender';
 import {
   Archive,
   ArrowDown,
@@ -717,12 +718,9 @@ function historyMessages(raw: unknown): HistoryMessage[] {
 }
 
 function renderMarkdown(text: string): string {
-  const html = marked.parse(text, { gfm: true, breaks: true }) as unknown as string;
+  const html = md.parse(text) as unknown as string;
   return DOMPurify.sanitize(html);
 }
-
-/** Options shared by the whole-document and the split streaming renderer. */
-const MD_OPTIONS = { gfm: true, breaks: true } as const;
 
 /**
  * M32: split a streaming message into a *frozen* prefix and the last block.
@@ -737,12 +735,18 @@ const MD_OPTIONS = { gfm: true, breaks: true } as const;
  * `cache` is the previous call's prefix (raw tokens + sanitized HTML). Tokens
  * are immutable for a given `text`, so a longest-common-prefix compare is an
  * exact "did any earlier block change" test.
+ *
+ * M36: the lexer/parser calls deliberately pass no per-call options. In
+ * `marked`, an options object replaces the instance's option set — including
+ * its `extensions` registry — so `md.lexer(text, MD_OPTIONS)` would silently
+ * drop the math tokenizers during streaming and only render math after the
+ * message settles. `md` already carries `gfm`/`breaks` defaults.
  */
 function splitMarkdown(
   text: string,
   cache: { raws: string[]; html: string },
 ): { head: string; tail: string } {
-  const tokens = marked.lexer(text, MD_OPTIONS) as unknown as Array<{ type?: string; raw?: string }>;
+  const tokens = md.lexer(text) as unknown as Array<{ type?: string; raw?: string }>;
   if (tokens.length === 0) {
     cache.raws = [];
     cache.html = '';
@@ -762,7 +766,7 @@ function splitMarkdown(
     tailTokens.links = links;
   }
   const sanitizeTokens = (slice: unknown[]): string =>
-    DOMPurify.sanitize(marked.parser(slice as never, MD_OPTIONS) as unknown as string);
+    DOMPurify.sanitize(md.parser(slice as never) as unknown as string);
 
   const raws = headTokens.map((token) => String(token.raw ?? ''));
   let common = 0;
@@ -905,8 +909,13 @@ function PartCard({ part }: { part: ContentPart }) {
  * bar + copy button, and wrap tables with their copy toolbar. Taking the
  * container as an argument lets the frozen prefix and the live tail be
  * decorated independently (M32).
+ *
+ * M36: `math` says whether this container may hydrate LaTeX placeholders. The
+ * frozen head and settled messages pass `true`; the live tail passes `false`
+ * so an in-flight paragraph keeps its literal `$...$` source until it is
+ * frozen — exactly the M32 split.
  */
-function decorateMarkdown(root: HTMLElement | null) {
+function decorateMarkdown(root: HTMLElement | null, math: boolean) {
   if (!root) return;
 
   root.querySelectorAll('pre').forEach((pre) => {
@@ -981,6 +990,11 @@ function decorateMarkdown(root: HTMLElement | null) {
     box.appendChild(bar);
     box.appendChild(scroll);
   });
+
+  // Last: hydration rewrites the placeholder into KaTeX markup and may be
+  // async (the chunk is fetched on first use), so it must not run while the
+  // code/table decoration is still walking the same tree.
+  if (math) hydrateMath(root);
 }
 
 /**
@@ -1008,15 +1022,29 @@ function Markdown({ text, streaming }: { text: string; streaming?: boolean }) {
   // completes, so finished code blocks are highlighted once per block rather
   // than once per delta.
   useLayoutEffect(() => {
-    decorateMarkdown(headRef.current);
+    decorateMarkdown(headRef.current, true);
   }, [parts.head]);
   useLayoutEffect(() => {
-    decorateMarkdown(tailRef.current);
+    decorateMarkdown(tailRef.current, false);
   }, [parts.tail]);
 
   const onContainerClick = (event: ReactMouseEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement | null;
     if (!target) return;
+
+    // M36 bonus: a click (a tap on mobile) on a rendered formula copies its
+    // LaTeX source. Long-press is left to the platform text-selection menu.
+    const mathEl = target.closest('.math');
+    if (mathEl instanceof HTMLElement) {
+      const tex = mathEl.dataset.tex || '';
+      if (!tex) return;
+      void copyText(tex).then((ok) => {
+        if (!ok) return;
+        mathEl.classList.add('math-copied');
+        window.setTimeout(() => mathEl.classList.remove('math-copied'), 1200);
+      });
+      return;
+    }
 
     const preBtn = target.closest('.pre-copy');
     if (preBtn instanceof HTMLElement) {

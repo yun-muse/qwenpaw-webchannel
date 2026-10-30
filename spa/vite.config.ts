@@ -78,12 +78,33 @@ function serviceWorkerBuildPlugin(): Plugin {
   };
 }
 
+/**
+ * M36: KaTeX ships every one of its 20 font families as woff2 + woff + ttf.
+ * The extra formats triple the emitted font payload (~1.05 MiB instead of
+ * ~250 KiB) for browsers that all understand woff2. Rewriting the `src:`
+ * declaration before Vite's URL pipeline means only woff2 is emitted and
+ * hashed; the fonts still ship from our own origin.
+ */
+function katexWoff2OnlyPlugin(): Plugin {
+  return {
+    name: 'webchannel-katex-woff2-only',
+    enforce: 'pre',
+    transform(code, id) {
+      if (!id.includes('katex') || !id.endsWith('.css')) return undefined;
+      return code.replace(
+        /src:url\(([^)]+\.woff2)\) format\("woff2"\),url\([^)]+\.woff\) format\("woff"\),url\([^)]+\.ttf\) format\("truetype"\)/g,
+        'src:url($1) format("woff2")',
+      );
+    },
+  };
+}
+
 export default defineConfig({
   define: {
     __BUILD_ID__: JSON.stringify(buildInfo.build),
     __BUILD_GIT__: JSON.stringify(buildInfo.git),
     __BUILD_TIME__: JSON.stringify(buildInfo.time),
   },
-  plugins: [react(), versionJsonPlugin(), serviceWorkerBuildPlugin()],
+  plugins: [react(), versionJsonPlugin(), serviceWorkerBuildPlugin(), katexWoff2OnlyPlugin()],
   server: { port: 5173 },
 });

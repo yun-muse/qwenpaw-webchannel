@@ -12,7 +12,9 @@
  * the M27 pack (a thinking level chosen before the chat's ChatSpec exists:
  * silent 404, applied after the first turn, while a real 422 stays visible),
  * and the M34 pack (备份全部会话: one .zip, every .md byte-identical to the
- * single-chat export, index.md/backup.json, failure and cancel paths).
+ * single-chat export, index.md/backup.json, failure and cancel paths), and the
+ * M36 pack (LaTeX: lazy KaTeX chunk, frozen-block math during a stream,
+ * code/currency exemptions, and the 390px wide-formula scroller).
  * Runs entirely local against a production build:
  *
  *   1. `npm run build` in spa/ (fails the run if the build fails)
@@ -38,6 +40,7 @@
  *   M26_ONLY=1         run only the M26 menu checks + evidence (fast loop)
  *   M27_ONLY=1         run only the M27 effort checks (fast before/after loop)
  *   M34_ONLY=1         run only the M34 backup checks (fast loop)
+ *   M36_ONLY=1         run only the M36 math checks (fast loop)
  *
  * M26 evidence (BEFORE vs AFTER) is the same structure-agnostic block, so the
  * BEFORE shots come from the unmodified build:
@@ -162,6 +165,50 @@ const BETA_HISTORY = Array.from({ length: 24 }, (_, i) => ({
       ? ANCHOR_MESSAGE
       : `历史消息 ${i + 1}：这是一段用来把列表撑高的说明文字，滚动定位测试需要足够的纵向空间，所以每条都写上两行左右的内容。`,
 }));
+
+/**
+ * M36: a chat whose history exercises every math path at once — inline math,
+ * a display block, a deliberately wide formula (390px scroll check), currency
+ * that must stay literal, and `$x$` inside both code forms.
+ */
+const M36_WIDE_FORMULA =
+  '\\displaystyle \\sum_{k=1}^{n} \\frac{k^4 + 3k^3 + 7k^2 + 11k + 13}' +
+  '{k^5 + 5k^4 + 9k^3 + 13k^2 + 17k + 19} + ' +
+  '\\int_{-\\infty}^{+\\infty} e^{-x^2}\\,dx + ' +
+  '\\prod_{j=1}^{m} \\left(1 + \\frac{1}{j^2}\\right) = \\sqrt{\\frac{\\pi^3}{2}}';
+const M36_HISTORY = [
+  { role: 'user', text: '解释一下质能方程和勾股定理' },
+  {
+    role: 'assistant',
+    text: [
+      '质能方程 $E = mc^2$ 是相对论的核心，勾股定理 $a^2 + b^2 = c^2$ 同样经典。',
+      '',
+      '价格写作 $5 和 $10 时不应被当成公式。',
+      '',
+      '$$\n\\int_0^1 x^2 \\, dx = \\frac{1}{3}\n$$',
+      '',
+      `$$\n${M36_WIDE_FORMULA}\n$$`,
+      '',
+      '行内代码 `$x$` 必须原样保留：',
+      '',
+      '```js',
+      'const tex = "$x$";',
+      '```',
+    ].join('\n'),
+  },
+];
+/** M36 streaming fixture: one inline + one display formula, then more prose. */
+const M36_STREAM_TEXT = [
+  '先看行内公式 $E=mc^2$，它在段落结束前应保持原文。',
+  '',
+  '块级公式即将出现：',
+  '',
+  '$$\n\\sum_{k=1}^{n} k = \\frac{n(n+1)}{2}\n$$',
+  '',
+  '公式之后还有一段很长的说明文字，用来把上面的块推进冻结区，让断言有足够的时间观察“冻结块已渲染、活尾巴仍是原文”的同时状态，而不是在流结束之后才看到结果。',
+  '',
+  '结束。',
+].join('\n');
 
 /** M23: a hit whose chat is not in localStorage/chats (仅归档 behaviour). */
 const ARCHIVED_HIT_TEXT = `只存在于归档的旧项目记录，关键词：归档专属，原会话已经不在服务器列表中。`;
@@ -381,14 +428,14 @@ const agentSend = (frame) => {
   if (agent && agent.readyState === 1) agent.send(JSON.stringify(frame));
 };
 
-function streamReply(chat) {
+function streamText(chat, text, { chunkSize = 10, delay = 45 } = {}) {
   const previous = state.streaming.get(chat);
   if (previous) clearInterval(previous);
   // ~10 chars per frame: the SPA re-renders often enough to catch duplicates,
   // and the whole reply lasts ~4 s so a scroll-up happens mid-stream.
   const chunks = [];
-  for (let at = 0; at < STREAM_TEXT.length; at += 10) {
-    chunks.push(STREAM_TEXT.slice(at, at + 10));
+  for (let at = 0; at < text.length; at += chunkSize) {
+    chunks.push(text.slice(at, at + chunkSize));
   }
   agentSend({ t: 'start', chat, seq: seq++ });
   let index = 0;
@@ -406,13 +453,22 @@ function streamReply(chat) {
     clearInterval(timer);
     state.streaming.delete(chat);
     agentSend({ t: 'end', chat, seq: seq++ });
-    agentSend({ t: 'msg', chat, seq: seq++, parts: [{ type: 'text', text: STREAM_TEXT }] });
+    agentSend({ t: 'msg', chat, seq: seq++, parts: [{ type: 'text', text }] });
     if (state.recordSends) {
       const list = state.history[chat] || (state.history[chat] = []);
-      list.push({ role: 'assistant', text: STREAM_TEXT });
+      list.push({ role: 'assistant', text });
     }
-  }, 45);
+  }, delay);
   state.streaming.set(chat, timer);
+}
+
+function streamReply(chat) {
+  streamText(chat, STREAM_TEXT);
+}
+
+/** M36: a slower stream so the frozen-head / live-tail window is observable. */
+function streamMathReply(chat) {
+  streamText(chat, M36_STREAM_TEXT, { chunkSize: 8, delay: 90 });
 }
 
 function handleAgentFrame(frame) {
@@ -570,7 +626,11 @@ function handleAgentFrame(frame) {
         const list = state.history[chat] || (state.history[chat] = []);
         list.push({ role: 'user', text: String(frame.text || ''), files });
       }
-      streamReply(chat);
+      if (String(frame.text || '').includes('M36 流式公式')) {
+        streamMathReply(chat);
+      } else {
+        streamReply(chat);
+      }
       break;
     }
     case 'att_get': {
@@ -3566,6 +3626,290 @@ async function runM31Checks(page, pass, mobile) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// M36 — LaTeX: lazy chunk, frozen-block rendering, code/currency exemptions
+// ---------------------------------------------------------------------------
+
+async function runM36Checks(page, pass, mobile) {
+  resetState();
+  state.chats = [
+    { chat: 'chat-alpha', title: 'Alpha 会话', updated_at: '2026-10-28T09:00:00Z' },
+    { chat: 'chat-math', title: 'Math 会话', updated_at: '2026-10-29T09:00:00Z' },
+  ];
+  state.history['chat-math'] = M36_HISTORY.map((message) => ({ ...message }));
+
+  await page.evaluate(() => {
+    localStorage.setItem('webchannel.chats', JSON.stringify(['chat-alpha', 'chat-math']));
+    localStorage.setItem('webchannel.activeChat', 'chat-alpha');
+    localStorage.setItem('webchannel.chatNames', '{}');
+    localStorage.setItem('webchannel.pinnedChats', '[]');
+    localStorage.removeItem('webchannel.chatTags');
+    localStorage.removeItem('webchannel.search');
+    localStorage.setItem('webchannel.theme', 'dark');
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await waitForHistory(page);
+  await sleep(400);
+
+  // ---- M36.1: nothing math-related is fetched for a math-free chat -------
+  const beforeResources = await page.evaluate(() =>
+    performance
+      .getEntriesByType('resource')
+      .map((entry) => entry.name)
+      .filter((name) => /katex/i.test(name)),
+  );
+  check(
+    `${pass}: KaTeX is not fetched for a math-free chat`,
+    beforeResources.length === 0,
+    JSON.stringify(beforeResources),
+  );
+
+  if (mobile && !(await page.locator('.app.sidebar-open').count())) {
+    await page.locator('.hamburger').click();
+    await sleep(400);
+  }
+  await page.locator('.chat-item', { hasText: 'Math 会话' }).click();
+  await sleep(400);
+  if (mobile && (await page.locator('.app.sidebar-open').count())) {
+    await page.locator('.sidebar-close').click();
+    await sleep(350);
+  }
+  const mathLoaded = await waitUntil(
+    () =>
+      page.evaluate(
+        () => document.querySelectorAll('.messages .row.assistant .md .katex').length >= 4,
+      ),
+    15000,
+  );
+  check(`${pass}: opening a math chat lazy-loads and renders KaTeX`, mathLoaded);
+
+  // ---- M36.2: history projection ----------------------------------------
+  const view = await page.evaluate(async () => {
+    await document.fonts.ready;
+    const md = [...document.querySelectorAll('.messages .row.assistant .md')].pop();
+    if (!md) return null;
+    const text = md.textContent || '';
+    const resources = performance
+      .getEntriesByType('resource')
+      .map((entry) => entry.name);
+    return {
+      spans: md.querySelectorAll('.math').length,
+      inlineSpans: md.querySelectorAll('.math-inline').length,
+      blockSpans: md.querySelectorAll('.math-block').length,
+      katex: md.querySelectorAll('.katex').length,
+      done: md.querySelectorAll('.math[data-math-state="done"]').length,
+      pending: md.querySelectorAll('.math[data-math-state="pending"]').length,
+      rawDollars: text.includes('$$'),
+      currency: text.includes('$5 和 $10'),
+      inlineCode: [...md.querySelectorAll('p code, li code')].some(
+        (el) => (el.textContent || '') === '$x$',
+      ),
+      fencedCode: [...md.querySelectorAll('pre code')].some(
+        (el) => (el.textContent || '').includes('$x$'),
+      ),
+      mathColor: md.querySelector('.katex')
+        ? getComputedStyle(md.querySelector('.katex')).color
+        : '',
+      textColor: getComputedStyle(md).color,
+      fontMain: document.fonts.check('16px KaTeX_Main'),
+      js: resources.filter((name) => /\/assets\/katex-.*\.js$/.test(name)).length,
+      css: resources.filter((name) => /\/assets\/katex-.*\.css$/.test(name)).length,
+      fonts: resources.filter((name) => /\/assets\/KaTeX_.*\.woff2$/.test(name)).length,
+      others: resources.filter((name) => /katex/i.test(name) && !/\/assets\//.test(name)),
+    };
+  });
+  check(
+    `${pass}: history renders 2 inline + 2 display formulas`,
+    Boolean(view) &&
+      view.spans === 4 &&
+      view.inlineSpans === 2 &&
+      view.blockSpans === 2 &&
+      view.katex === 4 &&
+      view.done === 4 &&
+      view.pending === 0,
+    JSON.stringify(view),
+  );
+  check(
+    `${pass}: no raw $$ survives and currency text stays literal`,
+    Boolean(view) && view.rawDollars === false && view.currency === true,
+    JSON.stringify(view && { raw: view.rawDollars, currency: view.currency }),
+  );
+  check(
+    `${pass}: $x$ inside inline code and a fenced block stays literal`,
+    Boolean(view) && view.inlineCode && view.fencedCode,
+    JSON.stringify(view && { inline: view.inlineCode, fenced: view.fencedCode }),
+  );
+  check(
+    `${pass}: math inherits the message color in dark mode`,
+    Boolean(view) && view.mathColor !== '' && view.mathColor === view.textColor,
+    JSON.stringify(view && { math: view.mathColor, text: view.textColor }),
+  );
+  check(
+    `${pass}: KaTeX chunk, CSS and a self-hosted font were fetched on demand`,
+    Boolean(view) && view.js >= 1 && view.css >= 1 && view.fonts >= 1 && view.fontMain,
+    JSON.stringify(view && { js: view.js, css: view.css, fonts: view.fonts, font: view.fontMain }),
+  );
+
+  // ---- M36.3: light theme is readable too -------------------------------
+  const themes = await page.evaluate(async () => {
+    const root = document.documentElement;
+    const previous = root.dataset.theme;
+    const out = {};
+    for (const mode of ['dark', 'light']) {
+      root.dataset.theme = mode;
+      await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+      const md = [...document.querySelectorAll('.messages .row.assistant .md')].pop();
+      out[mode] = {
+        math: md ? getComputedStyle(md.querySelector('.katex')).color : '',
+        text: md ? getComputedStyle(md).color : '',
+      };
+    }
+    if (previous) root.dataset.theme = previous;
+    return out;
+  });
+  check(
+    `${pass}: math inherits the message color in both themes`,
+    themes.dark.math === themes.dark.text &&
+      themes.light.math === themes.light.text &&
+      themes.dark.text !== themes.light.text,
+    JSON.stringify(themes),
+  );
+
+  // ---- M36.4: a wide formula scrolls inside its block at 390px ----------
+  const layout = await page.evaluate(() => {
+    const blocks = [...document.querySelectorAll('.messages .math-block')];
+    const block = blocks.find((el) => el.scrollWidth > el.clientWidth + 20) || blocks[0];
+    if (!block) return null;
+    const rect = block.getBoundingClientRect();
+    return {
+      docWidth: document.documentElement.scrollWidth,
+      innerWidth,
+      client: block.clientWidth,
+      scroll: block.scrollWidth,
+      left: Math.round(rect.left),
+      right: Math.round(rect.right),
+    };
+  });
+  check(
+    `${pass}: a wide formula never widens the page`,
+    Boolean(layout) &&
+      layout.docWidth <= layout.innerWidth + 1 &&
+      layout.left >= 0 &&
+      layout.right <= layout.innerWidth + 1,
+    JSON.stringify(layout),
+  );
+  if (mobile) {
+    check(
+      `${pass}: the wide formula has its own horizontal scroller at 390px`,
+      Boolean(layout) && layout.scroll > layout.client,
+      JSON.stringify(layout),
+    );
+  }
+
+  // ---- M36.5: click-to-copy LaTeX (bonus) -------------------------------
+  let copied = '';
+  try {
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    const tex = await page.evaluate(
+      () => (document.querySelector('.messages .math') || {}).dataset?.tex || '',
+    );
+    await page.locator('.messages .math').first().click();
+    copied = await page.evaluate(() => navigator.clipboard.readText());
+    check(
+      `${pass}: clicking a formula copies its LaTeX source`,
+      Boolean(tex) && copied === tex,
+      JSON.stringify({ copied, tex }),
+    );
+  } catch (error) {
+    check(`${pass}: clicking a formula copies its LaTeX source`, false, String(error));
+  }
+
+  // ---- M36.6: streaming — tail plain, frozen blocks settle --------------
+  await page.locator('.composer textarea').fill('M36 流式公式');
+  await page.locator('.composer .send').click();
+  const streamStarted = await waitUntil(
+    () => page.evaluate(() => Boolean(document.querySelector('.caret'))),
+    6000,
+  );
+
+  // One polling loop rather than two sequential waits: the window where the
+  // display block is frozen AND the tail is still arriving is short, so both
+  // observations must be sampled together.
+  let tailPlainSeen = false;
+  let frozenSeen = false;
+  let lastSnap = null;
+  const deadline = Date.now() + 18000;
+  while (streamStarted && Date.now() < deadline) {
+    lastSnap = await page.evaluate(() => {
+      const rows = [...document.querySelectorAll('.messages .row')];
+      const last = rows[rows.length - 1];
+      const head = last ? last.querySelector('.md-head') : null;
+      const tail = last ? last.querySelector('.md-tail') : null;
+      const tailText = tail ? tail.textContent || '' : '';
+      return {
+        caret: Boolean(document.querySelector('.caret')),
+        tailText: tailText.slice(0, 40),
+        tailKatex: tail ? tail.querySelectorAll('.katex').length : 0,
+        headKatex: head ? head.querySelectorAll('.math[data-math-state="done"] .katex').length : 0,
+        tailPlain:
+          Boolean(tail) &&
+          tailText.includes('$E=mc^2$') &&
+          tail.querySelectorAll('.katex').length === 0,
+        frozen: Boolean(
+          document.querySelector('.caret') &&
+            head &&
+            head.querySelector('.math-block[data-math-state="done"] .katex') &&
+            head.querySelector('.math-inline[data-math-state="done"] .katex'),
+        ),
+      };
+    });
+    if (lastSnap.tailPlain) tailPlainSeen = true;
+    if (lastSnap.frozen) {
+      frozenSeen = true;
+      break;
+    }
+    if (!lastSnap.caret) break;
+    await sleep(50);
+  }
+  check(
+    `${pass}: the math reply turns on the streaming caret`,
+    streamStarted,
+    JSON.stringify(lastSnap),
+  );
+  check(
+    `${pass}: the live tail keeps literal $...$ while it streams`,
+    tailPlainSeen,
+    JSON.stringify(lastSnap),
+  );
+  check(
+    `${pass}: completed blocks render math while the reply still streams`,
+    frozenSeen,
+    JSON.stringify(lastSnap),
+  );
+
+  await waitUntil(() => !state.streaming.has('chat-math'), 20000);
+  const settled = await waitUntil(
+    () =>
+      page.evaluate(() => {
+        const rows = [...document.querySelectorAll('.messages .row')];
+        const last = rows[rows.length - 1];
+        if (!last || document.querySelector('.caret')) return false;
+        const md = last.querySelector('.md');
+        if (!md) return false;
+        const text = md.textContent || '';
+        return (
+          md.querySelectorAll('.katex').length === 2 &&
+          md.querySelectorAll('.math[data-math-state="pending"]').length === 0 &&
+          !text.includes('$$')
+        );
+      }),
+    15000,
+  );
+  check(`${pass}: the settled reply shows both formulas and no raw delimiters`, settled);
+
+  await page.screenshot({ path: shot(pass, 'math-history'), fullPage: false });
+}
+
 async function runPass(browser, pass, viewport, mobile) {
   resetState();
   const contextOptions = mobile
@@ -3618,6 +3962,12 @@ async function runPass(browser, pass, viewport, mobile) {
 
     if (process.env.M34_ONLY === '1') {
       await runM34Checks(page, pass, mobile);
+      check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
+      return;
+    }
+
+    if (process.env.M36_ONLY === '1') {
+      await runM36Checks(page, pass, mobile);
       check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
       return;
     }
@@ -4106,6 +4456,9 @@ async function runPass(browser, pass, viewport, mobile) {
 
     // ---- 14. M31: attachments survive a history refresh -------------------
     await runM31Checks(page, pass, mobile);
+
+    // ---- 15. M36: LaTeX math (lazy, frozen blocks, code/currency) --------
+    await runM36Checks(page, pass, mobile);
 
     check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
   } finally {

@@ -1574,6 +1574,61 @@ button:disabled {
   display: contents;
 }
 
+/* ---------- M36 math ----------
+   KaTeX inherits the message color, so both themes are readable without a
+   second stylesheet. Display formulas own a horizontal scroller: at 390px a
+   wide \int or matrix scrolls inside the bubble instead of widening the page.
+   The placeholder styling covers the moment between HTML injection and the
+   lazy KaTeX chunk arriving (and is the permanent fallback if it never does). */
+.math {
+  color: inherit;
+}
+
+.math-block {
+  display: block;
+  max-width: 100%;
+  padding: 2px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.math-block .katex-display {
+  margin: 0.35em 0;
+}
+
+.math-inline {
+  display: inline-block;
+  max-width: 100%;
+  padding: 1px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  vertical-align: middle;
+}
+
+.math .katex {
+  color: inherit;
+}
+
+.math[data-math-state='pending'],
+.math[data-math-state='failed'] {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* Click-to-copy feedback. An outline (not a ::after chip) because the display
+   block is itself an overflow container and would clip anything drawn above
+   it. */
+.math-copied {
+  outline: 2px solid var(--ok);
+  outline-offset: 3px;
+  border-radius: 3px;
+  background: rgba(16, 185, 129, 0.1);
+}
+
 .md > :first-child,
 .md-head > :first-child,
 .md-tail.md-first > :first-child {
