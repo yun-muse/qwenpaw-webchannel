@@ -10,7 +10,9 @@
  * failure accounting, cancel), the M26 pack (compact sidebar rows, the
  * per-row ⋯ menu on phone + desktop, and BEFORE/AFTER drawer evidence), and
  * the M27 pack (a thinking level chosen before the chat's ChatSpec exists:
- * silent 404, applied after the first turn, while a real 422 stays visible).
+ * silent 404, applied after the first turn, while a real 422 stays visible),
+ * and the M34 pack (备份全部会话: one .zip, every .md byte-identical to the
+ * single-chat export, index.md/backup.json, failure and cancel paths).
  * Runs entirely local against a production build:
  *
  *   1. `npm run build` in spa/ (fails the run if the build fails)
@@ -35,6 +37,7 @@
  *   OUT_DIR            screenshot directory; default ./m19-shots
  *   M26_ONLY=1         run only the M26 menu checks + evidence (fast loop)
  *   M27_ONLY=1         run only the M27 effort checks (fast before/after loop)
+ *   M34_ONLY=1         run only the M34 backup checks (fast loop)
  *
  * M26 evidence (BEFORE vs AFTER) is the same structure-agnostic block, so the
  * BEFORE shots come from the unmodified build:
@@ -52,10 +55,10 @@
  */
 
 import { chromium, devices } from 'playwright';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -332,10 +335,21 @@ function resetState() {
   state.streaming.clear();
 }
 
-/** M25: a deterministic Markdown document per chat (what the plugin exports). */
+/**
+ * M25: a deterministic Markdown document per chat (what the plugin exports).
+ * M34: it carries the M20 header lines the backup reads back — `消息条数`
+ * comes from the chat's mock history, exactly like the plugin's own count.
+ */
 function exportDocFor(chat) {
   const title = (state.chats.find((item) => item.chat === chat) || {}).title || chat;
-  return `# ${title}\n\n> mock export for ${chat}\n\n## 对话\n\n用户：你好\n\n助手：这是 ${chat} 的导出内容。\n`;
+  const messages = (state.history[chat] || []).length;
+  return (
+    `# ${title}\n\n` +
+    '- 导出时间：2026-10-30 09:00:00\n' +
+    `- 消息条数：${messages}\n` +
+    '- 导出口径：mock 当前历史\n\n' +
+    `## 对话\n\n用户：你好\n\n助手：这是 ${chat} 的导出内容。\n`
+  );
 }
 
 let agent = null;
@@ -2233,6 +2247,340 @@ async function runM25Checks(page, pass, mobile) {
 }
 
 // ---------------------------------------------------------------------------
+// M34 — one-file backup (备份全部会话)
+// ---------------------------------------------------------------------------
+
+/**
+ * Independent store-only ZIP reader: EOCD → central directory → local header
+ * → payload, with its own table CRC. It shares nothing with
+ * `spa/src/lib/zip.ts`, so a writer bug cannot hide behind the same code.
+ */
+function unzipStore(buffer) {
+  let end = -1;
+  for (let at = buffer.length - 22; at >= 0; at -= 1) {
+    if (buffer.readUInt32LE(at) === 0x06054b50) {
+      end = at;
+      break;
+    }
+  }
+  if (end < 0) throw new Error('no end-of-central-directory record');
+  const count = buffer.readUInt16LE(end + 10);
+  const directorySize = buffer.readUInt32LE(end + 12);
+  const directoryOffset = buffer.readUInt32LE(end + 16);
+  if (end !== directoryOffset + directorySize) {
+    throw new Error('central directory does not end at the EOCD');
+  }
+
+  const entries = new Map();
+  let at = directoryOffset;
+  for (let i = 0; i < count; i += 1) {
+    if (buffer.readUInt32LE(at) !== 0x02014b50) throw new Error(`entry ${i}: bad central header`);
+    const method = buffer.readUInt16LE(at + 10);
+    const crc = buffer.readUInt32LE(at + 16);
+    const size = buffer.readUInt32LE(at + 24);
+    const nameLength = buffer.readUInt16LE(at + 28);
+    const extraLength = buffer.readUInt16LE(at + 30);
+    const commentLength = buffer.readUInt16LE(at + 32);
+    const localOffset = buffer.readUInt32LE(at + 42);
+    const name = buffer.subarray(at + 46, at + 46 + nameLength).toString('utf8');
+    if (method !== 0) throw new Error(`${name}: method ${method} is not store`);
+    if (buffer.readUInt32LE(localOffset) !== 0x04034b50) {
+      throw new Error(`${name}: bad local header`);
+    }
+    const localNameLength = buffer.readUInt16LE(localOffset + 26);
+    const localExtraLength = buffer.readUInt16LE(localOffset + 28);
+    const start = localOffset + 30 + localNameLength + localExtraLength;
+    const data = buffer.subarray(start, start + size);
+    if (crc32Chunk(data) !== crc) throw new Error(`${name}: payload does not match its CRC`);
+    entries.set(name, Buffer.from(data));
+    at += 46 + nameLength + extraLength + commentLength;
+  }
+  return entries;
+}
+
+let crcTable = null;
+function crc32Chunk(data) {
+  if (!crcTable) {
+    crcTable = new Uint32Array(256);
+    for (let i = 0; i < 256; i += 1) {
+      let value = i;
+      for (let bit = 0; bit < 8; bit += 1) {
+        value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+      }
+      crcTable[i] = value >>> 0;
+    }
+  }
+  let crc = 0xffffffff;
+  for (const byte of data) crc = (crc >>> 8) ^ crcTable[(crc ^ byte) & 0xff];
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+/** Export one chat through the UI and return the downloaded file's bytes. */
+async function singleChatExport(page, mobile, chat) {
+  await openChat(page, mobile, chat);
+  const event = page.waitForEvent('download', { timeout: 10000 });
+  if (mobile) {
+    await page.locator('.top-more-btn').click();
+    await sleep(150);
+    await page.locator('.top-menu button', { hasText: '导出 Markdown' }).click();
+  } else {
+    await page.locator('.top-secondary .icon-btn[aria-label="导出当前会话"]').click();
+  }
+  const download = await event;
+  const path = await download.path();
+  if (!path) throw new Error(`no download path for ${chat}`);
+  return { name: download.suggestedFilename(), bytes: readFileSync(path) };
+}
+
+async function runM34Checks(page, pass, mobile) {
+  state.exportFail = [];
+  state.exportDelay = 120;
+
+  if (mobile && !(await page.locator('.app.sidebar-open').count())) {
+    await page.locator('.hamburger').click();
+    await sleep(350);
+  }
+  // M23.5 leaves 归档专属 in the search box, so the sidebar renders no rows.
+  // Clear the query (and any tag filter) to get the two fixture chats back
+  // before the single-chat baselines are taken.
+  await page.locator('.chat-search').fill('');
+  const allTags = page.locator('.tag-filter').first();
+  if (await allTags.count()) await allTags.click();
+  await sleep(250);
+
+  // ---- 1. the action is separate from 导出全部 and states its output -----
+  const button = ((await page.locator('.backup-open').textContent()) || '').trim();
+  const buttonLabel = await page.locator('.backup-open').getAttribute('aria-label');
+  check(
+    `${pass}: 备份全部会话 is a separate action beside 导出全部 and says .zip`,
+    button.includes('备份全部') &&
+      button.includes('.zip') &&
+      String(buttonLabel).includes('备份全部会话'),
+    `${button} / ${buttonLabel}`,
+  );
+
+  // ---- 2. baseline: the same chat through the single-chat export ---------
+  const alphaSingle = await singleChatExport(page, mobile, 'chat-alpha');
+  const betaSingle = await singleChatExport(page, mobile, 'chat-beta');
+  check(
+    `${pass}: the single-chat baseline exported both chats`,
+    alphaSingle.bytes.length > 0 && betaSingle.bytes.length > 0,
+    `${alphaSingle.name} ${alphaSingle.bytes.length} · ${betaSingle.name} ${betaSingle.bytes.length}`,
+  );
+
+  // ---- 3. full backup: one download, one archive -------------------------
+  const downloads = [];
+  page.on('download', (download) => downloads.push(download));
+  if (mobile && !(await page.locator('.app.sidebar-open').count())) {
+    await page.locator('.hamburger').click();
+    await sleep(350);
+  }
+  await page.locator('.backup-open').click();
+  let toast = await waitToast(page, '备份完成', 15000);
+  await waitUntil(() => downloads.length === 1);
+  check(
+    `${pass}: a full backup downloads exactly one file`,
+    downloads.length === 1,
+    JSON.stringify(downloads.map((d) => d.suggestedFilename())),
+  );
+  const zipName = downloads[0].suggestedFilename();
+  check(
+    `${pass}: the archive is webchannel-backup-YYYYMMDD-HHmm.zip`,
+    /^webchannel-backup-\d{8}-\d{4}\.zip$/.test(zipName),
+    zipName,
+  );
+  const zipPath = await downloads[0].path();
+  const zipBytes = readFileSync(zipPath);
+  const entries = unzipStore(zipBytes);
+  check(
+    `${pass}: the archive holds every chat plus index.md and backup.json`,
+    entries.size === 4 && entries.has('index.md') && entries.has('backup.json'),
+    JSON.stringify([...entries.keys()]),
+  );
+
+  const alphaEntry = [...entries.keys()].find(
+    (name) => name.startsWith('Alpha 会话-') && name.endsWith('.md'),
+  );
+  const betaEntry = [...entries.keys()].find(
+    (name) => name.startsWith('Beta 会话-') && name.endsWith('.md'),
+  );
+  check(
+    `${pass}: the archive reuses the single-export file names`,
+    alphaEntry === alphaSingle.name && betaEntry === betaSingle.name,
+    JSON.stringify({ alphaEntry, betaEntry, single: [alphaSingle.name, betaSingle.name] }),
+  );
+  check(
+    `${pass}: every .md is byte-identical to its single-chat export`,
+    Boolean(alphaEntry && betaEntry) &&
+      entries.get(alphaEntry).equals(alphaSingle.bytes) &&
+      entries.get(betaEntry).equals(betaSingle.bytes),
+    `${entries.get(alphaEntry)?.length} / ${alphaSingle.bytes.length}`,
+  );
+
+  const index = entries.get('index.md').toString('utf8');
+  check(
+    `${pass}: index.md states the time, both chats and their counts`,
+    index.includes('# WebChannel 会话备份') &&
+      index.includes('- 备份时间：') &&
+      index.includes('| 1 | Alpha 会话 |') &&
+      index.includes('| 2 | Beta 会话 |') &&
+      index.includes('成功 2'),
+    index.slice(0, 400),
+  );
+  check(
+    `${pass}: index.md links each in-archive file`,
+    Boolean(alphaEntry && betaEntry) &&
+      index.includes(`(<${alphaEntry}>)`) &&
+      index.includes(`(<${betaEntry}>)`),
+    index.split('\n').filter((line) => line.startsWith('|')).join(' | '),
+  );
+
+  const manifest = JSON.parse(entries.get('backup.json').toString('utf8'));
+  check(
+    `${pass}: backup.json is a machine-readable manifest`,
+    manifest.generator === 'qwenpaw-webchannel' &&
+      manifest.format === 1 &&
+      /^\d{4}-\d{2}-\d{2}T/.test(manifest.generated_at) &&
+      typeof manifest.build_id === 'string' &&
+      manifest.build_id.length > 0 &&
+      manifest.limit === 100 &&
+      manifest.chats.length === 2 &&
+      manifest.chats.every(
+        (chat) => chat.status === 'ok' && chat.filename && typeof chat.messages === 'number',
+      ),
+    JSON.stringify(manifest).slice(0, 400),
+  );
+  check(
+    `${pass}: backup.json repeats the header message counts`,
+    manifest.chats[0]?.messages === state.history['chat-alpha'].length &&
+      manifest.chats[1]?.messages === state.history['chat-beta'].length,
+    JSON.stringify(manifest.chats.map((chat) => chat.messages)),
+  );
+
+  let pythonNote = 'python3 unavailable';
+  let pythonNames = '';
+  try {
+    const out = execFileSync(
+      'python3',
+      [
+        '-c',
+        'import sys, zipfile\n' +
+          'z = zipfile.ZipFile(sys.argv[1])\n' +
+          'assert z.testzip() is None\n' +
+          'print("\\n".join(sorted(z.namelist())))',
+        zipPath,
+      ],
+      { encoding: 'utf8' },
+    );
+    pythonNames = out.trim().split('\n').sort().join('|');
+    pythonNote = 'ok';
+  } catch (err) {
+    pythonNote = String((err && err.stderr) || (err && err.message) || err)
+      .trim()
+      .slice(0, 200);
+  }
+  check(
+    `${pass}: a stock zip tool accepts the archive (python zipfile)`,
+    pythonNote === 'ok' || pythonNote === 'python3 unavailable',
+    pythonNote,
+  );
+  check(
+    `${pass}: python zipfile lists the same entries`,
+    pythonNote !== 'ok' || pythonNames === [...entries.keys()].sort().join('|'),
+    pythonNames,
+  );
+
+  // ---- 4. a failed chat lands in index.md and backup.json ----------------
+  await dismissToast(page);
+  state.exportFail = ['chat-beta'];
+  const beforeFailure = downloads.length;
+  if (mobile && !(await page.locator('.app.sidebar-open').count())) {
+    await page.locator('.hamburger').click();
+    await sleep(350);
+  }
+  await page.locator('.backup-open').click();
+  toast = await waitToast(page, '备份完成', 15000);
+  await waitUntil(() => downloads.length === beforeFailure + 1);
+  check(
+    `${pass}: a partial backup still downloads and names the failure`,
+    toast.text.includes('成功 1') &&
+      toast.text.includes('失败 1') &&
+      toast.text.includes('Beta 会话') &&
+      toast.cls.includes('toast-danger'),
+    toast.text,
+  );
+  let failedEntries = new Map();
+  try {
+    failedEntries = unzipStore(readFileSync(await downloads[beforeFailure].path()));
+  } catch (err) {
+    check(`${pass}: the partial archive parses`, false, String(err && err.message));
+  }
+  const failedIndex = failedEntries.get('index.md')?.toString('utf8') || '';
+  check(
+    `${pass}: index.md lists the failed chat with its reason`,
+    failedIndex.includes('## 失败') &&
+      failedIndex.includes('**Beta 会话**（`chat-beta`）') &&
+      failedIndex.includes('E_EXPORT') &&
+      ![...failedEntries.keys()].some((name) => name.startsWith('Beta 会话-')),
+    failedIndex.slice(failedIndex.indexOf('## 失败')),
+  );
+  const failedManifest = JSON.parse(failedEntries.get('backup.json')?.toString('utf8') || '{}');
+  check(
+    `${pass}: backup.json records the failure without a file name`,
+    failedManifest.failed === 1 &&
+      failedManifest.failures?.[0]?.id === 'chat-beta' &&
+      String(failedManifest.failures?.[0]?.reason || '').includes('E_EXPORT') &&
+      failedManifest.chats?.find((chat) => chat.id === 'chat-beta')?.filename === null,
+    JSON.stringify(failedManifest.failures),
+  );
+
+  // ---- 5. cancel drops the archive and reports what was finished ---------
+  await dismissToast(page);
+  state.exportFail = [];
+  state.exportDelay = 700;
+  const beforeCancel = downloads.length;
+  if (mobile && !(await page.locator('.app.sidebar-open').count())) {
+    await page.locator('.hamburger').click();
+    await sleep(350);
+  }
+  await page.locator('.backup-open').click();
+  await page.waitForFunction(
+    () => {
+      const el = document.querySelector('.backup-panel .bulk-panel-head');
+      return Boolean(el && (el.textContent || '').includes('1/2'));
+    },
+    null,
+    { timeout: 4000 },
+  );
+  const panelHead = ((await page.locator('.backup-panel .bulk-panel-head').textContent()) || '').trim();
+  check(
+    `${pass}: the backup panel shows its own progress`,
+    panelHead.includes('备份中 1/2'),
+    panelHead,
+  );
+  await page.locator('.backup-cancel').click();
+  toast = await waitToast(page, '备份已取消');
+  check(
+    `${pass}: cancel reports completed and remaining counts`,
+    toast.text.includes('已完成 0 个') && toast.text.includes('剩余 2 个未备份'),
+    toast.text,
+  );
+  await sleep(900);
+  check(
+    `${pass}: cancel downloads nothing`,
+    downloads.length === beforeCancel,
+    JSON.stringify(downloads.slice(beforeCancel).map((d) => d.suggestedFilename())),
+  );
+  const panelGone = await page.evaluate(
+    () => document.querySelectorAll('.backup-panel').length,
+  );
+  check(`${pass}: the backup panel closes after a cancel`, panelGone === 0);
+
+  state.exportDelay = 0;
+  state.exportFail = [];
+}
+
+// ---------------------------------------------------------------------------
 // M26 — sidebar redesign: one ⋯ menu per row (tag / pin / rename / delete)
 // ---------------------------------------------------------------------------
 
@@ -3069,6 +3417,12 @@ async function runPass(browser, pass, viewport, mobile) {
       return;
     }
 
+    if (process.env.M34_ONLY === '1') {
+      await runM34Checks(page, pass, mobile);
+      check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
+      return;
+    }
+
     // ---- 1. code-block copy button ---------------------------------------
     const copyInfo = await page.evaluate(() => {
       const pre = document.querySelector('.md pre');
@@ -3538,6 +3892,9 @@ async function runPass(browser, pass, viewport, mobile) {
 
     // ---- 10. M25: bulk export (progress, failures, cancel) ----------------
     await runM25Checks(page, pass, mobile);
+
+    // ---- 10b. M34: one-file backup (zip, index.md, backup.json) -----------
+    await runM34Checks(page, pass, mobile);
 
     // ---- 11. M26: sidebar redesign (⋯ menu flows) -------------------------
     await runM26Checks(page, pass, mobile);

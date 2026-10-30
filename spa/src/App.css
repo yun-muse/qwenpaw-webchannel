@@ -289,7 +289,8 @@ button:disabled {
 /* M26: the three primary actions are slim, flat rows — not blocks. */
 .new-chat,
 .stats-open,
-.bulk-open {
+.bulk-open,
+.backup-open {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -312,14 +313,16 @@ button:disabled {
 
 .new-chat:hover,
 .stats-open:hover,
-.bulk-open:hover {
+.bulk-open:hover,
+.backup-open:hover {
   background: var(--chip-bg);
   color: var(--text);
 }
 
 .new-chat svg,
 .stats-open svg,
-.bulk-open svg {
+.bulk-open svg,
+.backup-open svg {
   flex: 0 0 auto;
   color: var(--muted);
 }
@@ -3325,7 +3328,8 @@ button:disabled {
 
 /* ---------- M25: bulk export (导出全部) ---------- */
 
-.bulk-open:disabled {
+.bulk-open:disabled,
+.backup-open:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
@@ -3334,6 +3338,55 @@ button:disabled {
   margin-left: auto;
   font-size: 10.5px;
   font-weight: 500;
+  color: var(--muted);
+}
+
+/* M34: 导出全部 and 备份全部会话 share one 44 px row — the sidebar's row
+   budget is tight (M26 needs ≥8 rows in a phone drawer). */
+.bulk-row {
+  display: flex;
+  gap: 6px;
+}
+
+.bulk-row .bulk-open,
+.bulk-row .backup-open {
+  width: auto;
+  min-width: 0;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 8px;
+}
+
+/* 导出全部 is sized by its count suffix; the backup takes the rest so its
+   longer label and the .zip tag are never ellipsized on a phone. */
+.bulk-row .bulk-open {
+  flex: 0 1 auto;
+}
+
+.bulk-row .backup-open {
+  flex: 1 1 auto;
+}
+
+.bulk-row .bulk-open > span,
+.bulk-row .backup-open > span {
+  white-space: nowrap;
+}
+
+.bulk-row .bulk-open > span:first-of-type,
+.bulk-row .backup-open > span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The one-word answer to "what is different from 导出全部?" — no extra row. */
+.backup-tag {
+  flex: 0 0 auto;
+  padding: 0 3px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 15px;
   color: var(--muted);
 }
 
@@ -3399,6 +3452,74 @@ button:disabled {
 .bulk-panel-note {
   font-size: 10.5px;
   color: var(--muted);
+}
+
+/* ---------- M34: backup size confirmation (one modal, never a silent run) ---------- */
+
+.backup-confirm-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.36);
+  backdrop-filter: blur(3px);
+}
+
+.backup-confirm {
+  width: min(420px, 100%);
+  padding: 18px 18px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+}
+
+.backup-confirm h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.backup-confirm p {
+  margin: 0 0 14px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.backup-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.backup-confirm-stop,
+.backup-confirm-go {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--card);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.backup-confirm-go {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+@media (max-width: 720px), (pointer: coarse) {
+  .backup-confirm-stop,
+  .backup-confirm-go {
+    min-height: 44px;
+  }
 }
 
 .stats-overlay {
@@ -4013,7 +4134,8 @@ button:disabled {
 
   .new-chat,
   .stats-open,
-  .bulk-open {
+  .bulk-open,
+  .backup-open {
     min-height: 44px;
   }
 
@@ -4396,11 +4518,13 @@ button:disabled {
   }
 
   /* M25: the batch action and its cancel control are thumb-sized too. */
-  .bulk-open {
+  .bulk-open,
+  .backup-open {
     min-height: 44px;
   }
 
-  .bulk-cancel {
+  .bulk-cancel,
+  .backup-cancel {
     min-height: 44px;
     padding: 0 4px;
   }

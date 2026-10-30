@@ -20,6 +20,7 @@ import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import hljs from 'highlight.js/lib/common';
 import {
+  Archive,
   ArrowDown,
   AtSign,
   BarChart3,
@@ -87,6 +88,22 @@ import { draftOf, loadDrafts, saveDrafts, setDraft } from './lib/drafts';
 import type { Drafts } from './lib/drafts';
 import { EXPORT_ERROR_TEXT, base64Of, exportFileName, hexOf, verifyExport } from './lib/export';
 import { bulkSummaryText, planBulk, runBulkExport } from './lib/bulkExport';
+import {
+  BACKUP_INDEX_NAME,
+  BACKUP_MANIFEST_NAME,
+  BackupSizeGuard,
+  backupFileName,
+  backupSummaryText,
+  buildBackupIndex,
+  buildBackupManifest,
+  buildBackupRecords,
+  formatBackupSize,
+  messageCountOf,
+  serializeBackupManifest,
+  uniqueChatFileNames,
+} from './lib/backup';
+import type { BackupProduced } from './lib/backup';
+import { ZipWriter, utf8Encode } from './lib/zip';
 import { AttachmentFetcher, attachmentKindOf, historyFilesOf } from './lib/attachments';
 import type { AttachmentResult, HistoryFile } from './lib/attachments';
 import type { BulkRunResult, BulkTarget } from './lib/bulkExport';
@@ -125,7 +142,7 @@ import {
 } from './prompts';
 import type { SkillItem, StarterPrompt } from './prompts';
 import { notifyAppMounted } from './lib/boot';
-import { BUILD_GIT, formatBuildLabel } from './version';
+import { BUILD_GIT, BUILD_ID, formatBuildLabel } from './version';
 import './App.css';
 
 /** protocol/frames.md §5 — UTF-8 bytes of the serialized JSON. */
@@ -461,6 +478,8 @@ interface ExportJob {
   settled: boolean;
   /** `export_end` arrived; verification is in flight (ignore duplicates). */
   finishing: boolean;
+  /** M34: receive the verified bytes instead of saving a download. */
+  deliver?: (bytes: Uint8Array) => void;
   settle: (outcome: ExportOutcome) => void;
 }
 
@@ -2050,6 +2069,17 @@ export default function App() {
     title: string;
     skipped: number;
   } | null>(null);
+  // M34: 备份全部会话 — one .zip, same targets and cap as M25.
+  const [backupActive, setBackupActive] = useState(false);
+  const [backupPending, setBackupPending] = useState(false);
+  const [backupProgress, setBackupProgress] = useState<{
+    total: number;
+    index: number;
+    title: string;
+    skipped: number;
+  } | null>(null);
+  /** Bytes already archived, shown by the >200 MB confirmation. */
+  const [backupConfirmBytes, setBackupConfirmBytes] = useState<number | null>(null);
 
   // Persona / Prompt Drawer state
   const [promptDrawerOpen, setPromptDrawerOpen] = useState(false);
@@ -2084,6 +2114,10 @@ export default function App() {
   const bulkCancelRef = useRef(false);
   const chatsWaiterRef = useRef<((targets: BulkTarget[]) => void) | null>(null);
   const chatsWaitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // M34: the backup run and its >200 MB confirmation (one resolver at a time).
+  const backupRunningRef = useRef(false);
+  const backupCancelRef = useRef(false);
+  const backupConfirmRef = useRef<((proceed: boolean) => void) | null>(null);
   // M13: the archive search in flight (debounce is local to its effect).
   const searchRef = useRef<SearchJob | null>(null);
   const modelsRequested = useRef(false);
@@ -2351,7 +2385,7 @@ export default function App() {
     settleExport(job, { ok: false, reason: message });
   };
 
-  /** Verify the collected chunks against `export_begin`, then save the Blob. */
+  /** Verify the collected chunks against `export_begin`, then keep or save it. */
   const finishExport = async (job: ExportJob) => {
     const result = await verifyExport(
       job.parts,
@@ -2367,7 +2401,13 @@ export default function App() {
     // A cancel during verification drops the file instead of downloading it.
     if (job.settled) return;
     const filename = exportFileName(job.title, new Date());
-    saveBlob(new Blob([result.buffer], { type: 'text/markdown;charset=utf-8' }), filename);
+    // M34: a backup collects the same verified bytes but does not download
+    // each chat; the single-file archive is the only download it produces.
+    if (job.deliver) {
+      job.deliver(new Uint8Array(result.buffer));
+    } else {
+      saveBlob(new Blob([result.buffer], { type: 'text/markdown;charset=utf-8' }), filename);
+    }
     settleExport(job, { ok: true, filename });
   };
 
@@ -2375,7 +2415,11 @@ export default function App() {
    * Ask the plugin for one chat's Markdown. The caller decides how to report
    * the outcome — a single export toasts it, a batch counts it (M25).
    */
-  const requestExport = (chat: string, title: string): Promise<ExportOutcome> => {
+  const requestExport = (
+    chat: string,
+    title: string,
+    deliver?: (bytes: Uint8Array) => void,
+  ): Promise<ExportOutcome> => {
     const client = clientRef.current;
     if (exportRef.current || !client) {
       return Promise.resolve({ ok: false, reason: '未连接 — 无法导出' });
@@ -2393,6 +2437,7 @@ export default function App() {
         timer: null,
         settled: false,
         finishing: false,
+        deliver,
         settle: resolve,
       };
       exportRef.current = job;
@@ -2464,53 +2509,69 @@ export default function App() {
     showToastBriefly(bulkSummaryText(result), tone);
   };
 
+  /**
+   * The server chat list, asking once when the cache is still empty (M25's
+   * 导出全部 and M34's backup share both the cache and the waiter). `null`
+   * means the list did not arrive or the socket is down.
+   */
+  const requestServerChats = (): Promise<BulkTarget[] | null> => {
+    const cached = serverChatsRef.current;
+    if (cached.length > 0) return Promise.resolve(cached);
+    const client = clientRef.current;
+    if (!client) return Promise.resolve(null);
+    return new Promise<BulkTarget[] | null>((resolve) => {
+      const clearWaiter = () => {
+        chatsWaiterRef.current = null;
+        if (chatsWaitTimerRef.current) {
+          clearTimeout(chatsWaitTimerRef.current);
+          chatsWaitTimerRef.current = null;
+        }
+      };
+      chatsWaiterRef.current = (incoming) => {
+        clearWaiter();
+        resolve(incoming);
+      };
+      chatsWaitTimerRef.current = setTimeout(() => {
+        clearWaiter();
+        resolve(null);
+      }, CHATS_WAIT_MS);
+      if (!client.send({ t: 'chats' })) {
+        clearWaiter();
+        resolve(null);
+      }
+    });
+  };
+
   /** Start 导出全部; without a server list yet, ask once and wait for it. */
-  const startBulkExport = () => {
+  const startBulkExport = async () => {
     if (bulkRunningRef.current || bulkPending) return;
+    if (backupRunningRef.current || backupPending) {
+      showToastBriefly('备份进行中 — 请稍后再导出全部', 'info');
+      return;
+    }
     if (exportRef.current) {
       showToastBriefly('正在导出当前会话 — 请稍后再导出全部', 'info');
       return;
     }
-    const targets = serverChatsRef.current;
-    if (targets.length > 0) {
-      void runBulk(targets);
-      return;
-    }
-    const client = clientRef.current;
-    if (!client) {
-      showToastBriefly('未连接 — 无法导出');
-      return;
-    }
-    setBulkPending(true);
-    showToastBriefly('正在获取服务器会话列表…', 'info');
-    chatsWaiterRef.current = (incoming) => {
-      chatsWaiterRef.current = null;
-      if (chatsWaitTimerRef.current) {
-        clearTimeout(chatsWaitTimerRef.current);
-        chatsWaitTimerRef.current = null;
-      }
-      setBulkPending(false);
-      if (incoming.length === 0) {
-        showToastBriefly('服务器没有可导出的会话', 'info');
+    if (serverChatsRef.current.length === 0) {
+      if (!clientRef.current) {
+        showToastBriefly('未连接 — 无法导出');
         return;
       }
-      void runBulk(incoming);
-    };
-    chatsWaitTimerRef.current = setTimeout(() => {
-      chatsWaiterRef.current = null;
-      chatsWaitTimerRef.current = null;
-      setBulkPending(false);
-      showToastBriefly('获取会话列表超时，请重试', 'info');
-    }, CHATS_WAIT_MS);
-    if (!client.send({ t: 'chats' })) {
-      chatsWaiterRef.current = null;
-      if (chatsWaitTimerRef.current) {
-        clearTimeout(chatsWaitTimerRef.current);
-        chatsWaitTimerRef.current = null;
-      }
-      setBulkPending(false);
-      showToastBriefly('未连接 — 无法导出');
+      setBulkPending(true);
+      showToastBriefly('正在获取服务器会话列表…', 'info');
     }
+    const incoming = await requestServerChats();
+    setBulkPending(false);
+    if (!incoming) {
+      showToastBriefly('获取会话列表超时，请重试', 'info');
+      return;
+    }
+    if (incoming.length === 0) {
+      showToastBriefly('服务器没有可导出的会话', 'info');
+      return;
+    }
+    void runBulk(incoming);
   };
 
   /** Cancel the batch: drop the in-flight file and stop before the next. */
@@ -2520,6 +2581,169 @@ export default function App() {
     const job = exportRef.current;
     if (job) failExport(job, '已取消');
     showToastBriefly('正在取消批量导出…', 'info');
+  };
+
+  // ---- M34: 备份全部会话 — every .md plus index.md / backup.json in one zip ----
+  /** Resolve the >200 MB prompt with the user's answer. */
+  const settleBackupConfirm = (proceed: boolean) => {
+    const resolve = backupConfirmRef.current;
+    backupConfirmRef.current = null;
+    setBackupConfirmBytes(null);
+    resolve?.(proceed);
+  };
+
+  const askBackupContinue = (bytes: number): Promise<boolean> =>
+    new Promise<boolean>((resolve) => {
+      backupConfirmRef.current = resolve;
+      setBackupConfirmBytes(bytes);
+    });
+
+  const runBackup = async (targets: BulkTarget[]) => {
+    if (backupRunningRef.current) return;
+    backupRunningRef.current = true;
+    backupCancelRef.current = false;
+    setBackupActive(true);
+    setBackupProgress(null);
+    const startedAt = new Date();
+    const { planned, skipped } = planBulk(targets);
+    // Names come from the same cleaning rule as a single export, deduped up
+    // front so a chat's name never depends on what the run reaches first.
+    const names = uniqueChatFileNames(planned, startedAt);
+    const zip = new ZipWriter();
+    const produced = new Map<string, BackupProduced>();
+    const guard = new BackupSizeGuard();
+    let stored = 0;
+    let result: BulkRunResult | null = null;
+    try {
+      result = await runBulkExport(
+        planned,
+        async (target) => {
+          // Assigned from inside the export callback; a holder keeps TS from
+          // narrowing it to `null` across the await.
+          const received: { bytes: Uint8Array | null } = { bytes: null };
+          const outcome = await requestExport(target.chat, target.title, (bytes) => {
+            received.bytes = bytes;
+          });
+          if (!outcome.ok) return outcome;
+          const bytes = received.bytes;
+          if (!bytes || bytes.length === 0) {
+            return { ok: false, reason: '导出失败：文档为空' };
+          }
+          const filename = names.get(target.chat);
+          if (!filename) return { ok: false, reason: '备份失败：文件名冲突' };
+          try {
+            // One chat at a time: the writer copies these bytes into a Blob
+            // and the per-chat buffer is released before the next request.
+            zip.add(filename, bytes);
+          } catch (error) {
+            console.error('[backup] 写入压缩包失败', target.chat, error);
+            return { ok: false, reason: '备份失败：无法写入压缩包' };
+          }
+          produced.set(target.chat, {
+            bytes: bytes.length,
+            messages: messageCountOf(bytes),
+          });
+          stored += bytes.length;
+          if (guard.check(stored)) {
+            const proceed = await askBackupContinue(stored);
+            if (!proceed) {
+              backupCancelRef.current = true;
+              return { ok: false, reason: '已取消' };
+            }
+          }
+          return { ok: true };
+        },
+        {
+          shouldCancel: () => backupCancelRef.current,
+          onProgress: (progress) => setBackupProgress({ ...progress, skipped }),
+        },
+      );
+    } catch (error) {
+      console.error('[backup] 备份中断', error);
+      showToastBriefly('备份中断：内部错误');
+    } finally {
+      // A dialog left open by an unmount/cancel must not keep its resolver.
+      settleBackupConfirm(false);
+      backupRunningRef.current = false;
+      backupCancelRef.current = false;
+      setBackupActive(false);
+      setBackupProgress(null);
+    }
+    if (!result) return;
+
+    for (const failure of result.failed) {
+      console.warn(`[backup] 失败 ${failure.title}（${failure.chat}）— ${failure.reason}`);
+    }
+    if (result.skipped > 0) {
+      console.warn(
+        `[backup] 仅备份前 ${planned.length} 个会话（共 ${result.total} 个），其余 ${result.skipped} 个未备份`,
+      );
+    }
+    // A cancelled backup downloads nothing: a partial archive could be
+    // mistaken for a complete one. The toast states what was finished.
+    if (!result.cancelled) {
+      const records = buildBackupRecords(planned, result, produced, names);
+      const doc = { generatedAt: startedAt, buildId: BUILD_ID, records, result };
+      try {
+        zip.add(BACKUP_INDEX_NAME, utf8Encode(buildBackupIndex(doc)));
+        zip.add(
+          BACKUP_MANIFEST_NAME,
+          utf8Encode(serializeBackupManifest(buildBackupManifest(doc))),
+        );
+        saveBlob(zip.finish(), backupFileName(startedAt));
+      } catch (error) {
+        console.error('[backup] 打包失败', error);
+        showToastBriefly('备份失败：无法生成 zip');
+        return;
+      }
+    }
+    const tone: ToastTone = result.cancelled
+      ? 'info'
+      : result.failed.length > 0
+        ? 'danger'
+        : 'ok';
+    showToastBriefly(backupSummaryText(result, stored), tone);
+  };
+
+  /** Start 备份全部会话 (same list/cap/wait behaviour as 导出全部). */
+  const startBackup = async () => {
+    if (backupRunningRef.current || backupPending) return;
+    if (bulkRunningRef.current || bulkPending) {
+      showToastBriefly('批量导出进行中 — 请稍后再备份', 'info');
+      return;
+    }
+    if (exportRef.current) {
+      showToastBriefly('正在导出当前会话 — 请稍后再备份', 'info');
+      return;
+    }
+    if (serverChatsRef.current.length === 0) {
+      if (!clientRef.current) {
+        showToastBriefly('未连接 — 无法备份');
+        return;
+      }
+      setBackupPending(true);
+      showToastBriefly('正在获取服务器会话列表…', 'info');
+    }
+    const incoming = await requestServerChats();
+    setBackupPending(false);
+    if (!incoming) {
+      showToastBriefly('获取会话列表超时，请重试', 'info');
+      return;
+    }
+    if (incoming.length === 0) {
+      showToastBriefly('服务器没有可备份的会话', 'info');
+      return;
+    }
+    void runBackup(incoming);
+  };
+
+  const cancelBackup = () => {
+    if (!backupRunningRef.current) return;
+    backupCancelRef.current = true;
+    settleBackupConfirm(false);
+    const job = exportRef.current;
+    if (job) failExport(job, '已取消');
+    showToastBriefly('正在取消备份…', 'info');
   };
 
   const requestHist = (chat: string) => {
@@ -2798,6 +3022,11 @@ export default function App() {
       bulkCancelRef.current = true;
       chatsWaiterRef.current = null;
       if (chatsWaitTimerRef.current) clearTimeout(chatsWaitTimerRef.current);
+      // M34: the same for a backup, including a pending size confirmation.
+      backupCancelRef.current = true;
+      const backupResolver = backupConfirmRef.current;
+      backupConfirmRef.current = null;
+      backupResolver?.(false);
       const searchJob = searchRef.current;
       if (searchJob?.timer) clearTimeout(searchJob.timer);
       searchRef.current = null;
@@ -3805,6 +4034,10 @@ export default function App() {
   const startExport = async () => {
     if (bulkRunningRef.current) {
       showToastBriefly('批量导出进行中 — 请先等待或取消', 'info');
+      return;
+    }
+    if (backupRunningRef.current) {
+      showToastBriefly('备份进行中 — 请先等待或取消', 'info');
       return;
     }
     if (exportRef.current) return;
@@ -4866,20 +5099,35 @@ export default function App() {
           <span>用量统计</span>
         </button>
 
-        <button
-          className="bulk-open"
-          type="button"
-          onClick={startBulkExport}
-          disabled={bulkActive || bulkPending}
-          title="把服务器列表中的会话逐个导出为 Markdown（最多 100 个；仅归档的会话不在列表，无法导出）"
-        >
-          <Download size={14} />
-          <span>
-            导出全部
-            {serverChats.length > 0 ? `（${serverChats.length}）` : ''}
-          </span>
-          {bulkPending ? <span className="bulk-waiting">获取列表…</span> : null}
-        </button>
+        <div className="bulk-row">
+          <button
+            className="bulk-open"
+            type="button"
+            onClick={startBulkExport}
+            disabled={bulkActive || bulkPending || backupActive || backupPending}
+            title="把服务器列表中的会话逐个导出为 Markdown（最多 100 个；仅归档的会话不在列表，无法导出）"
+          >
+            <Download size={14} />
+            <span>
+              导出全部
+              {serverChats.length > 0 ? `（${serverChats.length}）` : ''}
+            </span>
+            {bulkPending ? <span className="bulk-waiting">获取列表…</span> : null}
+          </button>
+          <button
+            className="backup-open"
+            type="button"
+            onClick={startBackup}
+            disabled={backupActive || backupPending || bulkActive || bulkPending}
+            aria-label="备份全部会话（单个 .zip）"
+            title="把同一份服务器列表打包成一个 .zip：每个会话一个 .md，另有 index.md 与 backup.json（最多 100 个）"
+          >
+            <Archive size={14} />
+            <span>备份全部</span>
+            <span className="backup-tag">.zip</span>
+            {backupPending ? <span className="bulk-waiting">获取列表…</span> : null}
+          </button>
+        </div>
         <p className="bulk-note">仅服务器列表 · 最多 100 个 · 归档会话不计入</p>
 
         {bulkActive ? (
@@ -4911,6 +5159,40 @@ export default function App() {
             {bulkProgress && bulkProgress.skipped > 0 ? (
               <div className="bulk-panel-note">
                 仅前 {bulkProgress.total} 个（共 {bulkProgress.total + bulkProgress.skipped} 个）
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {backupActive ? (
+          <div className="bulk-panel backup-panel" role="status" aria-live="polite">
+            <div className="bulk-panel-head">
+              <span>
+                {backupProgress
+                  ? `备份中 ${backupProgress.index}/${backupProgress.total}`
+                  : '备份中…'}
+              </span>
+              <button className="bulk-cancel backup-cancel" type="button" onClick={cancelBackup}>
+                取消
+              </button>
+            </div>
+            <div className="bulk-panel-title" title={backupProgress?.title}>
+              {backupProgress?.title ?? '等待插件响应…'}
+            </div>
+            <div className="bulk-bar" aria-hidden="true">
+              <i
+                style={{
+                  width: `${
+                    backupProgress
+                      ? Math.round(((backupProgress.index - 1) / backupProgress.total) * 100)
+                      : 0
+                  }%`,
+                }}
+              />
+            </div>
+            {backupProgress && backupProgress.skipped > 0 ? (
+              <div className="bulk-panel-note">
+                仅前 {backupProgress.total} 个（共 {backupProgress.total + backupProgress.skipped} 个）
               </div>
             ) : null}
           </div>
@@ -5196,7 +5478,7 @@ export default function App() {
               <button
                 className="icon-btn"
                 onClick={startExport}
-                disabled={exporting || bulkActive || bulkPending}
+                disabled={exporting || bulkActive || bulkPending || backupActive || backupPending}
                 title="导出当前会话为 Markdown（含思考过程与工具调用）"
                 aria-label="导出当前会话"
               >
@@ -5265,7 +5547,7 @@ export default function App() {
                   <button
                     type="button"
                     role="menuitem"
-                    disabled={exporting || bulkActive || bulkPending}
+                    disabled={exporting || bulkActive || bulkPending || backupActive || backupPending}
                     onClick={() => {
                       setMoreOpen(false);
                       startExport();
@@ -6005,6 +6287,39 @@ export default function App() {
               <span>
                 <kbd>Esc</kbd> 关闭
               </span>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {backupConfirmBytes != null ? (
+        <div className="backup-confirm-mask" role="presentation">
+          <div
+            className="backup-confirm"
+            role="dialog"
+            aria-modal="true"
+            aria-label="备份体积提醒"
+          >
+            <h3>备份已超过 200 MB</h3>
+            <p>
+              已打包 {formatBackupSize(backupConfirmBytes)}。继续会生成一个较大的 .zip，
+              可能占用较多内存和磁盘；完成前请不要关闭页面。
+            </p>
+            <div className="backup-confirm-actions">
+              <button
+                type="button"
+                className="backup-confirm-stop"
+                onClick={() => settleBackupConfirm(false)}
+              >
+                停止并取消
+              </button>
+              <button
+                type="button"
+                className="backup-confirm-go"
+                onClick={() => settleBackupConfirm(true)}
+              >
+                继续备份
+              </button>
             </div>
           </div>
         </div>
