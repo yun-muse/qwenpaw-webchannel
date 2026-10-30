@@ -1600,6 +1600,16 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // M26: the single per-row ⋯ menu. `sheet` is decided when it opens so phones
+  // get a bottom sheet and wide viewports an anchored dropdown; `top`/`left`
+  // are the dropdown anchor (fixed positioning, so the chat list can scroll
+  // under it without clipping).
+  const [chatMenu, setChatMenu] = useState<{
+    id: string;
+    top: number;
+    left: number;
+    sheet: boolean;
+  } | null>(null);
   // M22: named prompts, plus the composer panel that saves/inserts them.
   const [prompts, setPrompts] = useState<SavedPrompt[]>(loadPrompts);
   const [promptLibOpen, setPromptLibOpen] = useState(false);
@@ -3362,6 +3372,42 @@ export default function App() {
     setTagDraft('');
   };
 
+  // ---- M26: one ⋯ menu per row ----
+  const closeChatMenu = () => {
+    setChatMenu(null);
+    closeTagEditor();
+  };
+
+  /** Toggle/open the row menu, anchored to its ⋯ button on wide screens. */
+  const openChatMenu = (id: string, event: ReactMouseEvent<HTMLButtonElement>) => {
+    if (chatMenu?.id === id) {
+      closeChatMenu();
+      return;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    setChatMenu({
+      id,
+      sheet: window.matchMedia('(max-width: 720px)').matches,
+      top: Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - 252)),
+      left: Math.max(8, rect.right - 212),
+    });
+    closeTagEditor();
+  };
+
+  // Escape closes the menu; the tag editor inside it owns its own Escape.
+  useEffect(() => {
+    if (!chatMenu) return undefined;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setChatMenu(null);
+        setTaggingId(null);
+        setTagDraft('');
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [chatMenu]);
+
   const requestModels = () => {
     clientRef.current?.send({ t: 'models' });
   };
@@ -4176,10 +4222,10 @@ export default function App() {
     );
   }
 
-  /** M19: one sidebar row, used by both the 置顶 group and the main list. */
+  /** M19/M26: one compact sidebar row, used by both the 置顶 group and the list. */
   const chatRow = (id: string) => {
     const pinned = pinnedSet.has(id);
-    const tags = chatTags[id] ?? [];
+    const menuOpen = chatMenu?.id === id;
     return (
       <div
         key={id}
@@ -4213,92 +4259,31 @@ export default function App() {
             onDoubleClick={() => startRename(id)}
             title={titleOf(id)}
           >
-            {pinned ? (
-              <Pin size={12} className="chat-pin-mark" />
-            ) : (
-              <MessageSquare size={13} style={{ flexShrink: 0, opacity: 0.65 }} />
-            )}
             <span className="chat-title-text">{titleOf(id)}</span>
+            {pinned ? <Pin size={11} className="chat-pin-mark" aria-label="已置顶" /> : null}
           </button>
         )}
-        {tags.length > 0 ? (
-          <div className="chat-tags" aria-label="会话标签">
-            {tags.map((tag) => (
-              <span className="chat-tag" key={tag}>
-                {tag}
-              </span>
-            ))}
-          </div>
-        ) : null}
-        {taggingId === id ? (
-          <div className="chat-tag-edit">
-            <input
-              className="chat-tag-input"
-              value={tagDraft}
-              autoFocus
-              aria-label="会话标签（逗号分隔）"
-              placeholder="标签，逗号分隔"
-              onChange={(e) => setTagDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  commitTagEdit(id);
-                } else if (e.key === 'Escape') {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  closeTagEditor();
-                }
-              }}
-            />
-            <button
-              className="chat-tag-save"
-              type="button"
-              onClick={() => commitTagEdit(id)}
-            >
-              保存
-            </button>
-          </div>
-        ) : null}
+        <button
+          className={`chat-more${menuOpen ? ' open' : ''}`}
+          type="button"
+          aria-label="会话操作"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          title="更多操作"
+          onClick={(event) => openChatMenu(id, event)}
+        >
+          <MoreHorizontal size={17} />
+        </button>
         <span className="chat-id">{id}</span>
-        <span className="chat-actions">
-          <button
-            className={`chat-act chat-tag-btn${taggingId === id ? ' on' : ''}`}
-            title="标签"
-            aria-label="管理标签"
-            aria-pressed={taggingId === id}
-            onClick={() => openTagEditor(id)}
-          >
-            <Tag size={12} />
-          </button>
-          <button
-            className={`chat-act chat-pin${pinned ? ' on' : ''}`}
-            title={pinned ? '取消置顶' : '置顶会话'}
-            aria-label={pinned ? '取消置顶' : '置顶会话'}
-            aria-pressed={pinned}
-            onClick={() => togglePin(id)}
-          >
-            {pinned ? <PinOff size={12} /> : <Pin size={12} />}
-          </button>
-          <button
-            className="chat-act"
-            title="重命名"
-            aria-label="重命名会话"
-            onClick={() => startRename(id)}
-          >
-            <Edit3 size={12} />
-          </button>
-          <button
-            className="chat-act danger"
-            title="删除"
-            aria-label="删除会话"
-            onClick={() => deleteChat(id)}
-          >
-            <Trash2 size={12} />
-          </button>
-        </span>
       </div>
     );
   };
+
+  // M26: the open row menu. A chat can vanish (delete elsewhere) while it is
+  // open, so the id is validated on every render.
+  const menuChat = chatMenu && chatIds.includes(chatMenu.id) ? chatMenu : null;
+  const menuTags = menuChat ? chatTags[menuChat.id] ?? [] : [];
+  const menuPinned = menuChat ? pinnedSet.has(menuChat.id) : false;
 
   return (
     <div
@@ -4359,7 +4344,7 @@ export default function App() {
           type="button"
           onClick={startBulkExport}
           disabled={bulkActive || bulkPending}
-          title="把服务器列表中的会话逐个导出为 Markdown（最多 100 个）"
+          title="把服务器列表中的会话逐个导出为 Markdown（最多 100 个；仅归档的会话不在列表，无法导出）"
         >
           <Download size={14} />
           <span>
@@ -4368,9 +4353,7 @@ export default function App() {
           </span>
           {bulkPending ? <span className="bulk-waiting">获取列表…</span> : null}
         </button>
-        <p className="bulk-note">
-          仅服务器列表中的会话 · 最多 100 个 · 仅归档的会话不在列表，无法导出
-        </p>
+        <p className="bulk-note">仅服务器列表 · 最多 100 个 · 归档会话不计入</p>
 
         {bulkActive ? (
           <div className="bulk-panel" role="status" aria-live="polite">
@@ -4417,6 +4400,15 @@ export default function App() {
             aria-label="搜索会话与正文"
             onChange={(e) => setSearch(e.target.value)}
           />
+          <button
+            className="chat-refresh"
+            type="button"
+            title="从容器刷新会话列表"
+            aria-label="刷新会话列表"
+            onClick={() => clientRef.current?.send({ t: 'chats' })}
+          >
+            <RefreshCw size={14} />
+          </button>
         </div>
 
         {tagOptions.length > 0 ? (
@@ -4442,17 +4434,6 @@ export default function App() {
             ))}
           </div>
         ) : null}
-
-        <div className="sidebar-section-label">
-          <span>对话记录 ({visibleChats.length})</span>
-          <button
-            className="chat-act"
-            title="从容器刷新会话列表"
-            onClick={() => clientRef.current?.send({ t: 'chats' })}
-          >
-            <RefreshCw size={11} />
-          </button>
-        </div>
 
         <nav className="chat-list">
           {visibleChats.length === 0 ? (
@@ -4555,6 +4536,108 @@ export default function App() {
           </div>
         </div>
       </aside>
+
+      {menuChat ? (
+        <>
+          <div className="chat-menu-scrim" aria-hidden="true" onClick={closeChatMenu} />
+          <div
+            className={`chat-menu ${menuChat.sheet ? 'sheet' : 'dropdown'}`}
+            role="menu"
+            aria-label={`会话操作：${titleOf(menuChat.id)}`}
+            style={menuChat.sheet ? undefined : { top: menuChat.top, left: menuChat.left }}
+          >
+            <div className="chat-menu-grab" aria-hidden="true" />
+            <div className="chat-menu-head">
+              <span className="chat-menu-title">{titleOf(menuChat.id)}</span>
+              <span className="chat-menu-tags" title={menuTags.join('、')}>
+                {menuTags.length > 0 ? menuTags.join('、') : '无标签'}
+              </span>
+            </div>
+            {taggingId === menuChat.id ? (
+              <div className="chat-menu-tagform">
+                <input
+                  className="chat-tag-input"
+                  value={tagDraft}
+                  autoFocus
+                  aria-label="会话标签（逗号分隔）"
+                  placeholder="标签，逗号分隔"
+                  onChange={(e) => setTagDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      commitTagEdit(menuChat.id);
+                      closeChatMenu();
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      closeChatMenu();
+                    }
+                  }}
+                />
+                <button
+                  className="chat-tag-save"
+                  type="button"
+                  onClick={() => {
+                    commitTagEdit(menuChat.id);
+                    closeChatMenu();
+                  }}
+                >
+                  保存
+                </button>
+              </div>
+            ) : (
+              <>
+                <button
+                  className="chat-menu-item"
+                  type="button"
+                  role="menuitem"
+                  onClick={() => openTagEditor(menuChat.id)}
+                >
+                  <Tag size={15} />
+                  <span>标签</span>
+                  <em>{menuTags.length > 0 ? menuTags.join('、') : '无'}</em>
+                </button>
+                <button
+                  className="chat-menu-item"
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    togglePin(menuChat.id);
+                    closeChatMenu();
+                  }}
+                >
+                  {menuPinned ? <PinOff size={15} /> : <Pin size={15} />}
+                  <span>{menuPinned ? '取消置顶' : '置顶'}</span>
+                </button>
+                <button
+                  className="chat-menu-item"
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    closeChatMenu();
+                    startRename(menuChat.id);
+                  }}
+                >
+                  <Edit3 size={15} />
+                  <span>重命名</span>
+                </button>
+                <button
+                  className="chat-menu-item danger"
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    closeChatMenu();
+                    deleteChat(menuChat.id);
+                  }}
+                >
+                  <Trash2 size={15} />
+                  <span>删除</span>
+                </button>
+              </>
+            )}
+          </div>
+        </>
+      ) : null}
 
       <main className="main">
         <header className="top">

@@ -286,40 +286,65 @@ button:disabled {
   letter-spacing: 0.02em;
 }
 
-.new-chat {
+/* M26: the three primary actions are slim, flat rows — not blocks. */
+.new-chat,
+.stats-open,
+.bulk-open {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 9px 12px;
-  border: 1px solid var(--line-strong);
-  border-radius: 10px;
-  background: var(--card);
-  font-weight: 600;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-weight: 500;
   font-size: 13px;
+  text-align: left;
+}
+
+.new-chat {
   color: var(--text);
-  box-shadow: var(--shadow-sm);
+  font-weight: 600;
+}
+
+.new-chat:hover,
+.stats-open:hover,
+.bulk-open:hover {
+  background: var(--chip-bg);
+  color: var(--text);
+}
+
+.new-chat svg,
+.stats-open svg,
+.bulk-open svg {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.new-chat svg {
+  color: var(--accent);
 }
 
 .new-chat-left {
+  flex: 1 1 auto;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .new-chat-kbd {
+  flex: 0 0 auto;
+  margin-left: auto;
   font-size: 10.5px;
   font-weight: 500;
   color: var(--muted);
   padding: 1px 5px;
   border-radius: 5px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-}
-
-.new-chat:hover {
-  border-color: var(--accent);
-  color: var(--accent-dark);
+  background: var(--chip-bg);
 }
 
 .search-wrap {
@@ -330,71 +355,87 @@ button:disabled {
 
 .search-icon {
   position: absolute;
-  left: 10px;
+  left: 11px;
   color: var(--muted);
   pointer-events: none;
 }
 
 .chat-search {
   width: 100%;
-  padding: 7px 10px 7px 31px;
-  border: 1px solid var(--line);
+  height: 40px;
+  padding: 7px 40px 7px 32px;
+  border: 1px solid transparent;
   border-radius: 9px;
-  background: var(--card);
+  background: var(--chip-bg);
   color: inherit;
   font: inherit;
   font-size: 12.5px;
   outline: none;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .chat-search::placeholder {
   color: var(--muted);
 }
 
+.chat-search:hover {
+  background: var(--hover-bg);
+}
+
 .chat-search:focus {
   border-color: var(--focus-border);
+  background: var(--card);
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
-.sidebar-section-label {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  color: var(--muted);
-  padding: 4px 8px 0;
-  display: flex;
+/* M26: the list refresh moved out of the old section-label row. */
+.chat-refresh {
+  position: absolute;
+  right: 1px;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
+  border-radius: 7px;
+  color: var(--muted);
+}
+
+.chat-refresh:hover {
+  background: var(--hover-bg);
+  color: var(--text);
 }
 
 .chat-list {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   overflow-y: auto;
   min-height: 0;
-  padding-right: 2px;
+  padding: 2px 0 4px;
 }
 
+/* M26: compact flat rows. 44 px keeps the title and ⋯ at a full tap target. */
 .chat-item {
   position: relative;
   display: flex;
-  flex-direction: column;
-  /* Never shrink: `.chat-list` is the scroller. With the default flex-shrink:1 a
-     long list squeezes every row below one line and `overflow:hidden` then slices
-     the glyphs (descenders cut -> p reads as n, y as v). */
+  align-items: center;
   flex: 0 0 auto;
-  padding: 8px 10px;
-  border-radius: 9px;
+  min-height: 44px;
+  padding: 0 2px 0 0;
+  border-radius: 8px;
   text-align: left;
   overflow: hidden;
   transition: background 0.12s ease;
 }
 
 .chat-item:hover {
-  background: var(--panel-2);
+  background: var(--chip-bg);
+}
+
+.chat-item:active {
+  background: var(--hover-bg);
 }
 
 .chat-item.active {
@@ -410,15 +451,14 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
-  /* ellipsis only works on the text box, never on a flex container */
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   min-width: 0;
-  padding: 0;
+  height: 44px;
+  padding: 0 8px 0 10px;
   font-family: var(--font-ui);
-  font-size: 13px;
+  font-size: 13.5px;
   font-weight: 450;
-  line-height: 1.5;
+  line-height: 1.4;
   color: var(--text-secondary);
   text-align: left;
   white-space: nowrap;
@@ -431,15 +471,12 @@ button:disabled {
   white-space: nowrap;
 }
 
-.chat-item:hover .chat-title,
-.chat-item:focus-within .chat-title {
-  /* M23: room for tag + pin + rename + delete (4 × 22 px + gaps). */
-  padding-right: 104px;
-}
-
 .chat-rename {
-  width: 100%;
-  padding: 3px 7px;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 34px;
+  margin: 0 6px;
+  padding: 0 7px;
   border: 1px solid var(--focus-border);
   border-radius: 6px;
   background: var(--card);
@@ -449,22 +486,71 @@ button:disabled {
   outline: none;
 }
 
-.chat-actions {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  right: 6px;
-  display: flex;
-  gap: 2px;
+/* M26: exactly one per-row affordance, revealed on hover on wide screens. */
+.chat-more {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  color: var(--muted);
   opacity: 0;
-  transition: opacity 0.12s ease;
+  transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
 }
 
-.chat-item:hover .chat-actions,
-.chat-item:focus-within .chat-actions {
+.chat-item:hover .chat-more,
+.chat-item:focus-within .chat-more,
+.chat-more.open,
+.chat-more:focus-visible {
   opacity: 1;
 }
 
+.chat-more:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
+
+.chat-item.active .chat-more {
+  color: var(--text-secondary);
+}
+
+.chat-item.renaming .chat-more {
+  display: none;
+}
+
+.chat-none {
+  padding: 16px 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* ---------- M19/M26: pinned chats (置顶 group) ---------- */
+
+.chat-group-label {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  flex: 0 0 auto;
+  padding: 6px 10px 2px;
+  background: var(--panel);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.chat-pin-mark {
+  flex: 0 0 auto;
+  color: var(--accent);
+  opacity: 0.85;
+}
+
+/* M26: the ⋯ menu replaced the four inline row actions, but `.chat-act` is
+   still the compact icon button used by the stats/models panels. */
 .chat-act {
   width: 22px;
   height: 22px;
@@ -486,62 +572,11 @@ button:disabled {
   color: var(--danger);
 }
 
-.chat-none {
-  padding: 16px 10px;
-  font-size: 12.5px;
-  color: var(--muted);
-  text-align: center;
-}
-
-/* ---------- M19: pinned chats (置顶 group) ---------- */
-
-.chat-group-label {
-  flex: 0 0 auto;
-  padding: 8px 10px 2px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-}
-
-.chat-pin-mark {
-  flex-shrink: 0;
-  color: var(--accent);
-}
-
 .chat-act.on {
   color: var(--accent);
 }
 
-/* ---------- M23: chat tags + tag filter chips ---------- */
-
-.chat-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-  margin-top: 4px;
-}
-
-.chat-tag {
-  max-width: 104px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 1px 7px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: var(--chip-bg);
-  color: var(--muted);
-  font-size: 10.5px;
-  line-height: 1.5;
-}
-
-.chat-tag-edit {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-top: 5px;
-}
+/* ---------- M23/M26: chat tags + tag filter chips ---------- */
 
 .chat-tag-input {
   flex: 1;
@@ -573,35 +608,174 @@ button:disabled {
 
 .tag-filters {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 0 2px;
+  flex-wrap: nowrap;
+  gap: 2px;
+  padding: 0 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tag-filters::-webkit-scrollbar {
+  display: none;
 }
 
 .tag-filter {
-  max-width: 100%;
+  flex: 0 0 auto;
+  max-width: 148px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  padding: 3px 9px;
-  border: 1px solid var(--line);
+  padding: 5px 10px;
+  border: 0;
   border-radius: 999px;
-  background: var(--card);
+  background: transparent;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 11.5px;
   line-height: 1.4;
 }
 
 .tag-filter:hover {
-  border-color: var(--line-strong);
+  background: var(--chip-bg);
   color: var(--text-secondary);
 }
 
 .tag-filter.active {
-  border-color: var(--accent);
   background: var(--accent-soft);
   color: var(--accent-dark);
   font-weight: 600;
+}
+
+/* ---------- M26: the one-per-row ⋯ menu ---------- */
+
+.chat-menu-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 58;
+  background: transparent;
+}
+
+.chat-menu {
+  position: fixed;
+  z-index: 59;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 208px;
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+}
+
+.chat-menu-grab {
+  display: none;
+}
+
+.chat-menu-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 10px 8px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+
+.chat-menu-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.chat-menu-tags {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.chat-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 40px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.chat-menu-item svg {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.chat-menu-item span {
+  flex: 0 0 auto;
+}
+
+.chat-menu-item em {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-left: 8px;
+  text-align: right;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.chat-menu-item:hover {
+  background: var(--chip-bg);
+  color: var(--text);
+}
+
+.chat-menu-item:hover svg {
+  color: var(--text);
+}
+
+.chat-menu-item.danger,
+.chat-menu-item.danger svg {
+  color: var(--danger);
+}
+
+.chat-menu-item.danger:hover {
+  background: var(--danger-bg);
+}
+
+.chat-menu-tagform {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 4px;
+}
+
+.chat-menu-tagform .chat-tag-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+@keyframes chat-sheet-up {
+  from {
+    transform: translateY(14%);
+    opacity: 0.6;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
 /* ---------- M13: archive full-text hits ---------- */
@@ -3063,28 +3237,7 @@ button:disabled {
   font-size: 13px;
 }
 
-/* ---------- M24: all-chats usage dashboard ---------- */
-
-.stats-open,
-.bulk-open {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 12.5px;
-  font-weight: 600;
-}
-
-.stats-open:hover,
-.bulk-open:hover {
-  border-color: var(--accent);
-  color: var(--accent-dark);
-  background: var(--hover-bg);
-}
+/* ---------- M24/M26: 用量统计 + 导出全部 share the slim sidebar row ---------- */
 
 /* ---------- M25: bulk export (导出全部) ---------- */
 
@@ -3101,10 +3254,10 @@ button:disabled {
 }
 
 .bulk-note {
-  margin: -4px 2px 0;
-  padding: 0 10px;
+  margin: 0;
+  padding: 0 10px 2px;
   font-size: 10.5px;
-  line-height: 1.45;
+  line-height: 1.4;
   color: var(--muted);
 }
 
@@ -3580,7 +3733,7 @@ button:disabled {
     z-index: 50;
     width: min(82vw, 300px);
     padding: 12px 10px 10px;
-    gap: 8px;
+    gap: 6px;
     box-shadow: var(--shadow-lg);
     transform: translateX(-102%);
     transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
@@ -3622,15 +3775,22 @@ button:disabled {
     color: var(--muted);
   }
 
-  .new-chat {
-    min-height: 48px;
+  .new-chat,
+  .stats-open,
+  .bulk-open {
+    min-height: 44px;
   }
 
   .chat-search {
     height: 44px;
   }
 
-  /* M23: tag filters and the inline tag editor are thumb-sized too. */
+  .chat-refresh {
+    width: 44px;
+    height: 44px;
+  }
+
+  /* M23/M26: tag filters keep a 44 px target but lose the chip-card look. */
   .tag-filter {
     min-height: 44px;
     padding: 0 12px;
@@ -3655,51 +3815,74 @@ button:disabled {
     height: 44px;
   }
 
+  /* M26: one 46 px row: title + ⋯, both full-height tap targets. */
   .chat-item {
-    min-height: 56px;
-    justify-content: center;
-    padding: 6px 8px;
+    min-height: 46px;
+    padding: 0;
   }
 
   .chat-title {
-    min-height: 44px;
-    /* M23: four actions sit in their own grid column (see below). */
-    padding-right: 0;
+    height: 46px;
+    padding: 0 4px 0 10px;
   }
 
-  /* M23: stack title, tags and actions on phones. The four 44 px actions get
-     their own row, so tapping a title never hits 标签/置顶 by accident and
-     neither the title nor the tag editor is squeezed into a narrow column. */
-  .chat-item {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    align-items: center;
-    row-gap: 4px;
-  }
-
-  .chat-title,
   .chat-rename {
-    grid-column: 1;
-    width: 100%;
+    height: 40px;
   }
 
-  .chat-tags,
-  .chat-tag-edit {
-    grid-column: 1;
-  }
-
-  .chat-actions {
-    position: static;
-    transform: none;
-    right: auto;
-    grid-column: 1;
-    justify-self: end;
-  }
-
-  .chat-actions {
+  .chat-more {
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
     opacity: 1;
-    right: 2px;
-    gap: 0;
+  }
+
+  /* The ⋯ menu becomes a bottom sheet on phones. */
+  .chat-menu-scrim {
+    background: rgba(0, 0, 0, 0.38);
+    backdrop-filter: blur(1px);
+    -webkit-backdrop-filter: blur(1px);
+  }
+
+  .chat-menu.sheet {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    min-width: 0;
+    padding: 4px 12px max(14px, env(safe-area-inset-bottom));
+    border: 0;
+    border-top: 1px solid var(--line);
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -18px 48px rgba(0, 0, 0, 0.45);
+    animation: chat-sheet-up 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .chat-menu-grab {
+    display: block;
+    width: 36px;
+    height: 4px;
+    margin: 6px auto 8px;
+    border-radius: 999px;
+    background: var(--line-strong);
+  }
+
+  .chat-menu-head {
+    padding: 0 4px 10px;
+  }
+
+  .chat-menu-title {
+    font-size: 14px;
+  }
+
+  .chat-menu-item {
+    height: 48px;
+    font-size: 14px;
+    padding: 0 8px;
+  }
+
+  .chat-menu-tagform {
+    padding: 4px;
   }
 
   .help-btn {

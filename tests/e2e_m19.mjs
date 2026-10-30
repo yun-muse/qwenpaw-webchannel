@@ -5,7 +5,9 @@
  * paste-to-attach, per-chat drafts, prompt library), the M23 pack (chat
  * tags, Ctrl/⌘+K command palette, archive search jump) and the M24 pack
  * (all-chats usage dashboard: totals, day chart, ranking, empty state), and
- * the M25 pack (导出全部: progress, failure accounting, cancel).
+ * the M25 pack (导出全部: progress, failure accounting, cancel), and the M26
+ * pack (compact sidebar rows, the per-row ⋯ menu on phone + desktop, and
+ * BEFORE/AFTER drawer evidence).
  * Runs entirely local against a production build:
  *
  *   1. `npm run build` in spa/ (fails the run if the build fails)
@@ -15,7 +17,8 @@
  *   4. `vite preview` on :4173 serving spa/dist
  *
  * Two passes share the same server: desktop 1280x900 and iPhone 13
- * (390x844, the M14 mobile spec). Screenshots land in ./m19-shots/.
+ * (390x664; the M26 evidence switches to a real 390x844 canvas).
+ * Screenshots land in ./m19-shots/.
  *
  * Re-run (from the repo root):
  *   cd tests && npm install && npx playwright install chromium
@@ -27,6 +30,12 @@
  *   M19_SKIP_BUILD=1   reuse the existing spa/dist
  *   M19_HEADED=1       visible browser
  *   OUT_DIR            screenshot directory; default ./m19-shots
+ *   M26_ONLY=1         run only the M26 menu checks + evidence (fast loop)
+ *
+ * M26 evidence (BEFORE vs AFTER) is the same structure-agnostic block, so the
+ * BEFORE shots come from the unmodified build:
+ *   M26_ONLY=1 OUT_DIR=./m26-shots/before node e2e_m19.mjs   (before editing)
+ *   M26_ONLY=1 OUT_DIR=./m26-shots/after  node e2e_m19.mjs   (after editing)
  *
  * The browser always runs with a UTF-8 locale (see UTF8_LOCALE), whatever the
  * invoking shell exports: Chromium sanitizes `a[download]` names through the
@@ -608,6 +617,26 @@ async function openChat(page, mobile, id) {
 }
 
 /**
+ * M26: every per-chat action moved behind the row's single ⋯ button. The
+ * helper opens that menu (bottom sheet on phones, dropdown on desktop) and
+ * leaves the caller to click one `.chat-menu-item`.
+ */
+async function openRowMenu(page, title) {
+  const row = page.locator('.chat-item', { hasText: title }).first();
+  await row.hover().catch(() => {});
+  await row.locator('.chat-more').click();
+  await page.waitForSelector('.chat-menu', { timeout: 4000 });
+  await sleep(260);
+  return row;
+}
+
+/** Click a labelled item inside the open ⋯ menu. */
+async function clickMenuItem(page, label) {
+  await page.locator('.chat-menu-item', { hasText: label }).first().click();
+  await sleep(200);
+}
+
+/**
  * Dispatch a synthetic paste. A file lands as a real File in clipboardData
  * (the same path the picker/drop uses); text-only pastes carry no file.
  */
@@ -1184,30 +1213,31 @@ async function runM23Checks(page, pass, mobile) {
     await sleep(350);
   };
 
-  const rowFor = (title) => page.locator('.chat-item', { hasText: title }).first();
   const assignTags = async (title, tags) => {
-    const row = rowFor(title);
-    await row.hover().catch(() => {});
-    await row.locator('.chat-tag-btn').click();
+    await openRowMenu(page, title);
+    await clickMenuItem(page, '标签');
     await page.locator('.chat-tag-input').fill(tags);
     await page.locator('.chat-tag-input').press('Enter');
-    await sleep(200);
+    await sleep(220);
   };
 
-  // ---- M23.1: assign tags from the existing chat-item actions -----------
+  // ---- M23.1: tags live behind the M26 ⋯ menu ---------------------------
   await openDrawer();
   await assignTags('Alpha 会话', '工作, 重要');
   await assignTags('Beta 会话', '读书');
+  await openRowMenu(page, 'Alpha 会话');
   const tagged = await page.evaluate(() => ({
     stored: JSON.parse(localStorage.getItem('webchannel.chatTags') || '{}'),
-    chips: [...document.querySelectorAll('.chat-item .chat-tag')].map((el) =>
-      (el.textContent || '').trim(),
-    ),
+    menuTags: ((document.querySelector('.chat-menu-tags') || {}).textContent || '').trim(),
+    itemTags: ((document.querySelector('.chat-menu-item em') || {}).textContent || '').trim(),
+    inlineChips: document.querySelectorAll('.chat-item .chat-tag').length,
     filters: [...document.querySelectorAll('.tag-filter')].map((el) => ({
       text: (el.textContent || '').trim(),
       active: el.classList.contains('active'),
     })),
   }));
+  await page.keyboard.press('Escape');
+  await sleep(150);
   check(
     `${pass}: tags persist per chat id in localStorage`,
     JSON.stringify(tagged.stored['chat-alpha']) === JSON.stringify(['工作', '重要']) &&
@@ -1215,9 +1245,9 @@ async function runM23Checks(page, pass, mobile) {
     JSON.stringify(tagged.stored),
   );
   check(
-    `${pass}: tagged chats show their chips`,
-    tagged.chips.includes('工作') && tagged.chips.includes('重要') && tagged.chips.includes('读书'),
-    JSON.stringify(tagged.chips),
+    `${pass}: the row menu shows a chat's tags (no inline chips)`,
+    tagged.menuTags === '工作、重要' && tagged.itemTags === '工作、重要' && tagged.inlineChips === 0,
+    JSON.stringify(tagged),
   );
   check(
     `${pass}: the sidebar shows 全部 plus every tag`,
@@ -1244,9 +1274,8 @@ async function runM23Checks(page, pass, mobile) {
     JSON.stringify(filtered),
   );
 
-  await rowFor('Alpha 会话').hover().catch(() => {});
-  await rowFor('Alpha 会话').locator('.chat-pin').click();
-  await sleep(200);
+  await openRowMenu(page, 'Alpha 会话');
+  await clickMenuItem(page, '置顶');
   const pinnedWithTag = await page.evaluate(() => ({
     labels: [...document.querySelectorAll('.chat-group-label')].map((el) =>
       (el.textContent || '').trim(),
@@ -1275,6 +1304,26 @@ async function runM23Checks(page, pass, mobile) {
       allFilter.first === 'chat-alpha',
     JSON.stringify(allFilter),
   );
+
+  // The same menu item unpins: its label flips to 取消置顶.
+  await openRowMenu(page, 'Alpha 会话');
+  const unpinLabel = (
+    (await page.locator('.chat-menu-item', { hasText: '取消置顶' }).count()) ? '取消置顶' : ''
+  );
+  await clickMenuItem(page, '取消置顶');
+  const unpinned = await page.evaluate(() => ({
+    labels: [...document.querySelectorAll('.chat-group-label')].map((el) =>
+      (el.textContent || '').trim(),
+    ),
+    stored: localStorage.getItem('webchannel.pinnedChats'),
+    pinMarks: document.querySelectorAll('.chat-pin-mark').length,
+  }));
+  check(
+    `${pass}: the menu flips to 取消置顶 and clears the group`,
+    unpinLabel === '取消置顶' && unpinned.labels.length === 0 && unpinned.stored === '[]',
+    JSON.stringify({ unpinLabel, ...unpinned }),
+  );
+  check(`${pass}: no pin glyph is left behind`, unpinned.pinMarks === 0, String(unpinned.pinMarks));
 
   // ---- M23.3: tags survive a reload, then prune like pins --------------
   await page.reload({ waitUntil: 'domcontentloaded' });
@@ -1839,6 +1888,482 @@ async function runM25Checks(page, pass, mobile) {
 }
 
 // ---------------------------------------------------------------------------
+// M26 — sidebar redesign: one ⋯ menu per row (tag / pin / rename / delete)
+// ---------------------------------------------------------------------------
+
+async function runM26Checks(page, pass, mobile) {
+  resetState();
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.evaluate(() => {
+    localStorage.setItem('webchannel.chats', JSON.stringify(['chat-alpha', 'chat-beta']));
+    localStorage.setItem('webchannel.activeChat', 'chat-alpha');
+    localStorage.setItem('webchannel.pinnedChats', '[]');
+    localStorage.removeItem('webchannel.chatTags');
+    localStorage.setItem('webchannel.chatNames', '{}');
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await waitForHistory(page);
+  await sleep(350);
+  if (mobile && !(await page.locator('.app.sidebar-open').count())) {
+    await page.locator('.hamburger').click();
+    await sleep(350);
+  } else {
+    await page.mouse.move(600, 300).catch(() => {});
+    await sleep(120);
+  }
+
+  // ---- 1. structure: flat single-line rows, exactly one affordance ------
+  const structure = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('.chat-item')];
+    const first = rows[0];
+    const more = first.querySelector('.chat-more');
+    const title = first.querySelector('.chat-title-text');
+    const tr = title.getBoundingClientRect();
+    const mr = more.getBoundingClientRect();
+    const titleStyle = getComputedStyle(title);
+    return {
+      rows: rows.length,
+      mores: document.querySelectorAll('.chat-item .chat-more').length,
+      strayButtons: rows.reduce(
+        (count, row) =>
+          count +
+          [...row.querySelectorAll('button')].filter(
+            (btn) => !btn.classList.contains('chat-more') && !btn.classList.contains('chat-title'),
+          ).length,
+        0,
+      ),
+      heights: [...new Set(rows.map((row) => Math.round(row.getBoundingClientRect().height)))],
+      moreOpacity: getComputedStyle(more).opacity,
+      moreSize: [Math.round(mr.width), Math.round(mr.height)],
+      titleEllipsis: titleStyle.textOverflow,
+      titleWrap: titleStyle.whiteSpace,
+      titleHeight: Math.round(tr.height),
+      inlineChips: document.querySelectorAll('.chat-item .chat-tag').length,
+    };
+  });
+  check(
+    `${pass}: every row has exactly one ⋯ affordance (old 4-icon row is gone)`,
+    structure.rows === 2 && structure.mores === 2 && structure.strayButtons === 0,
+    JSON.stringify(structure),
+  );
+  check(
+    `${pass}: chat rows are one compact line in 44–52px`,
+    structure.heights.length === 1 &&
+      structure.heights[0] >= 44 &&
+      structure.heights[0] <= 52 &&
+      structure.titleHeight <= 24,
+    JSON.stringify(structure),
+  );
+  check(
+    `${pass}: long titles ellipsize on one line (no wrap, no clipping)`,
+    structure.titleEllipsis === 'ellipsis' && structure.titleWrap === 'nowrap',
+    JSON.stringify(structure),
+  );
+  check(
+    `${pass}: tags never render inline in a row`,
+    structure.inlineChips === 0,
+    String(structure.inlineChips),
+  );
+  if (mobile) {
+    check(
+      `${pass}: the ⋯ is always visible and a 44px tap target`,
+      structure.moreOpacity === '1' && structure.moreSize[0] >= 44 && structure.moreSize[1] >= 44,
+      JSON.stringify(structure),
+    );
+    const drawerAudit = await page.evaluate(TAP_TARGET_SCRIPT);
+    check(
+      `${pass}: the open M26 drawer keeps every tap target ≥44px`,
+      drawerAudit.length === 0,
+      JSON.stringify(drawerAudit.slice(0, 4)),
+    );
+  } else {
+    check(
+      `${pass}: the ⋯ stays hidden until the row is hovered`,
+      structure.moreOpacity === '0',
+      structure.moreOpacity,
+    );
+    await page.locator('.chat-item').first().hover();
+    await sleep(180);
+    const hovered = await page.evaluate(
+      () => getComputedStyle(document.querySelector('.chat-item .chat-more')).opacity,
+    );
+    check(`${pass}: hovering reveals the ⋯`, hovered === '1', hovered);
+  }
+
+  // ---- 2. the menu itself: dropdown on desktop, bottom sheet on mobile --
+  await openRowMenu(page, 'Beta 会话');
+  const menu = await page.evaluate(() => {
+    const el = document.querySelector('.chat-menu');
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return {
+      sheet: el.classList.contains('sheet'),
+      dropdown: el.classList.contains('dropdown'),
+      position: getComputedStyle(el).position,
+      rect: {
+        left: Math.round(r.left),
+        top: Math.round(r.top),
+        right: Math.round(r.right),
+        bottom: Math.round(r.bottom),
+        width: Math.round(r.width),
+      },
+      vw: innerWidth,
+      vh: innerHeight,
+      items: [...el.querySelectorAll('.chat-menu-item span')].map((span) =>
+        (span.textContent || '').trim(),
+      ),
+      itemHeight: Math.round(el.querySelector('.chat-menu-item').getBoundingClientRect().height),
+      tags: ((el.querySelector('.chat-menu-tags') || {}).textContent || '').trim(),
+    };
+  });
+  check(
+    `${pass}: the menu offers 标签 / 置顶 / 重命名 / 删除`,
+    Boolean(menu) && menu.items.join('|') === '标签|置顶|重命名|删除',
+    menu ? JSON.stringify(menu.items) : 'no menu',
+  );
+  check(
+    `${pass}: the menu is a fixed ${mobile ? 'bottom sheet' : 'anchored dropdown'}`,
+    Boolean(menu) &&
+      menu.position === 'fixed' &&
+      (mobile
+        ? menu.sheet && !menu.dropdown && menu.rect.bottom === menu.vh && menu.rect.left === 0 && menu.rect.right === menu.vw
+        : menu.dropdown && !menu.sheet && menu.rect.left >= 0 && menu.rect.right <= menu.vw && menu.rect.bottom <= menu.vh),
+    JSON.stringify(menu && menu.rect),
+  );
+  check(
+    `${pass}: menu items are ${mobile ? '48' : '40'}px tall and thumb-friendly`,
+    Boolean(menu) && menu.itemHeight >= (mobile ? 44 : 36),
+    menu ? String(menu.itemHeight) : '',
+  );
+  await page.screenshot({ path: shot(pass, mobile ? 'm26-menu-sheet' : 'm26-menu-dropdown'), fullPage: false });
+  await page.keyboard.press('Escape');
+  await sleep(180);
+  check(
+    `${pass}: Escape closes the ⋯ menu`,
+    (await page.locator('.chat-menu').count()) === 0,
+    String(await page.locator('.chat-menu').count()),
+  );
+
+  // Scrim click closes it too (tap the far corner, away from the menu).
+  await openRowMenu(page, 'Beta 会话');
+  await page.locator('.chat-menu-scrim').click({ position: { x: 6, y: 6 } });
+  await sleep(200);
+  check(
+    `${pass}: tapping outside closes the ⋯ menu`,
+    (await page.locator('.chat-menu').count()) === 0,
+    String(await page.locator('.chat-menu').count()),
+  );
+
+  // ---- 3. 标签: the editor moved into the menu, tags show in the menu ----
+  await openRowMenu(page, 'Beta 会话');
+  await clickMenuItem(page, '标签');
+  const tagEditor = await page.evaluate(() => {
+    const input = document.querySelector('.chat-menu .chat-tag-input');
+    if (!input) return null;
+    const r = input.getBoundingClientRect();
+    return {
+      focused: document.activeElement === input,
+      h: Math.round(r.height),
+      font: getComputedStyle(input).fontSize,
+    };
+  });
+  check(
+    `${pass}: 标签 opens an inline editor inside the menu`,
+    Boolean(
+      tagEditor &&
+        tagEditor.focused &&
+        tagEditor.h >= (mobile ? 44 : 28) &&
+        (!mobile || tagEditor.font === '16px'),
+    ),
+    JSON.stringify(tagEditor),
+  );
+  await page.locator('.chat-tag-input').fill('项目, 待办');
+  await page.locator('.chat-tag-input').press('Enter');
+  await sleep(250);
+  const tagState = await page.evaluate(() => ({
+    stored: JSON.parse(localStorage.getItem('webchannel.chatTags') || '{}'),
+    menu: document.querySelectorAll('.chat-menu').length,
+    filters: [...document.querySelectorAll('.tag-filter')].map((el) => (el.textContent || '').trim()),
+  }));
+  check(
+    `${pass}: committing tags stores them and closes the menu`,
+    JSON.stringify(tagState.stored['chat-beta']) === JSON.stringify(['项目', '待办']) &&
+      tagState.menu === 0,
+    JSON.stringify(tagState),
+  );
+  check(
+    `${pass}: the tag row appears above the list`,
+    tagState.filters.join('|') === '全部|项目|待办',
+    JSON.stringify(tagState.filters),
+  );
+
+  await openRowMenu(page, 'Beta 会话');
+  const menuTags = await page.evaluate(() => ({
+    head: ((document.querySelector('.chat-menu-tags') || {}).textContent || '').trim(),
+    row: ((document.querySelector('.chat-menu-item em') || {}).textContent || '').trim(),
+  }));
+  check(
+    `${pass}: reopening the menu shows the tags on the chat`,
+    menuTags.head === '项目、待办' && menuTags.row === '项目、待办',
+    JSON.stringify(menuTags),
+  );
+
+  // ---- 4. 置顶 rewrites the menu to 取消置顶 ----------------------------
+  await clickMenuItem(page, '置顶');
+  const pinned = await page.evaluate(() => {
+    const label = document.querySelector('.chat-group-label');
+    return {
+      label: (label ? label.textContent : '').trim(),
+      position: label ? getComputedStyle(label).position : '',
+      stored: localStorage.getItem('webchannel.pinnedChats'),
+      pinMarks: document.querySelectorAll('.chat-pin-mark').length,
+    };
+  });
+  check(
+    `${pass}: 置顶 moves the chat into a sticky 置顶 group`,
+    pinned.label === '置顶' && pinned.position === 'sticky' && pinned.stored === '["chat-beta"]',
+    JSON.stringify(pinned),
+  );
+  check(`${pass}: the pinned row shows its single pin glyph`, pinned.pinMarks === 1, String(pinned.pinMarks));
+
+  await openRowMenu(page, 'Beta 会话');
+  const flipLabel = await page.evaluate(
+    () => [...document.querySelectorAll('.chat-menu-item span')].map((el) => el.textContent.trim()),
+  );
+  check(`${pass}: the pinned menu offers 取消置顶`, flipLabel.includes('取消置顶'), JSON.stringify(flipLabel));
+
+  // ---- 5. 重命名 starts the inline editor in the row -------------------
+  await clickMenuItem(page, '重命名');
+  const renameOpen = await page.evaluate(() => {
+    const input = document.querySelector('.chat-rename');
+    return {
+      exists: Boolean(input),
+      focused: Boolean(input) && document.activeElement === input,
+      value: input ? input.value : '',
+      menu: document.querySelectorAll('.chat-menu').length,
+    };
+  });
+  check(
+    `${pass}: 重命名 opens the row editor with the old title`,
+    renameOpen.exists && renameOpen.focused && renameOpen.value === 'Beta 会话' && renameOpen.menu === 0,
+    JSON.stringify(renameOpen),
+  );
+  await page.locator('.chat-rename').fill('改名后的会话');
+  await page.locator('.chat-rename').press('Enter');
+  await sleep(250);
+  const renamed = await page.evaluate(() => ({
+    titles: [...document.querySelectorAll('.chat-item .chat-title-text')].map((el) =>
+      (el.textContent || '').trim(),
+    ),
+    stored: JSON.parse(localStorage.getItem('webchannel.chatNames') || '{}'),
+  }));
+  check(
+    `${pass}: Enter saves the new title`,
+    renamed.titles.includes('改名后的会话') &&
+      !renamed.titles.includes('Beta 会话') &&
+      renamed.stored['chat-beta'] === '改名后的会话',
+    JSON.stringify(renamed),
+  );
+
+  // ---- 6. lighter, horizontally scrollable tag chips --------------------
+  const chips = await page.evaluate(() => {
+    const wrap = document.querySelector('.tag-filters');
+    if (!wrap) return null;
+    const cs = getComputedStyle(wrap);
+    return {
+      overflowX: cs.overflowX,
+      wrap: cs.flexWrap,
+      border: getComputedStyle(wrap.querySelector('.tag-filter')).borderWidth,
+      chipHeight: Math.round(wrap.querySelector('.tag-filter').getBoundingClientRect().height),
+    };
+  });
+  check(
+    `${pass}: tag filters scroll horizontally as light chips`,
+    Boolean(chips) && chips.overflowX === 'auto' && chips.wrap === 'nowrap' && chips.border === '0px',
+    JSON.stringify(chips),
+  );
+
+  // ---- 7. the selected row is a quiet but distinct background ----------
+  const selection = await page.evaluate(() => {
+    const active = document.querySelector('.chat-item.active');
+    const idle = document.querySelector('.chat-item:not(.active)');
+    return {
+      active: active ? getComputedStyle(active).backgroundColor : '',
+      idle: idle ? getComputedStyle(idle).backgroundColor : '',
+      shadow: active ? getComputedStyle(active).boxShadow : '',
+    };
+  });
+  check(
+    `${pass}: the active row differs from an idle row (flat, no card)`,
+    selection.active !== selection.idle &&
+      selection.active !== 'rgba(0, 0, 0, 0)' &&
+      selection.shadow === 'none',
+    JSON.stringify(selection),
+  );
+
+  // ---- 8. 删除 goes through the menu and the confirm dialog ------------
+  let dialogText = '';
+  page.once('dialog', (dialog) => {
+    dialogText = dialog.message();
+    dialog.accept().catch(() => {});
+  });
+  await openRowMenu(page, '改名后的会话');
+  await clickMenuItem(page, '删除');
+  await sleep(350);
+  const deleted = await page.evaluate(() => ({
+    ids: [...document.querySelectorAll('.chat-item .chat-id')].map((el) => el.textContent.trim()),
+    stored: JSON.parse(localStorage.getItem('webchannel.chats') || '[]'),
+    tags: JSON.parse(localStorage.getItem('webchannel.chatTags') || '{}'),
+    pins: localStorage.getItem('webchannel.pinnedChats'),
+    menu: document.querySelectorAll('.chat-menu').length,
+  }));
+  check(`${pass}: 删除 confirms with the chat title`, /改名后的会话/.test(dialogText), dialogText);
+  check(
+    `${pass}: 删除 removes the row, its id, tags and pin`,
+    !deleted.ids.includes('chat-beta') &&
+      !deleted.stored.includes('chat-beta') &&
+      !('chat-beta' in deleted.tags) &&
+      deleted.pins === '[]' &&
+      deleted.menu === 0,
+    JSON.stringify(deleted),
+  );
+
+  resetState();
+}
+
+// ---------------------------------------------------------------------------
+// M26 — sidebar evidence: BEFORE/AFTER screenshots + density
+// ---------------------------------------------------------------------------
+
+/**
+ * A full, realistic sidebar. Long CJK titles prove the row ellipsizes without
+ * wrapping, and 14 chats overflow any phone-scale drawer at 44–52 px a row.
+ */
+const M26_CHATS = [
+  '构建 QwenPaw WebChannel 的完整设计记录',
+  '关于多模态检索增强生成流程的评审意见',
+  '每周同步：路线图与优先级调整',
+  '把侧边栏重做成成熟产品该有的样子',
+  '京都七日：行程、预算与备选方案',
+  'Kubernetes 集群升级复盘（含回滚预案）',
+  '读书笔记：《设计中的设计》第三章节',
+  '给新同事的入职说明与常用链接',
+  '数据导出格式讨论：Markdown 还是 JSON',
+  'DeepSeek 长上下文推理的价格对比',
+  '重构 relay 心跳：hb / hb_ack 方案',
+  '移动端 44px 触控规范的落地清单',
+  '周末露营装备清单与采购预算',
+  '把会议纪要整理成可执行的待办列表',
+];
+
+/**
+ * M26 evidence is deliberately structure-agnostic: it only opens the drawer,
+ * sets the theme and screenshots. That lets the same block produce the BEFORE
+ * shots against the pre-redesign build and the AFTER shots afterwards.
+ *
+ * Screenshots: <OUT_DIR>/m26-<pass>-<theme>.png
+ * Run BEFORE with `OUT_DIR=./m26-shots/before node e2e_m19.mjs`.
+ */
+async function runM26Evidence(page, pass, mobile) {
+  resetState();
+  // The M14 descriptor is 390×664 (chrome-less phone layout); the M26 brief
+  // asks for the full 390×844 canvas, so the evidence shots use it explicitly.
+  if (mobile) await page.setViewportSize({ width: 390, height: 844 });
+  state.chats = M26_CHATS.map((title, index) => ({
+    chat: `chat-m26-${String(index + 1).padStart(2, '0')}`,
+    title,
+    updated_at: `2026-10-${String(28 - index).padStart(2, '0')}T09:00:00Z`,
+  }));
+  state.history = Object.fromEntries(state.chats.map((item) => [item.chat, HISTORY]));
+  const ids = state.chats.map((item) => item.chat);
+
+  for (const theme of ['dark', 'light']) {
+    await page.evaluate(
+      ({ chatIds, active, mode }) => {
+        localStorage.setItem('webchannel.chats', JSON.stringify(chatIds));
+        localStorage.setItem('webchannel.activeChat', active);
+        localStorage.setItem('webchannel.pinnedChats', JSON.stringify([chatIds[2]]));
+        localStorage.setItem(
+          'webchannel.chatTags',
+          JSON.stringify({ [chatIds[1]]: ['工作', '重要'], [chatIds[3]]: ['读书'] }),
+        );
+        localStorage.setItem('webchannel.chatNames', '{}');
+        localStorage.setItem('webchannel.theme', mode);
+      },
+      { chatIds: ids, active: ids[0], mode: theme },
+    );
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await waitForHistory(page);
+    await sleep(500);
+    if (mobile && !(await page.locator('.app.sidebar-open').count())) {
+      await page.locator('.hamburger').click();
+      await sleep(450);
+    }
+
+    const density = await page.evaluate(() => {
+      const list = document.querySelector('.chat-list');
+      if (!list) return null;
+      const lr = list.getBoundingClientRect();
+      const rows = [...document.querySelectorAll('.chat-item')].map((el) => {
+        const r = el.getBoundingClientRect();
+        return {
+          top: Math.round(r.top * 10) / 10,
+          bottom: Math.round(r.bottom * 10) / 10,
+          height: Math.round(r.height * 10) / 10,
+          flat: getComputedStyle(el).boxShadow === 'none',
+        };
+      });
+      const visible = rows.filter((row) => row.top >= lr.top - 1 && row.bottom <= lr.bottom + 1);
+      return {
+        drawerHeight: Math.round(innerHeight),
+        listHeight: Math.round(lr.height),
+        rows: rows.length,
+        visible: visible.length,
+        heights: [...new Set(rows.map((row) => row.height))],
+        flat: rows.every((row) => row.flat),
+      };
+    });
+    const target = 8;
+    check(
+      `${pass}: M26 ${theme} drawer shows ≥${target} full chat rows`,
+      Boolean(density && density.visible >= target),
+      JSON.stringify(density),
+    );
+    if (density && density.heights.length === 1) {
+      check(
+        `${pass}: M26 ${theme} chat rows are ${density.heights[0]}px (44–52 px spec)`,
+        density.heights[0] >= 44 && density.heights[0] <= 52,
+        JSON.stringify(density.heights),
+      );
+    }
+    check(`${pass}: M26 ${theme} chat rows are flat`, Boolean(density && density.flat), JSON.stringify(density));
+
+    const path = join(OUT_DIR, `m26-${pass}-${theme}.png`);
+    await page.screenshot({ path, fullPage: false });
+    log(`${pass}: M26 ${theme} evidence → ${path} (${density ? density.visible : '?'} rows visible)`);
+
+    // The ⋯ menu shot is M26-only evidence (skipped on the BEFORE build).
+    if (await page.locator('.chat-item .chat-more').count()) {
+      await page.locator('.chat-item .chat-more').nth(1).click();
+      await page.waitForSelector('.chat-menu', { timeout: 4000 });
+      await sleep(320);
+      await page.screenshot({
+        path: join(OUT_DIR, `m26-${pass}-${theme}-menu.png`),
+        fullPage: false,
+      });
+      await page.keyboard.press('Escape');
+      await sleep(180);
+    }
+
+    if (mobile) {
+      await page.locator('.sidebar-close').click();
+      await sleep(300);
+    }
+  }
+  resetState();
+}
+
+// ---------------------------------------------------------------------------
 // One pass (desktop or mobile)
 // ---------------------------------------------------------------------------
 
@@ -1878,6 +2403,13 @@ async function runPass(browser, pass, viewport, mobile) {
     await page.goto(BASE, { waitUntil: 'domcontentloaded' });
     await waitForHistory(page);
     await sleep(400);
+
+    if (process.env.M26_ONLY === '1') {
+      await runM26Checks(page, pass, mobile);
+      await runM26Evidence(page, pass, mobile);
+      check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
+      return;
+    }
 
     // ---- 1. code-block copy button ---------------------------------------
     const copyInfo = await page.evaluate(() => {
@@ -2071,12 +2603,10 @@ async function runPass(browser, pass, viewport, mobile) {
     await page.locator('.context-meter-interactive').click();
     await sleep(120);
 
-    // ---- 4. pinning ------------------------------------------------------
+    // ---- 4. pinning (M26: behind the row's ⋯ menu) -----------------------
     await openDrawer();
-    const betaRow = page.locator('.chat-item', { hasText: 'Beta 会话' }).first();
-    await betaRow.hover().catch(() => {});
-    await betaRow.locator('.chat-pin').click();
-    await sleep(250);
+    await openRowMenu(page, 'Beta 会话');
+    await clickMenuItem(page, '置顶');
     const pinned = await page.evaluate(() => {
       const label = document.querySelector('.chat-group-label');
       const firstItem = document.querySelector('.chat-item');
@@ -2084,11 +2614,13 @@ async function runPass(browser, pass, viewport, mobile) {
         label: label ? (label.textContent || '').trim() : '',
         first: firstItem ? (firstItem.querySelector('.chat-id') || {}).textContent : '',
         stored: localStorage.getItem('webchannel.pinnedChats'),
+        menu: document.querySelectorAll('.chat-menu').length,
       };
     });
     check(`${pass}: pin creates a 置顶 group`, pinned.label === '置顶', pinned.label);
     check(`${pass}: pinned chat sits in the group`, pinned.first === 'chat-beta', pinned.first);
     check(`${pass}: pin persists in localStorage`, pinned.stored === '["chat-beta"]', pinned.stored || 'null');
+    check(`${pass}: the pin menu closes after the action`, pinned.menu === 0, String(pinned.menu));
     await page.screenshot({ path: shot(pass, 'pins'), fullPage: false });
 
     await page.reload({ waitUntil: 'domcontentloaded' });
@@ -2348,6 +2880,12 @@ async function runPass(browser, pass, viewport, mobile) {
 
     // ---- 10. M25: bulk export (progress, failures, cancel) ----------------
     await runM25Checks(page, pass, mobile);
+
+    // ---- 11. M26: sidebar redesign (⋯ menu flows) -------------------------
+    await runM26Checks(page, pass, mobile);
+
+    // ---- 12. M26: sidebar evidence (BEFORE/AFTER shots + density) ---------
+    await runM26Evidence(page, pass, mobile);
 
     check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
   } finally {
