@@ -1,4 +1,13 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  Fragment,
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import type {
   ChangeEvent,
   ClipboardEvent as ReactClipboardEvent,
@@ -662,6 +671,70 @@ function renderMarkdown(text: string): string {
   return DOMPurify.sanitize(html);
 }
 
+/** Options shared by the whole-document and the split streaming renderer. */
+const MD_OPTIONS = { gfm: true, breaks: true } as const;
+
+/**
+ * M32: split a streaming message into a *frozen* prefix and the last block.
+ *
+ * A chat message is a sequence of independent blocks (`marked` tokens). While
+ * the reply streams, every block except the last one is final: re-parsing and
+ * re-writing them on every delta was the measured hotspot (per-frame innerHTML
+ * replacement + a fresh `hljs` run over every completed code block). The
+ * prefix HTML is cached per token so a delta only re-renders the block that is
+ * actually growing, and completed code blocks keep their highlighted DOM.
+ *
+ * `cache` is the previous call's prefix (raw tokens + sanitized HTML). Tokens
+ * are immutable for a given `text`, so a longest-common-prefix compare is an
+ * exact "did any earlier block change" test.
+ */
+function splitMarkdown(
+  text: string,
+  cache: { raws: string[]; html: string },
+): { head: string; tail: string } {
+  const tokens = marked.lexer(text, MD_OPTIONS) as unknown as Array<{ type?: string; raw?: string }>;
+  if (tokens.length === 0) {
+    cache.raws = [];
+    cache.html = '';
+    return { head: '', tail: '' };
+  }
+  // Everything up to (not including) the last non-space token is final.
+  let split = tokens.length - 1;
+  while (split > 0 && tokens[split].type === 'space') split -= 1;
+  type Slice = Array<{ raw?: string }> & { links?: unknown };
+  const headTokens = tokens.slice(0, split) as unknown as Slice;
+  const tailTokens = tokens.slice(split) as unknown as Slice;
+  // `marked` keeps reference-style link definitions on the token list itself;
+  // the parser needs them on whichever slice it is asked to render.
+  const links = (tokens as unknown as { links?: unknown }).links;
+  if (links) {
+    headTokens.links = links;
+    tailTokens.links = links;
+  }
+  const sanitizeTokens = (slice: unknown[]): string =>
+    DOMPurify.sanitize(marked.parser(slice as never, MD_OPTIONS) as unknown as string);
+
+  const raws = headTokens.map((token) => String(token.raw ?? ''));
+  let common = 0;
+  while (
+    common < raws.length &&
+    common < cache.raws.length &&
+    raws[common] === cache.raws[common]
+  ) {
+    common += 1;
+  }
+  // Only a fully-matched old prefix can be reused; a fork rebuilds from zero.
+  let html = common > 0 && common === cache.raws.length ? cache.html : '';
+  if (common < cache.raws.length) common = 0;
+  for (let i = common; i < headTokens.length; i += 1) {
+    html += sanitizeTokens([headTokens[i]]);
+  }
+  cache.raws = raws;
+  cache.html = html;
+
+  return { head: html, tail: sanitizeTokens(tailTokens) };
+}
+
 function htmlTableToMarkdown(table: HTMLTableElement): string {
   const rows = Array.from(table.querySelectorAll('tr'));
   if (rows.length === 0) return '';
@@ -777,90 +850,119 @@ function PartCard({ part }: { part: ContentPart }) {
   );
 }
 
-function Markdown({ text, streaming }: { text: string; streaming?: boolean }) {
-  const ref = useRef<HTMLDivElement | null>(null);
-  const html = useMemo(() => renderMarkdown(text), [text]);
+/**
+ * Decorate one rendered Markdown container: highlight code, add the language
+ * bar + copy button, and wrap tables with their copy toolbar. Taking the
+ * container as an argument lets the frozen prefix and the live tail be
+ * decorated independently (M32).
+ */
+function decorateMarkdown(root: HTMLElement | null) {
+  if (!root) return;
 
-  // Layout effect, not a passive one: `html` replaces every child of the
-  // container on each streaming frame, and the copy button must exist in the
-  // same paint (M19 — no frame may render a code block without its button).
-  useLayoutEffect(() => {
-    const root = ref.current;
-    if (!root) return;
-
-    root.querySelectorAll('pre').forEach((pre) => {
-      const codeEl = pre.querySelector('code');
-      let lang = 'code';
-      if (codeEl) {
-        const cls = Array.from(codeEl.classList).find((c) => c.startsWith('language-'));
-        if (cls) lang = cls.replace('language-', '') || 'code';
-        if (!codeEl.dataset.highlighted) {
-          try {
-            if (lang !== 'code' && hljs.getLanguage(lang)) {
-              codeEl.innerHTML = hljs.highlight(codeEl.textContent ?? '', { language: lang }).value;
-            } else {
-              codeEl.innerHTML = hljs.highlightAuto(codeEl.textContent ?? '').value;
-            }
-            codeEl.dataset.highlighted = 'yes';
-          } catch {
-            /* ignore highlight errors during partial stream */
+  root.querySelectorAll('pre').forEach((pre) => {
+    const codeEl = pre.querySelector('code');
+    let lang = 'code';
+    if (codeEl) {
+      const cls = Array.from(codeEl.classList).find((c) => c.startsWith('language-'));
+      if (cls) lang = cls.replace('language-', '') || 'code';
+      if (!codeEl.dataset.highlighted) {
+        try {
+          if (lang !== 'code' && hljs.getLanguage(lang)) {
+            codeEl.innerHTML = hljs.highlight(codeEl.textContent ?? '', { language: lang }).value;
+          } else {
+            codeEl.innerHTML = hljs.highlightAuto(codeEl.textContent ?? '').value;
           }
+          codeEl.dataset.highlighted = 'yes';
+        } catch {
+          /* ignore highlight errors during partial stream */
         }
       }
-      if (!pre.querySelector('.pre-lang')) {
-        const langBar = document.createElement('div');
-        langBar.className = 'pre-lang';
-        langBar.textContent = lang;
-        pre.appendChild(langBar);
-      }
-      if (!pre.querySelector('.pre-copy')) {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'pre-copy';
-        button.textContent = '复制';
-        button.title = '复制代码';
-        button.setAttribute('aria-label', '复制代码');
-        pre.appendChild(button);
-      }
-    });
+    }
+    if (!pre.querySelector('.pre-lang')) {
+      const langBar = document.createElement('div');
+      langBar.className = 'pre-lang';
+      langBar.textContent = lang;
+      pre.appendChild(langBar);
+    }
+    if (!pre.querySelector('.pre-copy')) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'pre-copy';
+      button.textContent = '复制';
+      button.title = '复制代码';
+      button.setAttribute('aria-label', '复制代码');
+      pre.appendChild(button);
+    }
+  });
 
-    root.querySelectorAll('table').forEach((table) => {
-      if (table.parentElement?.classList.contains('table-scroll')) return;
-      const box = document.createElement('div');
-      box.className = 'table-box';
+  root.querySelectorAll('table').forEach((table) => {
+    if (table.parentElement?.classList.contains('table-scroll')) return;
+    const box = document.createElement('div');
+    box.className = 'table-box';
 
-      const bar = document.createElement('div');
-      bar.className = 'table-bar';
-      const titleSpan = document.createElement('span');
-      titleSpan.textContent = '📊 结构化表格';
+    const bar = document.createElement('div');
+    bar.className = 'table-bar';
+    const titleSpan = document.createElement('span');
+    titleSpan.textContent = '📊 结构化表格';
 
-      const actions = document.createElement('div');
-      actions.className = 'table-bar-actions';
+    const actions = document.createElement('div');
+    actions.className = 'table-bar-actions';
 
-      const mdBtn = document.createElement('button');
-      mdBtn.type = 'button';
-      mdBtn.className = 'table-copy-btn table-copy-md';
-      mdBtn.textContent = '📋 复制 Markdown 表格';
+    const mdBtn = document.createElement('button');
+    mdBtn.type = 'button';
+    mdBtn.className = 'table-copy-btn table-copy-md';
+    mdBtn.textContent = '📋 复制 Markdown 表格';
 
-      const tsvBtn = document.createElement('button');
-      tsvBtn.type = 'button';
-      tsvBtn.className = 'table-copy-btn table-copy-tsv';
-      tsvBtn.textContent = '📊 复制到 Excel';
+    const tsvBtn = document.createElement('button');
+    tsvBtn.type = 'button';
+    tsvBtn.className = 'table-copy-btn table-copy-tsv';
+    tsvBtn.textContent = '📊 复制到 Excel';
 
-      actions.appendChild(mdBtn);
-      actions.appendChild(tsvBtn);
-      bar.appendChild(titleSpan);
-      bar.appendChild(actions);
+    actions.appendChild(mdBtn);
+    actions.appendChild(tsvBtn);
+    bar.appendChild(titleSpan);
+    bar.appendChild(actions);
 
-      const scroll = document.createElement('div');
-      scroll.className = 'table-scroll';
+    const scroll = document.createElement('div');
+    scroll.className = 'table-scroll';
 
-      table.parentNode?.insertBefore(box, table);
-      scroll.appendChild(table);
-      box.appendChild(bar);
-      box.appendChild(scroll);
-    });
-  }, [html]);
+    table.parentNode?.insertBefore(box, table);
+    scroll.appendChild(table);
+    box.appendChild(bar);
+    box.appendChild(scroll);
+  });
+}
+
+/**
+ * M32: while a reply streams, the message renders as two containers. `md-head`
+ * holds every finished block (HTML cached per token; its DOM is not rewritten
+ * between deltas) and `md-tail` holds the block still growing. Settled
+ * messages take the single-pass `renderMarkdown` path, which keeps opening a
+ * 300-message history exactly as cheap as before.
+ */
+function Markdown({ text, streaming }: { text: string; streaming?: boolean }) {
+  const headRef = useRef<HTMLDivElement | null>(null);
+  const tailRef = useRef<HTMLDivElement | null>(null);
+  const cacheRef = useRef<{ raws: string[]; html: string }>({ raws: [], html: '' });
+
+  const parts = useMemo(() => {
+    if (!streaming) {
+      cacheRef.current = { raws: [], html: '' };
+      return { head: renderMarkdown(text), tail: '' };
+    }
+    return splitMarkdown(text, cacheRef.current);
+  }, [text, streaming]);
+
+  // Layout effect, not a passive one: a code block must exist in the same
+  // paint as its copy button (M19). The head effect only runs when a block
+  // completes, so finished code blocks are highlighted once per block rather
+  // than once per delta.
+  useLayoutEffect(() => {
+    decorateMarkdown(headRef.current);
+  }, [parts.head]);
+  useLayoutEffect(() => {
+    decorateMarkdown(tailRef.current);
+  }, [parts.tail]);
 
   const onContainerClick = (event: ReactMouseEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement | null;
@@ -917,12 +1019,20 @@ function Markdown({ text, streaming }: { text: string; streaming?: boolean }) {
 
   return (
     <div className="md-wrap">
-      <div
-        className="md"
-        ref={ref}
-        onClick={onContainerClick}
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
+      <div className="md" onClick={onContainerClick}>
+        <div
+          className="md-head"
+          ref={headRef}
+          dangerouslySetInnerHTML={{ __html: parts.head }}
+        />
+        {parts.tail ? (
+          <div
+            className={`md-tail${parts.head ? '' : ' md-first'}`}
+            ref={tailRef}
+            dangerouslySetInnerHTML={{ __html: parts.tail }}
+          />
+        ) : null}
+      </div>
       {streaming ? <i className="caret" /> : null}
     </div>
   );
@@ -1112,7 +1222,7 @@ function AttachmentList({
   );
 }
 
-function MessageView({
+const MessageView = memo(function MessageView({
   message,
   chat,
   flash = false,
@@ -1256,7 +1366,7 @@ function MessageView({
       {bubble}
     </div>
   );
-}
+});
 
 /**
  * Context meter above the composer (M15). A thin bar plus `上下文 ≈N%` on
@@ -4405,6 +4515,24 @@ export default function App() {
     );
   };
 
+  // M32: MessageView is memoized, so its three callbacks must keep one
+  // identity across renders. The ref always points at this render's closures,
+  // so a row React skipped still invokes the newest handler.
+  const rowActionsRef = useRef({ onApproval, handleRegenerate, handleEditResend });
+  rowActionsRef.current = { onApproval, handleRegenerate, handleEditResend };
+  const approveRow = useCallback(
+    (chat: string, message: ChatMessage, action: 'approve' | 'deny') => {
+      rowActionsRef.current.onApproval(chat, message, action);
+    },
+    [],
+  );
+  const regenerateRow = useCallback((message: ChatMessage) => {
+    rowActionsRef.current.handleRegenerate(message);
+  }, []);
+  const editResendRow = useCallback((message: ChatMessage) => {
+    rowActionsRef.current.handleEditResend(message);
+  }, []);
+
   // ---- Unified Inline Palette above Composer (`/` commands, `/model ...`, or `@skill`) ----
   const atMatch = /(?:^|\s)@([a-zA-Z0-9_-]*)$/.exec(input);
   const isAtTyping = Boolean(atMatch) && paletteMuted !== input;
@@ -5237,10 +5365,10 @@ export default function App() {
                 message={m}
                 chat={activeChat}
                 flash={m.id === flashMessageId}
-                onApproval={onApproval}
+                onApproval={approveRow}
                 onAttachment={fetchAttachment}
-                onRegenerate={handleRegenerate}
-                onEditResend={handleEditResend}
+                onRegenerate={regenerateRow}
+                onEditResend={editResendRow}
               />
             ))}
           </div>

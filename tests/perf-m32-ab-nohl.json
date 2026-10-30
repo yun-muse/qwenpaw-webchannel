@@ -1,0 +1,161 @@
+{
+  "label": "ab-nohl",
+  "at": "2026-10-30T13:53:41.576Z",
+  "runs": 1,
+  "passes": [
+    {
+      "pass": "desktop",
+      "viewport": {
+        "width": 1280,
+        "height": 900
+      },
+      "open": [
+        {
+          "open_ms": 954,
+          "rows": 300,
+          "nodes": 9246,
+          "pre_blocks": 150,
+          "pre_copies": 150,
+          "tables": 50,
+          "splash": false,
+          "dom_content_loaded": 235,
+          "expected": 300
+        }
+      ],
+      "open_scaling": [],
+      "stream_long": {
+        "wall_ms": 4011,
+        "longtask_count": 2,
+        "longtask_total_ms": 128,
+        "longtask_max_ms": 76,
+        "frames": 183,
+        "frame_mean_ms": 21.8,
+        "frame_p50_ms": 16.7,
+        "frame_p75_ms": 16.8,
+        "frame_p90_ms": 33.3,
+        "frame_p95_ms": 50,
+        "frame_max_ms": 83.3,
+        "frames_over_20": 39,
+        "frames_over_50": 7,
+        "frame_p50_by_quarter": [
+          33.3,
+          16.7,
+          16.7,
+          16.7
+        ],
+        "frame_mean_by_quarter": [
+          27,
+          23,
+          20.7,
+          16.7
+        ],
+        "typing_n": 14,
+        "typing_p50_ms": 8.7,
+        "typing_p95_ms": 16.3,
+        "typing_max_ms": 16.3,
+        "typing_mean_ms": 7.7,
+        "prof": {
+          "md_calls": 114,
+          "parse_ms": 21.2,
+          "sanitize_ms": 65.6,
+          "highlight_calls": 142,
+          "highlight_ms": 1,
+          "decorate_ms": 11.9,
+          "message_renders": 42576
+        }
+      },
+      "stream_plain": {
+        "wall_ms": 3714,
+        "longtask_count": 1,
+        "longtask_total_ms": 56,
+        "longtask_max_ms": 56,
+        "frames": 210,
+        "frame_mean_ms": 17.6,
+        "frame_p50_ms": 16.7,
+        "frame_p75_ms": 16.7,
+        "frame_p90_ms": 16.8,
+        "frame_p95_ms": 16.8,
+        "frame_max_ms": 50.1,
+        "frames_over_20": 10,
+        "frames_over_50": 2,
+        "frame_p50_by_quarter": [
+          16.7,
+          16.7,
+          16.7,
+          16.7
+        ],
+        "frame_mean_by_quarter": [
+          17,
+          18.6,
+          17.3,
+          17.6
+        ],
+        "typing_n": 20,
+        "typing_p50_ms": 5.4,
+        "typing_p95_ms": 15.5,
+        "typing_max_ms": 15.5,
+        "typing_mean_ms": 6.4,
+        "prof": {
+          "md_calls": 134,
+          "parse_ms": 12.3,
+          "sanitize_ms": 36.9,
+          "highlight_calls": 0,
+          "highlight_ms": 0,
+          "decorate_ms": 1.1,
+          "message_renders": 48333
+        }
+      },
+      "stream_short": {
+        "wall_ms": 3749,
+        "longtask_count": 0,
+        "longtask_total_ms": 0,
+        "longtask_max_ms": 0,
+        "frames": 220,
+        "frame_mean_ms": 17,
+        "frame_p50_ms": 16.7,
+        "frame_p75_ms": 16.7,
+        "frame_p90_ms": 16.7,
+        "frame_p95_ms": 16.8,
+        "frame_max_ms": 33.4,
+        "frames_over_20": 4,
+        "frames_over_50": 0,
+        "frame_p50_by_quarter": [
+          16.7,
+          16.7,
+          16.7,
+          16.7
+        ],
+        "frame_mean_by_quarter": [
+          17.6,
+          17,
+          16.7,
+          16.7
+        ],
+        "typing_n": 20,
+        "typing_p50_ms": 7.8,
+        "typing_p95_ms": 14.7,
+        "typing_max_ms": 14.7,
+        "typing_mean_ms": 7.1,
+        "prof": {
+          "md_calls": 145,
+          "parse_ms": 36.5,
+          "sanitize_ms": 90.1,
+          "highlight_calls": 171,
+          "highlight_ms": 0.9,
+          "decorate_ms": 13.9,
+          "message_renders": 681
+        }
+      },
+      "scroll": {
+        "scroll_top_ms": 17.600000000558794,
+        "top_visible": true,
+        "scroll_top": 0,
+        "rows": 304,
+        "longtask_count": 0,
+        "longtask_total_ms": 0,
+        "scroll_button": true
+      },
+      "errors": []
+    }
+  ]
+}

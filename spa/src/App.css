@@ -1563,11 +1563,23 @@ button:disabled {
   color: var(--text);
 }
 
-.md > :first-child {
+/* M32: the streaming message is split into a frozen prefix and a live tail.
+   `display: contents` keeps their blocks laying out as direct children of
+   `.md` (the typography rules below are descendant selectors). */
+.md-head,
+.md-tail {
+  display: contents;
+}
+
+.md > :first-child,
+.md-head > :first-child,
+.md-tail.md-first > :first-child {
   margin-top: 0;
 }
 
-.md > :last-child {
+.md > :last-child,
+.md-head:last-child > :last-child,
+.md-tail > :last-child {
   margin-bottom: 0;
 }
 
