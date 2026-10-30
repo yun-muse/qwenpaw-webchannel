@@ -289,6 +289,11 @@ const state = {
   effortReject: {},
   /** M27: how long the first `msg` takes to create the ChatSpec. */
   createDelay: 2500,
+  /** M31: keep sent turns (with attachments) in the mock history. */
+  recordSends: false,
+  /** M31: opaque ref -> {name, mime, bytes} for `att_get`. */
+  media: {},
+  attSeq: 0,
 };
 
 function resetState() {
@@ -296,7 +301,12 @@ function resetState() {
     { chat: 'chat-alpha', title: 'Alpha 会话', updated_at: '2026-10-28T09:00:00Z' },
     { chat: 'chat-beta', title: 'Beta 会话', updated_at: '2026-10-27T09:00:00Z' },
   ];
-  state.history = { 'chat-alpha': HISTORY, 'chat-beta': BETA_HISTORY };
+  // M31 appends to a chat's history; copy the fixtures so one pass cannot
+  // leak turns (or attachment refs) into the next.
+  state.history = {
+    'chat-alpha': HISTORY.map((message) => ({ ...message })),
+    'chat-beta': BETA_HISTORY.map((message) => ({ ...message })),
+  };
   state.usage = {
     'chat-alpha': {
       input_total: 12345,
@@ -315,6 +325,9 @@ function resetState() {
   state.effortGetLog = [];
   state.effortReject = {};
   state.createDelay = 2500;
+  state.recordSends = false;
+  state.media = {};
+  state.attSeq = 0;
   for (const timer of state.streaming.values()) clearInterval(timer);
   state.streaming.clear();
 }
@@ -357,6 +370,10 @@ function streamReply(chat) {
     state.streaming.delete(chat);
     agentSend({ t: 'end', chat, seq: seq++ });
     agentSend({ t: 'msg', chat, seq: seq++, parts: [{ type: 'text', text: STREAM_TEXT }] });
+    if (state.recordSends) {
+      const list = state.history[chat] || (state.history[chat] = []);
+      list.push({ role: 'assistant', text: STREAM_TEXT });
+    }
   }, 45);
   state.streaming.set(chat, timer);
 }
@@ -369,7 +386,7 @@ function handleAgentFrame(frame) {
     case 'models':
       agentSend({
         t: 'models',
-        items: [{ provider: 'mock', model: 'mock-1', active: true }],
+        items: [{ provider: 'mock', model: 'mock-1', active: true, vision: true }],
       });
       break;
     case 'skills':
@@ -490,7 +507,60 @@ function handleAgentFrame(frame) {
       if (state.notCreated.has(chat)) {
         setTimeout(() => state.notCreated.delete(chat), state.createDelay);
       }
+      // M31: mirror what QwenPaw persists -- a user turn with the attachment
+      // metadata (and an empty text when the turn was attachment-only).
+      if (state.recordSends && Array.isArray(frame.files) && frame.files.length) {
+        const file = frame.files[0];
+        const bytes = Buffer.from(String(file.data || ''), 'base64');
+        const ref = `mock-att-${++state.attSeq}`;
+        const name = String(file.name || 'attachment');
+        const mime = String(file.mime || 'application/octet-stream');
+        state.media[ref] = { name, mime, bytes };
+        const list = state.history[chat] || (state.history[chat] = []);
+        list.push({
+          role: 'user',
+          text: String(frame.text || ''),
+          files: [{
+            name,
+            mime,
+            size: bytes.length,
+            kind: mime.startsWith('image/') ? 'image' : 'file',
+            ref,
+          }],
+        });
+      }
       streamReply(chat);
+      break;
+    }
+    case 'att_get': {
+      const chat = String(frame.chat || '');
+      const id = String(frame.id || '');
+      const media = state.media[String(frame.ref || '')];
+      if (!media) {
+        agentSend({
+          t: 'error', code: 'E_ATT', chat, id, detail: 'unknown mock ref',
+        });
+        break;
+      }
+      const sha256 = createHash('sha256').update(media.bytes).digest('hex');
+      const pieces = [];
+      for (let at = 0; at < media.bytes.length; at += 96 * 1024) {
+        pieces.push(media.bytes.subarray(at, at + 96 * 1024));
+      }
+      agentSend({
+        t: 'att_begin',
+        chat,
+        id,
+        bytes: media.bytes.length,
+        chunks: pieces.length,
+        sha256,
+        name: media.name,
+        mime: media.mime,
+      });
+      pieces.forEach((piece, i) => {
+        agentSend({ t: 'att_chunk', chat, id, i, data: piece.toString('base64') });
+      });
+      agentSend({ t: 'att_end', chat, id });
       break;
     }
     case 'stop': {
@@ -2803,6 +2873,152 @@ async function runM26Evidence(page, pass, mobile) {
 // One pass (desktop or mobile)
 // ---------------------------------------------------------------------------
 
+
+// ---------------------------------------------------------------------------
+// M31 — attachments: send an image, reload, see it come back
+// ---------------------------------------------------------------------------
+
+/** 1x1 PNG: valid image bytes, small enough for the v1 inline path. */
+const ATT_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+  'base64',
+);
+
+async function runM31Checks(page, pass, mobile) {
+  resetState();
+  state.recordSends = true;
+  await page.evaluate(() => {
+    localStorage.setItem('webchannel.chats', JSON.stringify(['chat-alpha']));
+    localStorage.setItem('webchannel.activeChat', 'chat-alpha');
+    localStorage.setItem('webchannel.chatNames', '{}');
+    localStorage.setItem('webchannel.pinnedChats', '[]');
+    localStorage.removeItem('webchannel.chatTags');
+    localStorage.removeItem('webchannel.effort');
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await waitForHistory(page);
+  await sleep(300);
+
+  // ---- M31.1: attachment-only image turn --------------------------------
+  // The draft is persisted per chat; clear it so this turn really has no text
+  // (the point of the check is the attachment-only projection).
+  await page.locator('.composer textarea').fill('');
+  await page.setInputFiles('.composer input[type=file]', {
+    name: '截图.png',
+    mimeType: 'image/png',
+    buffer: ATT_PNG,
+  });
+  const ready = await waitUntil(async () => {
+    const note = await page.locator('.chips .chip-note').textContent().catch(() => '');
+    return Boolean(note && note.includes('已就绪'));
+  }, 5000);
+  check(`${pass}: an image is picked and staged for sending`, ready);
+  await page.locator('.composer .send').click();
+  const sentImage = await waitUntil(
+    () => (state.history['chat-alpha'] || []).some((m) => m.files && m.files.length),
+    10000,
+  );
+  const streamed = await waitUntil(() => !state.streaming.has('chat-alpha'), 20000);
+  check(`${pass}: an attachment-only image turn is sent`, sentImage && streamed);
+  const optimistic = await page.evaluate(() => ({
+    names: [...document.querySelectorAll('.messages .bubble-files .att-name')].map(
+      (el) => (el.textContent || '').trim(),
+    ),
+  }));
+  check(
+    `${pass}: the optimistic bubble names the image`,
+    optimistic.names.includes('截图.png'),
+    JSON.stringify(optimistic),
+  );
+
+  // ---- M31.2: the image survives a reload (hist files + att_get) ---------
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await waitForHistory(page);
+  const thumbLoaded = await waitUntil(
+    () => page.evaluate(() => {
+      const img = document.querySelector('.messages img.att-thumb');
+      return Boolean(img && img.complete && img.naturalWidth > 0);
+    }),
+    15000,
+  );
+  const thumb = await page.evaluate(() => {
+    const img = document.querySelector('.messages img.att-thumb');
+    const row = img ? img.closest('.row') : null;
+    return {
+      src: img ? img.getAttribute('src') || '' : '',
+      alt: img ? img.getAttribute('alt') || '' : '',
+      width: img ? img.naturalWidth : 0,
+      rowText: row ? (row.textContent || '').trim() : '',
+      bubbleText: row && row.querySelector('.bubble .plain')
+        ? (row.querySelector('.bubble .plain').textContent || '')
+        : null,
+      userRows: document.querySelectorAll('.messages .row.user').length,
+    };
+  });
+  check(
+    `${pass}: the image is visible after a history refresh`,
+    thumbLoaded &&
+      thumb.src.startsWith('blob:') &&
+      thumb.alt === '截图.png' &&
+      thumb.width === 1 &&
+      thumb.userRows >= 2,
+    JSON.stringify(thumb),
+  );
+  check(
+    `${pass}: an attachment-only turn keeps an (empty-text) user row`,
+    thumb.bubbleText === '' &&
+      !thumb.rowText.includes('已经下载到') &&
+      !thumb.rowText.includes('downloaded to'),
+    JSON.stringify({ text: thumb.bubbleText, row: thumb.rowText }),
+  );
+
+  // ---- M31.3: a non-image attachment keeps its name + download button ----
+  await page.setInputFiles('.composer input[type=file]', {
+    name: '笔记.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('附件下载测试', 'utf-8'),
+  });
+  await waitUntil(async () => {
+    const note = await page.locator('.chips .chip-note').textContent().catch(() => '');
+    return Boolean(note && note.includes('已就绪'));
+  }, 5000);
+  await page.locator('.composer textarea').fill('请读一下附件');
+  await page.locator('.composer .send').click();
+  const sentFile = await waitUntil(
+    () => (state.history['chat-alpha'] || []).some(
+      (m) => m.files && m.files.some((f) => f.name === '笔记.txt'),
+    ),
+    10000,
+  );
+  check(`${pass}: a text attachment turn is sent`, sentFile);
+  await waitUntil(() => !state.streaming.has('chat-alpha'), 20000);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await waitForHistory(page);
+  const chipReady = await waitUntil(
+    () => page.evaluate(() => [...document.querySelectorAll('.messages .att-chip .att-name')]
+      .some((el) => (el.textContent || '').trim() === '笔记.txt')),
+    15000,
+  );
+  check(`${pass}: a file attachment keeps its name after a refresh`, chipReady);
+
+  const downloadPromise = page.waitForEvent('download', { timeout: 15000 });
+  await page
+    .locator('.messages .att-chip', { hasText: '笔记.txt' })
+    .first()
+    .locator('.att-download')
+    .click();
+  const download = await downloadPromise;
+  check(
+    `${pass}: the file attachment downloads with its own name`,
+    download.suggestedFilename() === '笔记.txt',
+    download.suggestedFilename(),
+  );
+  check(
+    `${pass}: the retried file turn still shows its text`,
+    (await page.locator('.messages .row.user', { hasText: '请读一下附件' }).count()) === 1,
+  );
+}
+
 async function runPass(browser, pass, viewport, mobile) {
   resetState();
   const contextOptions = mobile
@@ -3331,6 +3547,9 @@ async function runPass(browser, pass, viewport, mobile) {
 
     // ---- 13. M27: deferred thinking level (pre-creation 404) -------------
     await runM27Checks(page, pass, mobile);
+
+    // ---- 14. M31: attachments survive a history refresh -------------------
+    await runM31Checks(page, pass, mobile);
 
     check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
   } finally {

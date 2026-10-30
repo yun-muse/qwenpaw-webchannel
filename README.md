@@ -19,7 +19,7 @@
 - **Markdown 导出**：`export` → `export_begin` / `export_chunk` / `export_end`，分块传输、sha256 校验，上限 10 MB。
 - **Turso 归档全文搜索**：插件把对话 best-effort 写入 Turso，`search` 在 `messages` / `chats` 上做参数化 `LIKE`，只回 snippet 和命中位置。
 - **心跳自愈**：`hb` / `hb_ack` 端到端探测（15 s 一次、10 s 未回、连续 2 次失败重连），配合连接阶段监管和退避重连；只有 close 4000、`E_AUTH`、HTTP 401/403 或显式 `stop()` 才终止。
-- **10 MB 分块附件**：`file_begin` / `file_chunk` / `file_end`，96 KB 一片、sha256 校验、10 分钟暂存，成功后用 `{"ref": id}` 引用。
+- **10 MB 分块附件与历史回看**：`file_begin` / `file_chunk` / `file_end`，96 KB 一片、sha256 校验、10 分钟暂存，成功后用 `{"ref": id}` 引用；`hist.messages[].files` 带名称/类型/大小（按 URL 去重、纯附件轮次保留），图片以 `FileContent` + `ImageContent` 双 part 交给多模态模型，历史里的缩略图与下载走 `att_get` → `att_begin` / `att_chunk` / `att_end`（opaque ref、10 MB 上限、media_dir 路径守卫）。
 
 ## 架构
 

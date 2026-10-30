@@ -66,8 +66,8 @@ superseded generation) is not acked.
 | `msg` | `chat`, `seq?`, `parts[]` | complete message, tool result or attachment reference |
 | `approval` | `chat`, `req_id`, `tool`, `severity`, `summary` | approval request |
 | `resync` | `chat`, `reason?` | ring buffer miss; client must reload history |
-| `hist` | `chat`, `messages:[{role, text, turn?}]`, `more?`, `seq?` | reply to a `hist` request; `more:true` means another `hist` frame follows; `turn` is the **v8** optional per-turn usage receipt (§11.2) |
-| `models` | `items:[{provider, model, active}]` | **v3** reply to a `models` request; exactly one item has `active:true` when the agent's current (effective) model is known |
+| `hist` | `chat`, `messages:[{role, text, files?, turn?}]`, `more?`, `seq?` | reply to a `hist` request; `more:true` means another `hist` frame follows; `turn` is the **v8** optional per-turn usage receipt (§11.2); `files` is the **v10** optional attachment list (§15.3) |
+| `models` | `items:[{provider, model, active, vision?}]` | **v3** reply to a `models` request; exactly one item has `active:true` when the agent's current (effective) model is known; `vision` is the **v10** optional boolean picture capability (omitted when unprobed, §15.4) |
 | `model_changed` | `provider`, `model` | **v3** a `set_model` succeeded; this pair is now the agent's active model |
 | `status` | `agent_name`, `provider?`, `model?` | **v3** identity push, sent when the agent attaches and whenever a client joins/leaves; the header displays it |
 | `effort` | `chat`, `level`, `effective`, `budget_tokens?`, `supported?`, `kind?`, `model_key?` | **v4** session thinking state: reply to `get_effort` / `set_effort`; control frame |
@@ -77,6 +77,9 @@ superseded generation) is not acked.
 | `export_chunk` | `chat`, `id`, `i`, `data` | **v6** one export chunk; `i` is 0-based, `data` is base64 of ≤96 KB raw bytes; control frame |
 | `export_end` | `chat`, `id` | **v6** all export chunks sent; the client verifies and saves; control frame |
 | `search_results` | `id`, `q`, `items:[{chat, title, role, snippet, match_start, match_len, ts}]`, `total` | **v7** archive full-text search reply to `search`; control frame |
+| `att_begin` | `chat`, `id`, `bytes`, `chunks`, `sha256`, `name`, `mime?` | **v10** attachment snapshot: exact byte length, chunk count, lower-case hex digest, bare display name; control frame (§15.2) |
+| `att_chunk` | `chat`, `id`, `i`, `data` | **v10** one attachment chunk; `i` is 0-based, `data` is base64 of ≤96 KB raw bytes; control frame |
+| `att_end` | `chat`, `id` | **v10** all attachment chunks sent; the client verifies before rendering/saving; control frame |
 | `file_ready` | `chat`, `id`, `seq?` | **v2** chunked upload verified and staged; `files[]` may now use `{"ref": id}` |
 | `file_error` | `chat`, `id`, `code`, `msg?`, `seq?` | **v2** chunked upload failed; `code` ∈ `E_CHECKSUM` / `E_TOOBIG` / `E_STATE` |
 | `pong` | — | reserved; the relay answers `ping` locally in v1 |
@@ -91,9 +94,10 @@ model's thinking and MUST NOT be concatenated into it. A reply is streaming unti
 segment's `end` — an `end` for `reasoning` closes that segment only. Missing `stream_type` means
 `message` (older containers).
 
-`models`, `model_changed`, `status`, `effort`, `usage`, `stats`, the `export_*` frames and
-`search_results` are **control frames**: they carry no `seq`, belong to no chat's stream, and are
-never ring-buffered or replayed on `resume` (§9.4, §10.3, §11.3, §12.4, §13.4, §14.4).
+`models`, `model_changed`, `status`, `effort`, `usage`, `stats`, the `export_*` frames,
+`search_results` and the `att_*` frames are **control frames**: they carry no `seq`, belong to no
+chat's stream, and are never ring-buffered or replayed on `resume` (§9.4, §10.3, §11.3, §12.4,
+§13.4, §14.4, §15.2).
 
 ### 2.4 browser → container
 
@@ -112,6 +116,7 @@ never ring-buffered or replayed on `resume` (§9.4, §10.3, §11.3, §12.4, §13
 | `get_stats` | `id?` | **v9** request the all-chats usage dashboard (§14) |
 | `export` | `chat`, `id` | **v6** request a Markdown export of that chat; answered with `export_begin` / `export_chunk` / `export_end` |
 | `search` | `id`, `q`, `limit?` | **v7** full-text search over the archive; answered with `search_results` or `error{code:"E_SEARCH"}` |
+| `att_get` | `chat`, `id`, `ref` | **v10** fetch one history attachment by its opaque plugin-issued `ref`; answered with `att_begin` / `att_chunk` / `att_end` or `error{code:"E_ATT"}` |
 | `file_begin` | `chat`, `id`, `name`, `mime`, `size`, `chunks`, `sha256` | **v2** start a chunked upload; `chunks` is how many `file_chunk` frames follow |
 | `file_chunk` | `chat`, `id`, `i`, `data` | **v2** one chunk; `i` is 0-based, `data` is base64 of ≤96 KB raw bytes |
 | `file_end` | `chat`, `id` | **v2** client finished sending; agent answers `file_ready` or `file_error` |
@@ -121,7 +126,9 @@ never ring-buffered or replayed on `resume` (§9.4, §10.3, §11.3, §12.4, §13
 `chat`/session before acting (design §8), so a replayed or cross-session `req_id` is rejected.
 
 `msg.files[]` items are `{name, mime, data}` (v1 inline, base64 `data`) or, after a `file_ready`,
-`{"ref": "<id>"}` (v2) referring to a file staged by a chunked upload. See §8.
+`{"ref": "<id>"}` (v2) referring to a file staged by a chunked upload. Since **v10** a `ref` item
+also carries the metadata the browser already knows -- `{"ref", "name", "mime", "size"}` -- so the
+archive keeps the file name even after the staged record expires (§15.6). See §8.
 
 ### 2.5 relay → browser
 
@@ -212,6 +219,7 @@ Error frame: `{"t":"error","code":"...","id":"<offending frame id, if any>"}`.
 | `E_EFFORT` | thinking setting unavailable, unknown level, unsupported by the current model, or the app rejected the write | client restores the last confirmed level and shows the error; a 404 is different: the chat has no server record yet, so the local choice is kept **without any error UI** and re-applied after the first completed turn (§10.2); the connection is unaffected |
 | `E_EXPORT` | export requested for a chat with no server record, or its history could not be read or rendered | client shows the error; the connection is unaffected |
 | `E_SEARCH` | search with an empty query, an archive that is not configured, or a Turso request that failed | client shows "search unavailable"; the connection is unaffected |
+| `E_ATT` | attachment ref unknown, expired or from another chat; the message is gone; the file is outside the media directory, missing or over 10 MB | client keeps the attachment chip and shows no toast; always carries `chat` and `id`, and the connection is unaffected |
 
 `E_AUTH` is enforced at the HTTP upgrade (401 before the socket opens), so it is normally not seen
 as a frame — a browser only observes a bare `close`. Because there is no close reason to read, a
@@ -584,12 +592,16 @@ only drops its line — it never fails the export.
 Every `Message` keeps its type:
 
 - `MESSAGE` — a `### <role> · <metadata.timestamp>` heading followed by its text and any
-  `[附件: name]` lines.
+  `[附件: name · mime · size bytes]` lines (one per file; the size is omitted when it could not be
+  measured).
 - `REASONING` — a collapsible `<details><summary>思考过程</summary>…</details>` block.
 - `PLUGIN_CALL` / `PLUGIN_CALL_OUTPUT` — compact blocks: the tool name on one line, arguments/output
   in a fenced code block.
 - Attachments are metadata only: the bare `filename` (or the last path segment of a URL, or
-  `内嵌附件` for a data URL). Absolute hosted paths and payload bytes never appear.
+  `内嵌附件` for a data URL), the MIME (declared, taken from a data URL, or guessed from the
+  extension) and the size in bytes when the file could be stat'ed. Absolute hosted paths and payload
+  bytes never appear. A file that is both a `file` and an `image` part (G2-A) is deduplicated by
+  URL, so it produces exactly one line.
 
 **Turn usage footnotes (M20).** When the history payload already carries QwenPaw's
 `qwenpaw_turn_usage`, the assistant message that closes a persisted `Msg` (the same anchor `hist`
@@ -859,3 +871,93 @@ is only the latter).
   switch cannot be seen in the data.
 - Cache keys follow §14.5 per row: a model with no observed turn shows no cache fields (the UI
   prints `—`), which is **not** a 0% hit rate.
+
+## 15. Protocol v10 — attachment history and retrieval (M31)
+
+History used to carry text only: a picture or a document vanished on reload, and a turn that had no
+text disappeared entirely (with its answer left hanging). v10 makes attachments first-class in
+`hist` and adds a bounded, opaque way to fetch the bytes back. The relay needs **no changes**:
+every `att_*` frame is an ordinary frame it forwards verbatim.
+
+### 15.1 Why refs instead of paths
+
+`GET /api/chats/{id}` reports a local attachment as an absolute container path
+(`FileContent.file_url` / `ImageContent.image_url`). That path is useful to the plugin (it is the
+same machine) and meaningless to a browser, and publishing it would leak the container layout. The
+plugin therefore mints an opaque, random `ref` per `(chat, message original_id, part index)` and
+keeps the path in memory only. The browser can ask for a ref; it can never name a path.
+
+### 15.2 Wire format (control frames, no `seq`)
+
+```
+browser → container : {"t":"att_get","chat":"…","id":"<request id>","ref":"<opaque>"}
+container → browser : {"t":"att_begin","chat","id","bytes","chunks","sha256","name","mime?"}
+                      {"t":"att_chunk","chat","id","i","data"}   // ≤96 KB raw bytes, 40 ms apart
+                      {"t":"att_end","chat","id"}
+                      {"t":"error","code":"E_ATT","chat","id","detail"}
+```
+
+- `id` is the client's correlation id and is echoed by every reply; frames for an unknown id are
+  ignored. `bytes` is the exact file length, `chunks` the number of `att_chunk` frames, `sha256` the
+  lower-case hex digest of the whole file, `name` the bare display name.
+- Chunks are contiguous slices of the file and reassembly is byte-identical; the stream is paced
+  like an export (§12.3) so a 10 MB file stays inside the relay's 30 frames/s budget.
+- The client MUST verify the length and SHA-256 before rendering or saving, and MUST ignore a
+  stream that never received `att_end`.
+- `att_*` frames are control frames: no ring buffering, no replay on `resume`.
+
+### 15.3 `hist.messages[].files`
+
+An optional array on a message:
+
+```json
+{"role":"user","text":"","files":[
+  {"name":"截图.png","mime":"image/png","size":28417,"kind":"image","ref":"hT3…"}
+]}
+```
+
+- `name` is the bare file name (no directory, no URL, no data URL payload).
+- `mime` is omitted when unknown; `size` is omitted when the file could not be stat'ed — never 0.
+- `kind` is `"image"` or `"file"`. An image that the plugin sends as both `FileContent` and
+  `ImageContent` (G2-A, same URL) is one entry with `kind:"image"`.
+- `ref` is present only for files that live on the container filesystem; a data URL or an HTTP
+  attachment has none and is display-only.
+- A message with attachments and no text is still a turn: `text` is `""` and `files` is non-empty.
+  A message with neither is still skipped. Turn receipts (`turn`) keep their M15 anchoring rules:
+  only the group's last assistant **text** segment carries one.
+
+Refs expire ten minutes after being issued (re-issued by a later `hist` answer) and are bound to one
+chat.
+
+### 15.4 `models.items[].vision`
+
+An optional boolean copied from the model's own metadata (`supports_image`, falling back to
+`supports_multimodal`). Omitted means "not probed" and MUST NOT be treated as `false`: QwenPaw
+fails open for unprobed models and may still accept images. Only this boolean leaves
+`ProviderInfo` — never `api_key`, `base_url` or any other provider field. The SPA shows a subtle
+hint only when `vision` is `false`.
+
+### 15.5 Server-side validation (all required)
+
+A request is refused with `E_ATT` (and nothing is streamed) when any of these fails:
+
+1. the ref is unknown or older than ten minutes;
+2. the ref belongs to another chat;
+3. a fresh `GET /api/chats/{id}` no longer contains that message (`metadata.original_id`) with the
+   same attachment URL;
+4. `Path(path).resolve()` is not inside the console media directory (`CONSOLE_MEDIA_DIR`, else
+   `<workspace_dir>/media`) — this rejects `..` traversal and a symlink that points outside;
+5. the target is not a regular file, or is larger than **10 MB**.
+
+### 15.6 Upload metadata (G4)
+
+A chunked upload still travels as `file_begin` / `file_chunk` / `file_end` (§8). The `msg.files[]`
+entry that consumes it now also carries the metadata the browser already knows:
+
+```json
+{"ref":"file-…","name":"报告.pdf","mime":"application/pdf","size":123456}
+```
+
+The plugin prefers the entry's own `name`/`mime`/`size` and falls back to the staged record, so an
+archive entry keeps its file name even when the staged upload has expired. The archive uses the
+first attachment name as the chat title when a turn has no text.

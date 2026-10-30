@@ -191,7 +191,7 @@ def test_markdown_mixed_conversation():
 
     assert "### 用户 · %s" % TS in doc
     assert "你好" in doc
-    assert "[附件: 报告.pdf]" in doc
+    assert "[附件: 报告.pdf · application/pdf]" in doc
     # An attachment only ever leaks its bare file name.
     assert "/home/agent" not in doc
 
@@ -314,8 +314,8 @@ def test_markdown_attachment_only_message():
     ]), WEB_CHAT, "t", EXPORTED_AT)
 
     assert "- 消息条数：2" in doc
-    assert "[附件: a.png]" in doc
-    assert "[附件: pic one.png]" in doc
+    assert "[附件: a.png · image/png]" in doc
+    assert "[附件: pic one.png · image/png]" in doc
     assert "data:image" not in doc
     assert "/tmp/media" not in doc
 
@@ -360,7 +360,7 @@ def test_attachment_without_name_uses_url_basename():
             "file_url": "https://example.test/a/b/report.txt?token=1",
         }]),
     ]), WEB_CHAT, "t", EXPORTED_AT)
-    assert "[附件: report.txt]" in doc
+    assert "[附件: report.txt · text/plain]" in doc
     assert "example.test" not in doc
 
 

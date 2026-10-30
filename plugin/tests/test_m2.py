@@ -176,7 +176,13 @@ def test_history_messages_extracts_role_and_text():
     ]
 
 
-def test_history_messages_skips_textless_messages():
+def test_history_messages_keeps_attachment_only_messages():
+    """M31: a turn with an attachment but no text is a real user turn.
+
+    Before M31 the projection dropped every message without text, so a pure
+    image/file turn disappeared from history while its answer stayed. The
+    textless, attachmentless message is still skipped.
+    """
     history = {
         "messages": [
             {"role": "assistant", "content": [{"type": "text", "text": ""}]},
@@ -184,7 +190,14 @@ def test_history_messages_skips_textless_messages():
             {"content": [{"type": "text", "text": "no role"}]},
         ],
     }
-    assert history_messages(history) == [{"role": "", "text": "no role"}]
+    assert history_messages(history) == [
+        {
+            "role": "assistant",
+            "text": "",
+            "files": [{"name": "x", "kind": "image"}],
+        },
+        {"role": "", "text": "no role"},
+    ]
 
 
 def test_history_messages_limit_and_default():

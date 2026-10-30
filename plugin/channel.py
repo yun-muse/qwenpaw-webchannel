@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import os
 import time
 from datetime import datetime
 from pathlib import Path
@@ -29,12 +30,15 @@ import httpx
 # Real import lines from the v2.2.2.post1 sources: BaseChannel lives in
 # qwenpaw.app.channels.base, which (like console/channel.py's ``..base``
 # import) re-exports ContentType / TextContent / FileContent from
-# qwenpaw.schemas.
+# qwenpaw.schemas. ImageContent matters for M31: a FileContent always becomes
+# an ``application/octet-stream`` DataBlock that every formatter drops, while
+# ImageContent becomes a real ``image/*`` block.
 try:
     from qwenpaw.app.channels.base import (
         BaseChannel,
         ContentType,
         FileContent,
+        ImageContent,
         TextContent,
     )
 except ImportError:  # standalone test environment without host package
@@ -47,6 +51,7 @@ except ImportError:  # standalone test environment without host package
     class ContentType:  # type: ignore[no-redef]
         TEXT = "text"
         FILE = "file"
+        IMAGE = "image"
 
     class TextContent:  # type: ignore[no-redef]
         def __init__(self, type=None, text=""):
@@ -59,12 +64,20 @@ except ImportError:  # standalone test environment without host package
             self.filename = filename
             self.file_url = file_url
 
+    class ImageContent:  # type: ignore[no-redef]
+        def __init__(self, type=None, image_url=""):
+            self.type = type
+            self.image_url = image_url
+
 try:  # package-relative (tests, ``python -m plugin...``)
     from .frames import (
         RingBuffer,
         SeqCounter,
         StreamDiffer,
         approval_frame,
+        att_begin_frame,
+        att_chunk_frame,
+        att_end_frame,
         chat_deleted_frame,
         chat_renamed_frame,
         chats_frame,
@@ -99,7 +112,9 @@ try:  # package-relative (tests, ``python -m plugin...``)
     from .util import (
         ANSWER_STREAM_TYPE,
         MAX_EXPORT_BYTES,
+        MAX_FILE_BYTES,
         PROMPT_FILES,
+        AttachmentRefs,
         FileTransfers,
         SessionUsageStore,
         active_llm_detail,
@@ -114,8 +129,10 @@ try:  # package-relative (tests, ``python -m plugin...``)
         extract_skill_items,
         extract_web_chats,
         hist_limit,
+        history_has_attachment,
         history_messages,
         is_effort_level,
+        media_file_path,
         model_items,
         pack_history,
         plan_model_switch,
@@ -128,6 +145,9 @@ except ImportError:  # loaded as a top-level module by the plugin loader
         SeqCounter,
         StreamDiffer,
         approval_frame,
+        att_begin_frame,
+        att_chunk_frame,
+        att_end_frame,
         chat_deleted_frame,
         chat_renamed_frame,
         chats_frame,
@@ -162,7 +182,9 @@ except ImportError:  # loaded as a top-level module by the plugin loader
     from util import (
         ANSWER_STREAM_TYPE,
         MAX_EXPORT_BYTES,
+        MAX_FILE_BYTES,
         PROMPT_FILES,
+        AttachmentRefs,
         FileTransfers,
         SessionUsageStore,
         active_llm_detail,
@@ -177,8 +199,10 @@ except ImportError:  # loaded as a top-level module by the plugin loader
         extract_skill_items,
         extract_web_chats,
         hist_limit,
+        history_has_attachment,
         history_messages,
         is_effort_level,
+        media_file_path,
         model_items,
         pack_history,
         plan_model_switch,
@@ -201,6 +225,8 @@ _UPLOAD_TIMEOUT_S = 60.0
 # Exports are pushed back to the browser in 96 KB chunks; the hosted relay
 # allows 30 frames/s per tenant, so leave ~40 ms between chunks (M12).
 _EXPORT_CHUNK_PACE_S = 0.04
+# Attachment downloads use the same pacing and the same 96 KB chunk size (M31).
+_ATT_CHUNK_PACE_S = 0.04
 # A search page is at most 50 hits. Snippets are ~90 characters, so the reply
 # is a small control frame that needs no size check (M13).
 _SEARCH_LIMIT_MAX = 50
@@ -297,6 +323,8 @@ class WebChannel(BaseChannel):
         self._agent_name: Optional[str] = None
         # Protocol v2 chunked uploads: in-progress assemblies + staged files.
         self._files = FileTransfers()
+        # M31: opaque refs handed to the browser for history attachments.
+        self._attachments = AttachmentRefs()
         # Rotating local log of the relay lifecycle (M7.2); owned by start().
         self._flog: Optional[FileLog] = None
         # Per-session token usage read from the agent's session files (M11).
@@ -565,6 +593,8 @@ class WebChannel(BaseChannel):
             await self._handle_hist(frame)
         elif kind == "export":
             await self._handle_export(frame)
+        elif kind == "att_get":
+            await self._handle_att_get(frame)
         elif kind == "search":
             await self._handle_search(frame)
         elif kind in ("approve", "deny"):
@@ -621,34 +651,23 @@ class WebChannel(BaseChannel):
         # the bytes), collected before the entries are resolved/consumed.
         files_meta: List[Dict[str, Any]] = []
         if isinstance(files, list):
+            now = time.monotonic()
             for entry in files:
                 if not isinstance(entry, dict):
                     continue
-                name = entry.get("name")
-                if not name:
-                    continue
-                size: Optional[int] = None
-                raw = entry.get("data")
-                if isinstance(raw, str) and raw:
-                    try:
-                        size = len(base64.b64decode(raw))
-                    except Exception:  # noqa: BLE001 - metadata is best effort
-                        size = None
-                else:
-                    declared = entry.get("size")
-                    if isinstance(declared, int) and not isinstance(
-                        declared, bool,
-                    ):
-                        size = declared
-                files_meta.append({
-                    "name": str(name),
-                    "mime": str(entry.get("mime") or ""),
-                    "size": size,
-                })
+                # M31/G4: a chunked message only carries {ref}; the staged
+                # record still knows the name/mime/size the archive needs.
+                staged = None
+                ref = entry.get("ref")
+                if isinstance(ref, str) and ref and "data" not in entry:
+                    staged = self._files.peek(ref, now)
+                meta = self._file_meta(entry, staged)
+                if meta is not None:
+                    files_meta.append(meta)
             for entry in files:
-                part = await self._resolve_file_entry(chat, entry)
-                if part is not None:
-                    content_parts.append(part)
+                content_parts.extend(
+                    await self._resolve_file_entry(chat, entry),
+                )
         if not content_parts:
             return
 
@@ -674,15 +693,64 @@ class WebChannel(BaseChannel):
             chat, text, files_meta, int(time.time() * 1000),
         )
 
+    @staticmethod
+    def _file_meta(
+        entry: Dict[str, Any], staged: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """``{name, mime, size}`` for one inbound ``files[]`` item, or None.
+
+        Name resolution order (G4): the entry's own ``name``, then the staged
+        record a ``{ref}`` points at. Without either the item is invisible to
+        the archive and skipped. The name is reduced to a bare file name --
+        a client-supplied path must not become an archive title.
+        """
+        name = entry.get("name")
+        if not (isinstance(name, str) and name.strip()):
+            name = (staged or {}).get("name")
+        if not (isinstance(name, str) and name.strip()):
+            return None
+        bare = name.strip().replace("\\", "/").rsplit("/", 1)[-1]
+        if not bare:
+            return None
+
+        mime = entry.get("mime")
+        if not (isinstance(mime, str) and mime.strip()):
+            mime = (staged or {}).get("mime") or ""
+
+        size: Optional[int] = None
+        raw = entry.get("data")
+        if isinstance(raw, str) and raw:
+            try:
+                size = len(base64.b64decode(raw))
+            except Exception:  # noqa: BLE001 - metadata is best effort
+                size = None
+        if size is None:
+            declared = entry.get("size")
+            if (
+                isinstance(declared, int)
+                and not isinstance(declared, bool)
+                and declared >= 0
+            ):
+                size = declared
+        if size is None:
+            staged_size = (staged or {}).get("size")
+            if isinstance(staged_size, int) and not isinstance(
+                staged_size, bool,
+            ):
+                size = staged_size
+
+        return {"name": bare, "mime": str(mime), "size": size}
+
     async def _resolve_file_entry(
         self, chat: str, entry: Any,
-    ) -> Optional[FileContent]:
-        """Turn one ``msg.files[]`` item into a ``FileContent`` (A4 + v2 refs).
+    ) -> List[Any]:
+        """Turn one ``msg.files[]`` item into its content parts (A4 + v2 refs).
 
         ``{"ref": "<id>"}`` (no ``data``) consumes a file staged by a chunked
         upload; everything else takes the v1 inline ``{name, mime, data}``
         path. Refs are one-shot, so an unknown/expired/consumed one is logged
-        and the entry skipped.
+        and the entry skipped. A successful upload yields one part, or two
+        for an image (M31/G2-A).
         """
         ref = entry.get("ref") if isinstance(entry, dict) else None
         if isinstance(ref, str) and ref and "data" not in entry:
@@ -693,16 +761,16 @@ class WebChannel(BaseChannel):
                     "unknown, expired or already used; entry dropped",
                     chat, ref,
                 )
-                return None
+                return []
             name, mime, data = taken
             return await self._store_file(chat, name, mime, data)
         return await self._upload_file(chat, entry)
 
-    async def _upload_file(self, chat: str, entry: Any) -> Optional[FileContent]:
+    async def _upload_file(self, chat: str, entry: Any) -> List[Any]:
         """Store one inline inbound ``files[]`` item (A4).
 
         Decodes ``{name, mime, base64 data}`` and hands the bytes to
-        ``_store_file``. Returns None (after logging) for an undecodable or
+        ``_store_file``. Returns ``[]`` (after logging) for an undecodable or
         failed item; the rest of the message still goes through.
         """
         decoded = decode_file_entry(entry)
@@ -711,19 +779,27 @@ class WebChannel(BaseChannel):
                 "webchannel: chat=%s sent an undecodable file entry; dropped",
                 chat,
             )
-            return None
+            return []
         return await self._store_file(chat, *decoded)
 
     async def _store_file(
         self, chat: str, name: str, mime: str, data: bytes,
-    ) -> Optional[FileContent]:
-        """Upload raw *data* via the console API; the matching ``FileContent``.
+    ) -> List[Any]:
+        """Upload raw *data* via the console API; the matching content parts.
 
         The console channel receives attachments as ``FileContent(file_url=…)``
         pointing at an absolute path inside its media dir, and
         ``POST /api/console/upload`` is what produces exactly that, so the
         plugin reuses it instead of inventing a second storage location.
-        Returns None (after logging) when the upload fails.
+
+        M31/G2-A: an ``image/*`` upload yields **two** parts with the same
+        URL -- ``FileContent`` first, ``ImageContent`` second. The file part
+        is what makes QwenPaw keep ``qwenpaw_original_user_content`` (a clean
+        history without the media hook's absolute-path hint); the image part
+        is what the runtime turns into an ``image/*`` DataBlock the model's
+        formatter accepts. Other types stay a single ``FileContent``.
+
+        Returns ``[]`` (after logging) when the upload fails.
         """
         try:
             async with httpx.AsyncClient(timeout=_UPLOAD_TIMEOUT_S) as client:
@@ -737,27 +813,32 @@ class WebChannel(BaseChannel):
                     "webchannel: upload of %r for chat=%s failed: HTTP %s",
                     name, chat, response.status_code,
                 )
-                return None
+                return []
             payload = response.json()
         except Exception:  # noqa: BLE001 - one bad upload must not drop the turn
             logger.warning(
                 "webchannel: upload of %r for chat=%s failed", name, chat,
                 exc_info=True,
             )
-            return None
+            return []
 
         url = payload.get("url") if isinstance(payload, dict) else None
         if not url:
             logger.warning(
                 "webchannel: upload of %r for chat=%s returned no url", name, chat,
             )
-            return None
+            return []
         logger.info(
             "webchannel: chat=%s attached %r (%d bytes)", chat, name, len(data),
         )
-        return FileContent(
-            type=ContentType.FILE, filename=name, file_url=str(url),
-        )
+        parts: List[Any] = [
+            FileContent(type=ContentType.FILE, filename=name, file_url=str(url)),
+        ]
+        if str(mime).lower().startswith("image/"):
+            parts.append(
+                ImageContent(type=ContentType.IMAGE, image_url=str(url)),
+            )
+        return parts
 
     # -- protocol v2: chunked file transfer -----------------------------
 
@@ -767,6 +848,7 @@ class WebChannel(BaseChannel):
             logger.warning(
                 "webchannel: dropped expired file transfer id=%s", tid,
             )
+        self._attachments.purge(now)
 
     @staticmethod
     def _file_target(frame: Dict[str, Any]):
@@ -878,16 +960,28 @@ class WebChannel(BaseChannel):
             await relay.send(stored)
 
     async def _handle_hist(self, frame: Dict[str, Any]) -> None:
-        """Reply to ``{t:"hist", chat, limit?}`` with ``hist`` frame(s) (A3)."""
+        """Reply to ``{t:"hist", chat, limit?}`` with ``hist`` frame(s) (A3).
+
+        M31: every attachment that lives on disk gets an opaque ``ref`` (G3)
+        bound to this chat and its persisted message, so the browser can ask
+        for the bytes later without ever naming a path.
+        """
         chat = str(frame.get("chat") or "default")
         limit = hist_limit(frame.get("limit"))
+        now = time.monotonic()
 
-        messages: List[Dict[str, str]] = []
+        def issue(path, msg_id, part_index, name, mime, url=""):
+            return self._attachments.issue(
+                chat, path, msg_id, part_index, name=name, mime=mime,
+                url=url, now=now,
+            )
+
+        messages: List[Dict[str, Any]] = []
         chat_id = await self._resolve_chat_id(chat)
         if chat_id:
             history = await self._get_history(chat_id)
             if history is not None:
-                messages = history_messages(history, limit)
+                messages = history_messages(history, limit, ref_factory=issue)
 
         if not messages:
             await self._emit(
@@ -1719,6 +1813,121 @@ class WebChannel(BaseChannel):
             )
             await self._export_error(chat, export_id, "export failed")
 
+    # -- M31: attachment retrieval (opaque refs, media-dir guard) ---------
+
+    async def _att_error(
+        self, chat: str, att_id: str, detail: str,
+    ) -> None:
+        """Send ``error{code:"E_ATT", chat, id, detail}`` for a refused attachment.
+
+        Always carries ``chat`` and ``id`` so the client can settle exactly
+        one request; an E_ATT must never be mistaken for a connection-level
+        auth failure.
+        """
+        frame = error_frame("E_ATT", detail)
+        frame["chat"] = chat
+        frame["id"] = att_id
+        await self._send_control(frame)
+
+    async def _handle_att_get(self, frame: Dict[str, Any]) -> None:
+        """Reply to ``{t:"att_get", chat, id, ref}`` with the file's bytes (M31).
+
+        The client sends only the opaque ``ref`` it got from ``hist``; a path
+        can never enter this handler. Every request is re-validated:
+
+        1. the ref exists, is unexpired and belongs to **this** chat;
+        2. a fresh ``GET /api/chats/{id}`` still contains the message (same
+           ``metadata.original_id``) with the same attachment URL;
+        3. ``media_file_path`` resolves the file inside the console media
+           directory (``..`` and symlink escapes fail there), requires a
+           regular file and enforces the 10 MB ceiling.
+
+        Success streams ``att_begin`` / ``att_chunk`` / ``att_end`` as control
+        frames (no ``seq``, no replay), sharing the export pacing. Failure is
+        one ``E_ATT``; nothing is ever written partially.
+        """
+        chat = str(frame.get("chat") or "default")
+        att_id = frame.get("id")
+        if not (isinstance(att_id, str) and att_id):
+            logger.warning(
+                "webchannel: att_get without a usable id for chat=%s ignored",
+                chat,
+            )
+            return
+
+        try:
+            now = time.monotonic()
+            self._purge_files(now)
+            entry = self._attachments.resolve(frame.get("ref"), now)
+            if entry is None or entry["chat"] != chat:
+                await self._att_error(
+                    chat, att_id, "unknown or expired attachment ref",
+                )
+                return
+
+            chat_id = await self._resolve_chat_id(chat)
+            if not chat_id:
+                await self._att_error(
+                    chat, att_id, "no QwenPaw chat exists for this session yet",
+                )
+                return
+            history = await self._get_history(chat_id)
+            if history is None or not history_has_attachment(
+                history, entry["msg_id"], entry["url"],
+            ):
+                await self._att_error(
+                    chat, att_id, "attachment is no longer in this chat",
+                )
+                return
+
+            path = media_file_path(entry["path"], self._media_dir())
+            if path is None:
+                await self._att_error(
+                    chat, att_id, "attachment is unavailable",
+                )
+                return
+            # Cap the read: a file that grew between the stat and the read
+            # must not be pulled into memory beyond the declared limit.
+            with path.open("rb") as handle:
+                data = handle.read(MAX_FILE_BYTES + 1)
+            if len(data) > MAX_FILE_BYTES:
+                await self._att_error(
+                    chat, att_id, "attachment exceeds the 10 MB limit",
+                )
+                return
+
+            chunks = chunk_utf8(data)
+            name = entry["name"] or path.name
+            mime = entry["mime"]
+            logger.info(
+                "webchannel: chat=%s attachment id=%s: %d bytes, %d chunks",
+                chat, att_id, len(data), len(chunks),
+            )
+            await self._send_control(att_begin_frame(
+                chat, att_id, len(data), len(chunks), sha256_hex(data),
+                name, mime,
+            ))
+            for index, chunk in enumerate(chunks):
+                if index:
+                    await asyncio.sleep(_ATT_CHUNK_PACE_S)
+                if self._relay is None:
+                    logger.warning(
+                        "webchannel: relay went away during attachment id=%s",
+                        att_id,
+                    )
+                    return
+                await self._send_control(att_chunk_frame(
+                    chat, att_id, index,
+                    base64.b64encode(chunk).decode("ascii"),
+                ))
+            await self._send_control(att_end_frame(chat, att_id))
+        except Exception:  # noqa: BLE001 - a control frame never fails a chat
+            logger.warning(
+                "webchannel: attachment fetch failed for chat=%s id=%s",
+                chat, att_id, exc_info=True,
+            )
+            await self._att_error(chat, att_id, "attachment fetch failed")
+
     # -- M13: full-text search over the archive --------------------------
 
     async def _search_error(
@@ -1789,6 +1998,19 @@ class WebChannel(BaseChannel):
         if ws_dir:
             return Path(ws_dir)
         return Path.home() / ".qwenpaw" / "workspaces" / self._agent_id()
+
+    def _media_dir(self) -> Path:
+        """Directory QwenPaw's console uploads land in (M31).
+
+        ``POST /api/console/upload`` writes to the console channel's
+        ``media_dir``: ``CONSOLE_MEDIA_DIR`` when the deployment sets it,
+        otherwise ``<workspace_dir>/media`` (the console channel's default).
+        Attachment refs are only ever resolved inside this directory.
+        """
+        override = os.getenv("CONSOLE_MEDIA_DIR", "").strip()
+        if override:
+            return Path(override).expanduser()
+        return self._workspace_dir() / "media"
 
     async def _handle_chats(self, frame: Dict[str, Any]) -> None:
         """Reply to ``{t:"chats"}`` with ``{t:"chats", items:[...]}``."""

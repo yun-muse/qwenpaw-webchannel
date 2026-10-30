@@ -52,6 +52,9 @@ __all__ = [
     "StreamDiffer",
     "TRANSFER_TTL_S",
     "approval_frame",
+    "att_begin_frame",
+    "att_chunk_frame",
+    "att_end_frame",
     "chat_deleted_frame",
     "chat_renamed_frame",
     "chats_frame",
@@ -270,6 +273,57 @@ def export_chunk_frame(chat, export_id, index, data):
 def export_end_frame(chat, export_id):
     """Export finished: ``{t:"export_end", chat, id}`` (client verifies + saves)."""
     return {"t": "export_end", "chat": chat, "id": export_id}
+
+
+# ---------------------------------------------------------------------------
+# M31 -- attachment retrieval (protocol/frames.md section 15)
+#
+# ``att_begin`` / ``att_chunk`` / ``att_end`` are control frames exactly like
+# the export stream: no ``seq``, never ring-buffered, never replayed.
+# ---------------------------------------------------------------------------
+
+
+def att_begin_frame(chat, att_id, size, chunks, sha256, name, mime=""):
+    """Attachment snapshot: ``{t:"att_begin", chat, id, bytes, chunks, sha256, name, mime?}``.
+
+    *size* is the exact byte length of the file, *chunks* the number of
+    ``att_chunk`` frames that follow and *sha256* its lower-case hex digest.
+    *name* is the bare display name; *mime* is omitted when unknown. Sent only
+    after the file passed every check (exists, inside the media directory,
+    within the 10 MB limit), so a refused request never emits a partial stream.
+    """
+    frame = {
+        "t": "att_begin",
+        "chat": chat,
+        "id": att_id,
+        "bytes": size,
+        "chunks": chunks,
+        "sha256": sha256,
+        "name": name,
+    }
+    if mime:
+        frame["mime"] = mime
+    return frame
+
+
+def att_chunk_frame(chat, att_id, index, data):
+    """One attachment chunk: ``{t:"att_chunk", chat, id, i, data}``.
+
+    *data* is base64 of at most ``CHUNK_RAW_BYTES`` raw bytes; chunks are a
+    pure byte-stream split (binary safe).
+    """
+    return {
+        "t": "att_chunk",
+        "chat": chat,
+        "id": att_id,
+        "i": index,
+        "data": data,
+    }
+
+
+def att_end_frame(chat, att_id):
+    """Attachment finished: ``{t:"att_end", chat, id}`` (client verifies)."""
+    return {"t": "att_end", "chat": chat, "id": att_id}
 
 
 def error_frame(code, detail=""):

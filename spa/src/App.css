@@ -1725,6 +1725,15 @@ button:disabled {
     border-radius: 0 10px 0 10px;
     font-size: 12px;
   }
+
+  /* M31: the download action is a real thumb target on coarse pointers. */
+  .att-download {
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+    padding: 0 8px;
+    font-size: 12px;
+  }
 }
 
 .hljs-keyword,
@@ -2005,6 +2014,69 @@ button:disabled {
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 8px;
+}
+
+/* M31: history attachments — thumbnail for images, chip + download otherwise. */
+.att-chip {
+  max-width: 100%;
+}
+
+.att-name {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.att-size {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.att-download {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.att-download:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.att-download:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.att-thumb {
+  display: block;
+  max-width: min(260px, 100%);
+  max-height: 200px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--chip-bg);
+  object-fit: contain;
+}
+
+.att-loading {
+  opacity: 0.75;
+}
+
+.vision-hint {
+  align-self: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .chip {

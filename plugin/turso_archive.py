@@ -147,12 +147,32 @@ def message_insert_request(
     return execute_request(_MESSAGE_INSERT_SQL, [chat_id, role, content, ts])
 
 
+def _first_file_name(files_meta) -> str:
+    """Bare name of the first attachment in *files_meta*, or "" (M31)."""
+    for entry in files_meta or []:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name")
+        if isinstance(name, str) and name.strip():
+            bare = name.strip().replace("\\", "/").rsplit("/", 1)[-1]
+            if bare:
+                return bare
+    return ""
+
+
 def user_requests(
     chat_id: str, agent_id: str, text: Any, files_meta, ts: int,
 ) -> List[Dict[str, Any]]:
-    """Batch for an inbound user turn (title comes from this first text)."""
+    """Batch for an inbound user turn.
+
+    The title comes from the first text, falling back to the first attachment
+    name (M31): an attachment-only turn used to leave the chat title empty,
+    so the chat list fell back to the raw chat id. The assistant turn never
+    replaces an existing title.
+    """
+    title = make_title(text) or make_title(_first_file_name(files_meta))
     return [
-        chat_upsert_request(chat_id, agent_id, ts, make_title(text)),
+        chat_upsert_request(chat_id, agent_id, ts, title),
         message_insert_request(
             chat_id, "user", (text or "") + format_files_suffix(files_meta), ts,
         ),

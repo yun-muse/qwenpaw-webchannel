@@ -10,10 +10,13 @@ import datetime
 import hashlib
 import json
 import math
+import mimetypes
 import os
+import secrets
 import threading
 from collections import deque
-from urllib.parse import urlsplit
+from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 # Protocol §2.4 ``hist`` frames carry at most the last 50 messages unless the
 # client asks for another count.
@@ -303,6 +306,279 @@ def _attach_history_turns(entries):
             anchor["turn"] = turn
 
 
+def _part_mime(part):
+    """Declared MIME of one content part, or "" (never guessed here)."""
+    for field in ("mime", "media_type", "content_type"):
+        value = part.get(field)
+        if not (isinstance(value, str) and value.strip()):
+            continue
+        mime = value.split(";", 1)[0].strip().lower()
+        if "/" in mime:
+            return mime
+    return ""
+
+
+def _data_url_mime(url):
+    """Media type of a ``data:`` URL, or "" for any other URL."""
+    if not (isinstance(url, str) and url.startswith("data:")):
+        return ""
+    header = url[5:].split(",", 1)[0]
+    mime = header.split(";", 1)[0].strip().lower()
+    return mime if "/" in mime else ""
+
+
+def _part_url(part):
+    """The attachment URL of one part (any URL field, else a data URL)."""
+    for field in _ATTACHMENT_URL_FIELDS:
+        value = part.get(field)
+        if isinstance(value, str) and value:
+            return value
+    data = part.get("data")
+    if isinstance(data, str) and data.startswith("data:"):
+        return data
+    return ""
+
+
+def _local_attachment_path(url):
+    """Filesystem path behind a local attachment URL, else None.
+
+    Only absolute container paths and ``file:`` URLs are local. ``http(s)``,
+    ``data:`` and relative values return None, so no caller can turn a URL
+    into a fetch of something outside the agent's media directory.
+    """
+    if not (isinstance(url, str) and url):
+        return None
+    if url.startswith("data:"):
+        return None
+    if url.startswith("file:"):
+        try:
+            parsed = urlsplit(url)
+        except ValueError:
+            return None
+        if parsed.netloc not in ("", "localhost"):
+            return None
+        path = unquote(parsed.path)
+        return path if os.path.isabs(path) else None
+    if "://" in url:
+        return None
+    return url if os.path.isabs(url) else None
+
+
+def _attachment_size(url):
+    """``os.stat`` size of a local attachment, or None (unknown, not 0)."""
+    path = _local_attachment_path(url)
+    if not path:
+        return None
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    return stat.st_size if stat.st_size >= 0 else None
+
+
+def _explicit_file_name(part):
+    """True when the part itself names the file (not just its URL)."""
+    for field in ("filename", "name"):
+        value = part.get(field)
+        if isinstance(value, str) and value.strip():
+            return True
+    return False
+
+
+def _history_files(message):
+    """Project one Message's attachment parts to ``[{name, mime?, size?, kind}]``.
+
+    Uses the same attachment detection as the Markdown export
+    (``_is_attachment`` / ``_attachment_name``, defined below -- Python
+    resolves them at call time). Only the bare file name is published: an
+    absolute container path or a data URL never leaves the plugin. ``mime``
+    and ``size`` are omitted when unknown (never zero-filled, M11 rule).
+
+    Parts are deduplicated by URL. G2-A sends an image as ``FileContent``
+    followed by ``ImageContent`` with the same ``file_url``, so the two parts
+    collapse into one entry that keeps ``kind="image"`` and the FileContent's
+    original (non-uuid) name.
+
+    Each returned dict also carries private ``_path`` / ``_url`` / ``_index``
+    / ``_explicit`` keys for the channel (ref issuance); ``history_messages``
+    strips them.
+    """
+    content = message.get("content")
+    if not isinstance(content, list):
+        return []
+
+    files = []
+    by_url = {}
+    for index, part in enumerate(content):
+        if isinstance(part, str) or not isinstance(part, dict):
+            continue
+        if not _is_attachment(part):
+            continue
+
+        url = _part_url(part)
+        key = url or "part:%d" % index
+        name = _attachment_name(part)
+        mime = _part_mime(part) or _data_url_mime(url)
+        if not mime:
+            guessed, _encoding = mimetypes.guess_type(name)
+            mime = (guessed or "").lower()
+        is_image = (
+            _part_type(part) == "image"
+            or mime.startswith("image/")
+            or (
+                isinstance(part.get("image_url"), str)
+                and bool(part.get("image_url"))
+            )
+        )
+        size = _attachment_size(url)
+
+        existing = by_url.get(key)
+        if existing is not None:
+            # Same file twice (G2-A): keep one entry, prefer the image kind
+            # and the part that carried an explicit filename.
+            if is_image:
+                existing["kind"] = "image"
+            if mime and not existing.get("mime"):
+                existing["mime"] = mime
+            if size is not None and "size" not in existing:
+                existing["size"] = size
+            if _explicit_file_name(part) and not existing["_explicit"]:
+                existing["name"] = name
+                existing["_explicit"] = True
+            continue
+
+        entry = {"name": name, "kind": "image" if is_image else "file"}
+        if mime:
+            entry["mime"] = mime
+        if size is not None:
+            entry["size"] = size
+        entry["_path"] = _local_attachment_path(url) or ""
+        entry["_url"] = url
+        entry["_index"] = index
+        entry["_explicit"] = _explicit_file_name(part)
+        files.append(entry)
+        by_url[key] = entry
+    return files
+
+
+def _hist_entries(raw_messages):
+    """``_history_entries`` plus attachment-only messages (M31).
+
+    ``_history_entries`` deliberately drops every message without text
+    because turn receipts are anchored on assistant text. A pure attachment
+    turn has no text at all and would vanish from ``hist``, so the history
+    projection uses this superset instead. Turn anchoring itself is still
+    computed on the old, text-only projection (see ``history_messages``), so
+    adding attachments never changes which message owns a receipt.
+    """
+    entries = []
+    if not isinstance(raw_messages, list):
+        return entries
+    for index, message in enumerate(raw_messages):
+        if not isinstance(message, dict):
+            continue
+        text = "".join(_part_texts(message.get("content")))
+        files = _history_files(message)
+        if not text and not files:
+            continue
+        role = message.get("role")
+        role = getattr(role, "value", role)
+        entries.append({
+            "role": str(role or ""),
+            "text": text,
+            "type": _message_type(message),
+            "message": message,
+            "index": index,
+            "files": files,
+        })
+    return entries
+
+
+def _project_history_files(files, message, ref_factory):
+    """Public ``files[]`` of one message; private keys never cross the wire."""
+    out = []
+    msg_id = _history_original_id(message)
+    for entry in files or []:
+        item = {"name": entry["name"], "kind": entry["kind"]}
+        if entry.get("mime"):
+            item["mime"] = entry["mime"]
+        if "size" in entry:
+            item["size"] = entry["size"]
+        if ref_factory is not None and entry.get("_path"):
+            try:
+                ref = ref_factory(
+                    entry["_path"], msg_id, entry.get("_index", 0),
+                    entry["name"], entry.get("mime", ""),
+                    entry.get("_url", ""),
+                )
+            except Exception:  # noqa: BLE001 - a ref is best effort
+                ref = None
+            if isinstance(ref, str) and ref:
+                item["ref"] = ref
+        out.append(item)
+    return out
+
+
+def history_messages(history, limit=DEFAULT_HIST_LIMIT, ref_factory=None):
+    """Extract ``[{role, text, files?, turn?}]`` from ``ChatHistory``.
+
+    ``GET /api/chats/{id}`` answers ``{messages: [Message...], status}`` where
+    every ``Message`` (qwenpaw.schemas) is ``{role, content: [parts]...}``.
+    Text parts of one message are concatenated. A message with no text is
+    kept when it carries an attachment (M31): a pure attachment turn is a
+    real user turn and must not disappear from history. Messages with neither
+    text nor attachments (tool calls, empty turns) are skipped.
+
+    ``files`` lists attachment metadata, deduplicated by URL and never a
+    path. *ref_factory*, when given, is called as
+    ``(path, msg_id, part_index, name, mime)`` for every file that lives on
+    the container filesystem; its return value becomes ``ref`` (G3). The
+    factory belongs to the channel and is what keeps raw paths out of the
+    wire format.
+
+    Each persisted ``Msg`` becomes one or more ``Message`` segments sharing
+    ``metadata.original_id``. Its per-turn usage is attached once, as
+    ``turn``, to the group's last assistant text segment (M15); the anchor
+    rules are computed on the text-only projection, so attachments can never
+    move a receipt. Turns are attached to the full projection first and only
+    then truncated, so a receipt survives a window that starts inside its
+    turn.
+    """
+    if not isinstance(history, dict):
+        return []
+    raw = history.get("messages")
+    if not isinstance(raw, list):
+        return []
+
+    # Turn anchoring: exactly the old, text-only rule.
+    text_entries = _history_entries(raw)
+    _attach_history_turns(text_entries)
+    turns = {
+        entry["index"]: entry["turn"]
+        for entry in text_entries
+        if "turn" in entry
+    }
+
+    entries = _hist_entries(raw)
+    for entry in entries:
+        if entry["index"] in turns:
+            entry["turn"] = turns[entry["index"]]
+
+    limit = hist_limit(limit)
+    messages = []
+    for entry in entries[-limit:]:
+        projected = {"role": entry["role"], "text": entry["text"]}
+        files = _project_history_files(
+            entry["files"], entry["message"], ref_factory,
+        )
+        if files:
+            projected["files"] = files
+        if "turn" in entry:
+            projected["turn"] = entry["turn"]
+        messages.append(projected)
+    return messages
+
+
 def _history_entries(raw_messages):
     """Project raw ``ChatHistory.messages`` to ``{role, text, type, ...}``.
 
@@ -330,40 +606,6 @@ def _history_entries(raw_messages):
             "index": index,
         })
     return entries
-
-
-def history_messages(history, limit=DEFAULT_HIST_LIMIT):
-    """Extract ``[{role, text}]`` (plus optional ``turn``) from ``ChatHistory``.
-
-    ``GET /api/chats/{id}`` answers ``{messages: [Message...], status}`` where
-    every ``Message`` (qwenpaw.schemas) is ``{role, content: [parts]...}``.
-    Text parts of one message are concatenated; messages without text (tool
-    calls, empty turns) are skipped. Only the last *limit* messages are kept.
-
-    Each persisted ``Msg`` becomes one or more ``Message`` segments sharing
-    ``metadata.original_id``. Its per-turn usage is attached once, as
-    ``turn``, to the group's last assistant text segment (M15); messages
-    without an id or usage keep the plain ``{role, text}`` shape. Turns are
-    attached to the full projection first and only then truncated, so a
-    receipt survives a window that starts inside its turn.
-    """
-    if not isinstance(history, dict):
-        return []
-    raw = history.get("messages")
-    if not isinstance(raw, list):
-        return []
-
-    entries = _history_entries(raw)
-    _attach_history_turns(entries)
-
-    limit = hist_limit(limit)
-    messages = []
-    for entry in entries[-limit:]:
-        projected = {"role": entry["role"], "text": entry["text"]}
-        if "turn" in entry:
-            projected["turn"] = entry["turn"]
-        messages.append(projected)
-    return messages
 
 
 def pack_history(messages, fits):
@@ -656,6 +898,25 @@ class FileTransfers:
                 del self._staged[tid]
         return dropped
 
+    def peek(self, tid, now):
+        """Staged metadata of *tid* without consuming it (M31 / G4).
+
+        A chunked message only carries ``{ref: id}``; the archive title and
+        the attachment suffix still want the name/mime/size the staged record
+        already knows. Read-only: a later ``take`` still consumes the bytes.
+        Unknown or expired ids return None.
+        """
+        staged = self._staged.get(tid)
+        if staged is None:
+            return None
+        if now - staged["staged"] > TRANSFER_TTL_S:
+            return None
+        return {
+            "name": staged["name"],
+            "mime": staged["mime"],
+            "size": len(staged["data"]),
+        }
+
     def _live(self, tid, now):
         """The in-progress entry for *tid* unless unknown or expired."""
         entry = self._active.get(tid)
@@ -665,6 +926,152 @@ class FileTransfers:
             del self._active[tid]
             return None
         return entry
+
+
+# ---------------------------------------------------------------------------
+# M31 -- attachment retrieval (opaque refs + a media-directory guard)
+# ---------------------------------------------------------------------------
+
+# A ref lives as long as a staged upload: ten minutes, refreshed while it is
+# re-issued by a newer ``hist`` answer.
+ATTACH_REF_TTL_S = TRANSFER_TTL_S
+
+
+class AttachmentRefs:
+    """Opaque, short-lived handles for attachments shown in ``hist`` (G3).
+
+    The browser never sends a path: it gets ``ref`` values from history and
+    asks for them by that value alone. A ref is bound to one chat (and to the
+    persisted message it came from), so a leaked ref cannot read another
+    session's file. Every method takes an explicit *now* so tests control
+    expiry, exactly like ``FileTransfers``.
+
+    The token is random and carries no path or message id, so a ref reveals
+    nothing and cannot be forged into another entry.
+    """
+
+    def __init__(self, ttl=ATTACH_REF_TTL_S):
+        self._ttl = ttl
+        # ref -> {chat, path, url, msg_id, part_index, name, mime, issued}
+        self._by_ref = {}
+        # (chat, path, msg_id, part_index) -> ref (reused while still live)
+        self._by_key = {}
+
+    def issue(self, chat, path, msg_id="", part_index=0, name="", mime="",
+              url="", now=0.0):
+        """Return the live ref for this attachment, minting one if needed."""
+        resolved = str(path)
+        key = (str(chat), resolved, str(msg_id or ""), int(part_index or 0))
+        ref = self._by_key.get(key)
+        if ref is not None:
+            entry = self._by_ref.get(ref)
+            if entry is not None and now - entry["issued"] <= self._ttl:
+                return ref
+            self._drop(ref)
+
+        ref = secrets.token_urlsafe(12)
+        self._by_ref[ref] = {
+            "chat": str(chat),
+            "path": resolved,
+            "url": str(url or ""),
+            "msg_id": str(msg_id or ""),
+            "part_index": int(part_index or 0),
+            "name": str(name or ""),
+            "mime": str(mime or ""),
+            "issued": now,
+        }
+        self._by_key[key] = ref
+        return ref
+
+    def resolve(self, ref, now=0.0):
+        """The entry behind *ref*, or None when unknown/expired."""
+        if not (isinstance(ref, str) and ref):
+            return None
+        entry = self._by_ref.get(ref)
+        if entry is None:
+            return None
+        if now - entry["issued"] > self._ttl:
+            self._drop(ref)
+            return None
+        return dict(entry)
+
+    def purge(self, now):
+        """Drop every expired ref; returns how many were removed."""
+        dropped = 0
+        for ref, entry in list(self._by_ref.items()):
+            if now - entry["issued"] > self._ttl:
+                self._drop(ref)
+                dropped += 1
+        return dropped
+
+    def _drop(self, ref):
+        entry = self._by_ref.pop(ref, None)
+        if entry is None:
+            return
+        key = (
+            entry["chat"], entry["path"],
+            entry["msg_id"], entry["part_index"],
+        )
+        if self._by_key.get(key) == ref:
+            del self._by_key[key]
+
+
+def media_file_path(raw_path, media_dir, max_bytes=MAX_FILE_BYTES):
+    """Resolved path of *raw_path* only when it is a regular file inside *media_dir*.
+
+    Guards, in order: the path resolves at all (symlinks followed), it stays
+    inside the media directory, it is a regular file, and it is at most
+    *max_bytes*. ``..`` traversal and a symlink pointing outside both fail the
+    containment check. Returns a ``Path`` or None; never raises.
+    """
+    if not (isinstance(raw_path, str) and raw_path):
+        return None
+    try:
+        root = Path(media_dir).expanduser().resolve()
+        target = Path(raw_path).expanduser().resolve()
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if target == root or not target.is_relative_to(root):
+        return None
+    try:
+        if not target.is_file():
+            return None
+        if target.stat().st_size > max_bytes:
+            return None
+    except OSError:
+        return None
+    return target
+
+
+def history_has_attachment(history, msg_id="", url=""):
+    """True when *history* still contains the referenced attachment (G3).
+
+    A ref is re-validated against a fresh ``GET /api/chats/{id}``: the
+    persisted message (``metadata.original_id``) must still be there and must
+    still carry the same attachment URL. A deleted or edited turn therefore
+    cannot be fetched through an old ref. When *msg_id* is empty the URL alone
+    decides; with neither, nothing is accepted.
+    """
+    if not (msg_id or url):
+        return False
+    raw = history.get("messages") if isinstance(history, dict) else None
+    if not isinstance(raw, list):
+        return False
+    for message in raw:
+        if not isinstance(message, dict):
+            continue
+        if msg_id and _history_original_id(message) != msg_id:
+            continue
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        if not url:
+            return True
+        for part in content:
+            if isinstance(part, dict) and _part_url(part) == url:
+                return True
+    return False
+
 
 
 # ---------------------------------------------------------------------------
@@ -735,13 +1142,31 @@ def _provider_eligible(provider, model_count):
     return True
 
 
+def _model_vision(entry):
+    """Vision capability of one model metadata dict: True / False / None.
+
+    Only a real boolean is copied out of ``supports_image`` (or
+    ``supports_multimodal`` as a fallback); ``None`` means "not probed" and
+    becomes an omitted field, never ``false``. This is the whole of the M31
+    capability projection -- no other metadata leaves ``ProviderInfo``.
+    """
+    if not isinstance(entry, dict):
+        return None
+    for field in ("supports_image", "supports_multimodal"):
+        value = entry.get(field)
+        if isinstance(value, bool):
+            return value
+    return None
+
+
 def model_items(providers, active_provider="", active_model=""):
-    """Project ``ProviderInfo`` dicts to ``[{provider, model, active}]``.
+    """Project ``ProviderInfo`` dicts to ``[{provider, model, active, vision?}]``.
 
     Only the console-eligible providers/models are listed (see
-    ``_provider_eligible``), and only ``provider`` / ``model`` / ``active``
-    are copied out -- credential material such as ``api_key`` never reaches
-    the client.
+    ``_provider_eligible``), and only ``provider`` / ``model`` / ``active`` /
+    ``vision`` are copied out -- credential material such as ``api_key`` never
+    reaches the client. ``vision`` is the model's boolean picture capability
+    and is omitted when the app has not probed it (M31).
 
     *active* is True on the single item matching ``(active_provider,
     active_model)``. When both are given but that pair is not in the list
@@ -764,15 +1189,27 @@ def model_items(providers, active_provider="", active_model=""):
             model_ids = _provider_model_ids(provider)
             if not _provider_eligible(provider, len(model_ids)):
                 continue
+            metadata = {}
+            for field in ("models", "extra_models"):
+                for entry in provider.get(field) or []:
+                    if not isinstance(entry, dict):
+                        continue
+                    model_id = entry.get("id")
+                    if _text(model_id) and model_id not in metadata:
+                        metadata[model_id] = entry
             for model_id in model_ids:
-                items.append({
+                item = {
                     "provider": provider_id,
                     "model": model_id,
                     "active": (
                         provider_id == active_provider
                         and model_id == active_model
                     ),
-                })
+                }
+                vision = _model_vision(metadata.get(model_id))
+                if vision is not None:
+                    item["vision"] = vision
+                items.append(item)
 
     if active_provider and active_model:
         if not any(item["active"] for item in items):
@@ -2259,6 +2696,29 @@ def _attachment_name(part):
     return "附件"
 
 
+def _attachment_mime(part):
+    """Display MIME of an attachment: declared, data-URL or extension guess."""
+    mime = _part_mime(part) or _data_url_mime(_part_url(part))
+    if not mime:
+        guessed, _encoding = mimetypes.guess_type(_attachment_name(part))
+        mime = (guessed or "").lower()
+    return mime or _DEFAULT_FILE_MIME
+
+
+def _attachment_label(part):
+    """One export placeholder: ``[附件: name · mime · size bytes]`` (M31).
+
+    Never a path and never file content: the name is bare, the MIME is a
+    label, and the size is the metadata ``os.stat`` reported (omitted when
+    the file could not be measured).
+    """
+    text = "%s · %s" % (_attachment_name(part), _attachment_mime(part))
+    size = _attachment_size(_part_url(part))
+    if size is not None:
+        text += " · %d bytes" % size
+    return "[附件: %s]" % text
+
+
 def _content_blocks(message, message_type):
     """Markdown blocks of one Message's content list, in order."""
     content = message.get("content")
@@ -2268,6 +2728,7 @@ def _content_blocks(message, message_type):
         return []
 
     blocks = []
+    seen_attachments = set()
     for part in content:
         if isinstance(part, str):
             if part.strip():
@@ -2301,7 +2762,14 @@ def _content_blocks(message, message_type):
         ):
             blocks.append(_render_tool_output(part))
         elif _is_attachment(part):
-            blocks.append("[附件: %s]" % _attachment_name(part))
+            # G2-A stores an image as FileContent + ImageContent with the
+            # same URL; one file must not become two placeholder lines.
+            url = _part_url(part)
+            if url:
+                if url in seen_attachments:
+                    continue
+                seen_attachments.add(url)
+            blocks.append(_attachment_label(part))
         else:
             text = part.get("text")
             if isinstance(text, str) and text.strip():
@@ -2398,8 +2866,9 @@ def build_export_markdown(
     number of rendered messages and the one-line basis statement. Messages
     keep their original order and type: ``MESSAGE`` becomes a role heading
     with body text, ``REASONING`` a ``<details>`` block, ``PLUGIN_CALL`` /
-    ``PLUGIN_CALL_OUTPUT`` compact tool blocks, and attachments an
-    ``[附件: name]`` metadata line. An assistant message that carries a
+    ``PLUGIN_CALL_OUTPUT`` compact tool blocks, and attachments a
+    ``[附件: name · mime · size bytes]`` metadata line (M31; one line per
+    file, deduplicated by URL). An assistant message that carries a
     ``qwenpaw_turn_usage`` receipt gets one 本轮用量 footnote. An empty
     conversation yields the header only.
     """

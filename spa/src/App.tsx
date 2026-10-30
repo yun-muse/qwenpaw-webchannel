@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type {
   ChangeEvent,
   ClipboardEvent as ReactClipboardEvent,
@@ -78,6 +78,8 @@ import { draftOf, loadDrafts, saveDrafts, setDraft } from './lib/drafts';
 import type { Drafts } from './lib/drafts';
 import { EXPORT_ERROR_TEXT, base64Of, exportFileName, hexOf, verifyExport } from './lib/export';
 import { bulkSummaryText, planBulk, runBulkExport } from './lib/bulkExport';
+import { AttachmentFetcher, attachmentKindOf, historyFilesOf } from './lib/attachments';
+import type { AttachmentResult, HistoryFile } from './lib/attachments';
 import type { BulkRunResult, BulkTarget } from './lib/bulkExport';
 import {
   addPrompt,
@@ -336,7 +338,8 @@ interface ChatMessage {
   thinking?: string;
   streaming?: boolean;
   parts?: ContentPart[];
-  attachments?: string[];
+  /** M31: attachment metadata; `ref` on entries that can be fetched. */
+  attachments?: HistoryFile[];
   approval?: ApprovalMeta;
   ts?: number;
   /** Per-turn token receipt from `hist` / `usage.last_turn` (M15). */
@@ -347,6 +350,8 @@ interface ModelItem {
   provider: string;
   model: string;
   active: boolean;
+  /** M31: the model's declared picture capability; absent = not probed. */
+  vision?: boolean;
 }
 
 interface ModelRef {
@@ -495,6 +500,13 @@ function fmtKb(bytes: number): string {
   return `${Math.round(bytes / 1024)} KB`;
 }
 
+/** M31: compact size label for an attachment chip. */
+function fmtBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 const USAGE_TITLE =
   '本会话累计 ↑↓ 取自 QwenPaw 每轮 usage 元数据；上下文占用 ≈ 最近一轮最后一次模型调用的输入，工具调用轮次不再累加，仍可能与实时值略有偏差';
 
@@ -565,11 +577,20 @@ function modelItemsOf(raw: unknown): ModelItem[] {
   const out: ModelItem[] = [];
   for (const entry of raw) {
     if (!entry || typeof entry !== 'object') continue;
-    const record = entry as { provider?: unknown; model?: unknown; active?: unknown };
+    const record = entry as {
+      provider?: unknown;
+      model?: unknown;
+      active?: unknown;
+      vision?: unknown;
+    };
     const provider = asString(record.provider);
     const model = asString(record.model);
     if (!provider || !model) continue;
-    out.push({ provider, model, active: record.active === true });
+    const item: ModelItem = { provider, model, active: record.active === true };
+    // Only a real boolean is a capability claim; anything else is "unknown"
+    // and must not produce the SPA's warning hint (M31).
+    if (record.vision === true || record.vision === false) item.vision = record.vision;
+    out.push(item);
   }
   return out;
 }
@@ -604,6 +625,8 @@ function mergeSkillItems(raw: unknown): SkillItem[] {
 interface HistoryMessage {
   role: Role;
   text: string;
+  /** M31: attachments of this turn; empty is omitted by the plugin. */
+  files?: HistoryFile[];
   turn?: TurnUsage;
 }
 
@@ -612,7 +635,12 @@ function historyMessages(raw: unknown): HistoryMessage[] {
   const out: HistoryMessage[] = [];
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue;
-    const record = item as { role?: unknown; text?: unknown; turn?: unknown };
+    const record = item as {
+      role?: unknown;
+      text?: unknown;
+      turn?: unknown;
+      files?: unknown;
+    };
     const role: Role | null =
       record.role === 'assistant' ? 'assistant' : record.role === 'user' ? 'user' : null;
     if (!role) continue;
@@ -620,6 +648,8 @@ function historyMessages(raw: unknown): HistoryMessage[] {
       role,
       text: typeof record.text === 'string' ? record.text : '',
     };
+    const files = historyFilesOf(record.files);
+    if (files.length) message.files = files;
     const turn = turnUsageOf(record.turn);
     if (turn) message.turn = turn;
     out.push(message);
@@ -938,11 +968,156 @@ function ApprovalCard({
   );
 }
 
+type AttachmentFetch = (chat: string, file: HistoryFile) => Promise<AttachmentResult>;
+
+/** M31: one non-image attachment (or an image whose bytes failed to load). */
+function AttachmentChip({
+  chat,
+  file,
+  onAttachment,
+}: {
+  chat: string;
+  file: HistoryFile;
+  onAttachment: AttachmentFetch;
+}) {
+  const [busy, setBusy] = useState(false);
+  const download = async () => {
+    if (!file.ref || busy) return;
+    setBusy(true);
+    try {
+      const result = await onAttachment(chat, file);
+      if (!result.ok) return;
+      saveBlob(
+        new Blob([result.buffer], {
+          type: result.mime || file.mime || 'application/octet-stream',
+        }),
+        result.name || file.name,
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <span className="chip att-chip" title={file.name}>
+      <FileText size={12} />
+      <span className="att-name">{file.name}</span>
+      {file.size != null ? <span className="att-size">{fmtBytes(file.size)}</span> : null}
+      {file.ref ? (
+        <button
+          type="button"
+          className="att-download"
+          onClick={() => void download()}
+          disabled={busy}
+          title="下载附件"
+        >
+          <Download size={12} />
+          <span>{busy ? '…' : '下载'}</span>
+        </button>
+      ) : null}
+    </span>
+  );
+}
+
+/**
+ * M31: an image attachment renders its bytes as a thumbnail. The object URL
+ * is created after verification and revoked when the bubble unmounts (chat
+ * switch, history reload), so blobs never accumulate. A failed fetch degrades
+ * to the ordinary name chip and never blocks the conversation.
+ */
+function AttachmentThumb({
+  chat,
+  file,
+  onAttachment,
+}: {
+  chat: string;
+  file: HistoryFile;
+  onAttachment: AttachmentFetch;
+}) {
+  const [url, setUrl] = useState('');
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!file.ref) return;
+    let cancelled = false;
+    let objectUrl = '';
+    setUrl('');
+    setFailed(false);
+    void onAttachment(chat, file)
+      .then((result) => {
+        if (cancelled) return;
+        if (!result.ok) {
+          setFailed(true);
+          return;
+        }
+        objectUrl = URL.createObjectURL(
+          new Blob([result.buffer], {
+            type: result.mime || file.mime || 'application/octet-stream',
+          }),
+        );
+        setUrl(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [chat, file.ref, file.name, file.mime, onAttachment]);
+
+  if (!file.ref || failed) {
+    return <AttachmentChip chat={chat} file={file} onAttachment={onAttachment} />;
+  }
+  if (!url) {
+    return (
+      <span className="chip att-chip att-loading" title={file.name}>
+        <FileText size={12} />
+        <span className="att-name">{file.name}</span>
+      </span>
+    );
+  }
+  return <img className="att-thumb" src={url} alt={file.name} title={file.name} />;
+}
+
+function AttachmentList({
+  chat,
+  files,
+  onAttachment,
+}: {
+  chat: string;
+  files?: HistoryFile[];
+  onAttachment: AttachmentFetch;
+}) {
+  if (!files?.length) return null;
+  return (
+    <div className="bubble-files">
+      {files.map((file, index) =>
+        file.kind === 'image' ? (
+          <AttachmentThumb
+            key={`${file.ref ?? file.name}-${index}`}
+            chat={chat}
+            file={file}
+            onAttachment={onAttachment}
+          />
+        ) : (
+          <AttachmentChip
+            key={`${file.ref ?? file.name}-${index}`}
+            chat={chat}
+            file={file}
+            onAttachment={onAttachment}
+          />
+        ),
+      )}
+    </div>
+  );
+}
+
 function MessageView({
   message,
   chat,
   flash = false,
   onApproval,
+  onAttachment,
   onRegenerate,
   onEditResend,
 }: {
@@ -950,6 +1125,7 @@ function MessageView({
   chat: string;
   flash?: boolean;
   onApproval: (chat: string, message: ChatMessage, action: 'approve' | 'deny') => void;
+  onAttachment: AttachmentFetch;
   onRegenerate?: (message: ChatMessage) => void;
   onEditResend?: (message: ChatMessage) => void;
 }) {
@@ -1004,16 +1180,11 @@ function MessageView({
       {message.parts?.map((part, index) => (
         <PartCard key={`${message.id}-${index}`} part={part} />
       ))}
-      {message.attachments?.length ? (
-        <div className="bubble-files">
-          {message.attachments.map((name) => (
-            <span className="chip" key={name}>
-              <FileText size={12} />
-              {name}
-            </span>
-          ))}
-        </div>
-      ) : null}
+      <AttachmentList
+        chat={chat}
+        files={message.attachments}
+        onAttachment={onAttachment}
+      />
       {message.streaming ? null : (
         <div className="bubble-foot">
           {isAssistant && message.turn ? (
@@ -1794,6 +1965,8 @@ export default function App() {
   const uploadRef = useRef<Upload | null>(null);
   // M12: the export being collected (chunks arrive as control frames).
   const exportRef = useRef<ExportJob | null>(null);
+  // M31: attachment chunk collector (att_begin/chunk/end control frames).
+  const attFetcherRef = useRef<AttachmentFetcher | null>(null);
   // M25: server list cache + cooperative cancel for 导出全部. The waiter is
   // installed by the click handler, so it always closes over fresh state.
   const serverChatsRef = useRef<BulkTarget[]>([]);
@@ -1838,6 +2011,34 @@ export default function App() {
   } | null>(null);
   const statsReqSeq = useRef(0);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /**
+   * M31: fetch one attachment's bytes through the shared collector.
+   *
+   * Created lazily on first use and kept for the app's lifetime: a thumbnail
+   * that mounts later still joins the same (chat, ref) job. `useCallback`
+   * keeps the identity stable so an effect that depends on it does not
+   * refetch on every render.
+   */
+  const fetchAttachment = useCallback<AttachmentFetch>((chat, file) => {
+    let fetcher = attFetcherRef.current;
+    if (!fetcher) {
+      fetcher = new AttachmentFetcher(
+        (frame) => clientRef.current?.send(frame) ?? false,
+        (buffer) => crypto.subtle.digest('SHA-256', buffer).then(hexOf),
+      );
+      attFetcherRef.current = fetcher;
+    }
+    return fetcher.request(chat, file);
+  }, []);
+
+  useEffect(
+    () => () => {
+      attFetcherRef.current?.dispose();
+      attFetcherRef.current = null;
+    },
+    [],
+  );
 
   const runtimeOf = (chat: string): ChatRuntime => {
     let rt = runtimes.current.get(chat);
@@ -2250,16 +2451,22 @@ export default function App() {
       }
       const out = [...prev];
       // Overlapping frames re-describe messages already on screen (the live
-      // path has no receipt). Keep what is shown, but take a receipt that the
-      // incoming history now carries; M15 anchors it to one text segment.
+      // path has no receipt and no attachment refs). Keep what is shown, but
+      // take a receipt the incoming history now carries (M15 anchors it to
+      // one text segment) and the fetched attachment metadata (M31): the
+      // optimistic bubble only knew the name, the history knows the ref.
       for (let i = 0; i < start; i += 1) {
         const turn = incoming[i]?.turn;
-        if (!turn) continue;
+        const files = incoming[i]?.files;
         const index = prev.length - start + i;
         const shown = out[index];
-        if (!shown || shown.role !== 'assistant') continue;
+        if (!shown) continue;
+        if (files?.length) {
+          out[index] = { ...out[index], attachments: files };
+        }
+        if (!turn || shown.role !== 'assistant') continue;
         if (shown.turn && shown.turn.id === turn.id) continue;
-        out[index] = { ...shown, turn };
+        out[index] = { ...out[index], turn };
       }
       for (let i = start; i < incoming.length; i += 1) {
         const item = incoming[i];
@@ -2270,6 +2477,7 @@ export default function App() {
           text: item.text,
         };
         if (item.turn) message.turn = item.turn;
+        if (item.files?.length) message.attachments = item.files;
         out.push(message);
       }
       return out;
@@ -2983,6 +3191,14 @@ export default function App() {
           break;
         }
 
+        case 'att_begin':
+        case 'att_chunk':
+        case 'att_end': {
+          // M31: the collector settles exactly one job by its request id.
+          attFetcherRef.current?.handle(frame);
+          break;
+        }
+
         case 'resync': {
           flushNow();
           const rt = runtimeOf(chat);
@@ -3235,6 +3451,9 @@ export default function App() {
             }
             break;
           }
+          // M31: a refused attachment fetch settles its own chip and must
+          // never reach the generic toast (it carries chat + id).
+          if (attFetcherRef.current?.handleError(frame)) break;
           // M12: an export failure is request-scoped — it must not fall
           // through to the generic toast and must not touch the socket.
           if (
@@ -4094,10 +4313,18 @@ export default function App() {
 
     const frame: Frame = { t: 'msg', chat, text: wireText };
     if (file) {
+      // M31/G4: a chunked message names its file too. The plugin already
+      // staged name/mime/size, but sending them keeps the archive correct
+      // even when the staged record expired between upload and send.
       frame.files =
         file.kind === 'inline'
           ? [{ name: file.name, mime: file.mime, data: file.data }]
-          : [{ ref: file.ref ?? file.id }];
+          : [{
+              ref: file.ref ?? file.id,
+              name: file.name,
+              mime: file.mime,
+              size: file.size,
+            }];
     }
 
     const size = byteSize(frame);
@@ -4123,7 +4350,14 @@ export default function App() {
         role: 'user',
         kind: 'text',
         text: displayText,
-        attachments: file ? [file.name] : undefined,
+        attachments: file
+          ? [{
+              name: file.name,
+              mime: file.mime,
+              size: file.size,
+              kind: attachmentKindOf(file.name, file.mime),
+            }]
+          : undefined,
         ts: Date.now(),
       },
     ]);
@@ -5004,6 +5238,7 @@ export default function App() {
                 chat={activeChat}
                 flash={m.id === flashMessageId}
                 onApproval={onApproval}
+                onAttachment={fetchAttachment}
                 onRegenerate={handleRegenerate}
                 onEditResend={handleEditResend}
               />
@@ -5390,6 +5625,17 @@ export default function App() {
                     </div>
                   ) : null}
                 </div>
+
+                {/* M31: only a probed `vision:false` earns the hint; unknown
+                    stays silent because it is not a capability claim. */}
+                {modelItems.find((item) => item.active)?.vision === false ? (
+                  <span
+                    className="vision-hint"
+                    title="当前模型未声明支持图片：图片会保存在会话里，模型可能看不到内容。可在模型面板切换支持视觉的模型。"
+                  >
+                    图片可能不可见
+                  </span>
+                ) : null}
 
                 <div className="effort-wrap" title={EFFORT_TITLE}>
                   <span className="effort-label">思考等级</span>
