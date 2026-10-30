@@ -365,6 +365,8 @@ const state = {
   /** M31: opaque ref -> {name, mime, bytes} for `att_get`. */
   media: {},
   attSeq: 0,
+  /** M37: every `msg` the mock actually received, in arrival order. */
+  received: [],
 };
 
 function resetState() {
@@ -401,6 +403,7 @@ function resetState() {
   state.staged = new Map();
   state.attGets = [];
   state.attSeq = 0;
+  state.received = [];
   for (const timer of state.streaming.values()) clearInterval(timer);
   state.streaming.clear();
 }
@@ -597,6 +600,8 @@ function handleAgentFrame(frame) {
       // M27: the ChatSpec is created while the first message is processed,
       // deliberately slower than the old 1.2 s re-apply timer.
       const chat = String(frame.chat || '');
+      // M37: record what actually arrived, in order (the outbox suite asks).
+      state.received.push({ chat, text: String(frame.text || ''), at: Date.now() });
       if (state.notCreated.has(chat)) {
         setTimeout(() => state.notCreated.delete(chat), state.createDelay);
       }
@@ -700,6 +705,10 @@ function connectAgent() {
       clearTimeout(timer);
       ws.send(JSON.stringify({ t: 'hello', started: Date.now(), session: 'm19-mock' }));
       agent = ws;
+      // M37: the real plugin pushes `status` right after the relay's `ready`
+      // (plugin/channel.py:645-647). It is the only browser-visible proof
+      // that an offline agent is back, so the mock must do it too.
+      ws.send(JSON.stringify({ t: 'status', agent_name: 'mock-agent' }));
       resolveP();
     });
     ws.on('message', (raw) => {
@@ -780,6 +789,46 @@ function cleanup() {
       /* already gone */
     }
   }
+}
+
+// M37: the outage scenario needs to stop and restart the relay process.
+let relayProc = null;
+
+function startRelayProcess() {
+  log('starting relay-node…');
+  relayProc = background('node', ['server.js'], RELAY_DIR, 'relay');
+  return waitHttp(`http://127.0.0.1:${RELAY_PORT}/health`, 'relay-node');
+}
+
+async function stopRelayProcess() {
+  if (!relayProc) return;
+  const child = relayProc;
+  relayProc = null;
+  await new Promise((resolveP) => {
+    const done = () => resolveP();
+    child.once('exit', done);
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      done();
+    }
+  });
+}
+
+/** Drop the mock agent's socket (the plugin-restart window, relay kept). */
+async function disconnectMockAgent() {
+  if (!agent) return;
+  const ws = agent;
+  agent = null;
+  await new Promise((resolveP) => {
+    ws.once('close', () => resolveP());
+    try {
+      ws.close();
+    } catch {
+      resolveP();
+    }
+    setTimeout(resolveP, 1500);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -3910,6 +3959,334 @@ async function runM36Checks(page, pass, mobile) {
   await page.screenshot({ path: shot(pass, 'math-history'), fullPage: false });
 }
 
+// ---------------------------------------------------------------------------
+// M37 — offline send queue (outbox)
+// ---------------------------------------------------------------------------
+
+/**
+ * The whole point of the outbox: a message the user sends while the backend
+ * is gone must (a) never look delivered, (b) survive a reload, (c) go out in
+ * order exactly once when the backend returns, (d) turn into the ordinary
+ * local echo without a second bubble.
+ */
+async function runM37Checks(page, pass, mobile) {
+  const snap = () =>
+    page.evaluate(() => {
+      const textOf = (row) => (row.querySelector('.plain') || row.querySelector('.bubble-text') || row).textContent.trim();
+      return {
+        labels: [...document.querySelectorAll('.status-label')].map((node) => node.textContent),
+        pending: [...document.querySelectorAll('.messages .row.pending')].map((row) => ({
+          id: row.getAttribute('data-outbox-id'),
+          state: row.getAttribute('data-outbox-state'),
+          text: textOf(row),
+          hasCancel: Boolean(row.querySelector('button[aria-label="撤销这条待发送消息"]')),
+        })),
+        userRows: [...document.querySelectorAll('.messages .row.user:not(.pending)')].map((row) => textOf(row)),
+        stored: localStorage.getItem('webchannel.outbox'),
+        input: (document.querySelector('textarea') || {}).value || '',
+        error: (document.querySelector('.composer-error') || {}).textContent || '',
+      };
+    });
+
+  const sendText = async (text) => {
+    await page.locator('textarea').fill(text);
+    await page.locator('button.send').click();
+    await sleep(250);
+  };
+
+  const scrollToEnd = async () => {
+    await page.evaluate(() => {
+      const el = document.querySelector('.messages');
+      if (el) el.scrollTop = el.scrollHeight;
+    });
+    await sleep(200);
+  };
+
+  // A clean chat: M36 left chat-math selected and its history on screen.
+  await openChat(page, mobile, 'chat-alpha');
+  await waitUntil(
+    () => page.evaluate(() => document.querySelectorAll('.messages .row.user').length > 0),
+    8000,
+  );
+
+  // ---- 1. online baseline -------------------------------------------------
+  const baselineId = `M37 基线-${pass}`;
+  await sendText(baselineId);
+  const baselineArrived = await waitUntil(
+    () => state.received.some((item) => item.text === baselineId),
+    6000,
+  );
+  const baselineSnap = await snap();
+  check(`${pass}: M37 baseline reaches the agent over the live path`, baselineArrived);
+  check(
+    `${pass}: M37 a live send has no pending row`,
+    baselineSnap.pending.length === 0 && baselineSnap.userRows.includes(baselineId),
+    JSON.stringify(baselineSnap.pending),
+  );
+  check(
+    `${pass}: M37 a live send still echoes one user bubble`,
+    baselineSnap.userRows.filter((text) => text === baselineId).length === 1,
+  );
+  // Let the mock's reply finish before the outage: its timers are global to
+  // the process and would otherwise keep streaming into a dead socket.
+  await waitUntil(() => !state.streaming.has('chat-alpha'), 20000);
+
+  // ---- 2. relay down: two sends queue up --------------------------------
+  await stopRelayProcess();
+  const wentOffline = await waitUntil(
+    () =>
+      page.evaluate(() => {
+        const label = document.querySelector('.status-label');
+        return Boolean(label && ['恢复中', '连接中', '离线', '同步中'].includes(label.textContent));
+      }),
+    10000,
+  );
+  check(`${pass}: M37 killing the relay moves the header off 已连接`, wentOffline, JSON.stringify((await snap()).labels));
+
+  const one = `M37 待发一-${pass}`;
+  const two = `M37 待发二-${pass}`;
+  await sendText(one);
+  await sendText(two);
+  const queued = await snap();
+  check(
+    `${pass}: M37 both offline sends show as 待发送 rows`,
+    queued.pending.length === 2 &&
+      queued.pending.every((row) => row.state === 'queued') &&
+      queued.pending[0].text === one &&
+      queued.pending[1].text === two,
+    JSON.stringify(queued.pending),
+  );
+  check(
+    `${pass}: M37 a queued row is cancellable and is not an ordinary bubble`,
+    queued.pending.every((row) => row.hasCancel) &&
+      !queued.userRows.includes(one) &&
+      !queued.userRows.includes(two),
+    JSON.stringify(queued.userRows),
+  );
+  check(`${pass}: M37 queueing clears the composer and shows no error`, queued.input === '' && queued.error === '', JSON.stringify({ input: queued.input, error: queued.error }));
+  check(
+    `${pass}: M37 the queue is persisted under webchannel.outbox`,
+    (() => {
+      try {
+        const stored = JSON.parse(queued.stored || '[]');
+        return (
+          Array.isArray(stored) &&
+          stored.filter((entry) => entry.chat === 'chat-alpha' && entry.status === 'queued').length === 2
+        );
+      } catch {
+        return false;
+      }
+    })(),
+    String(queued.stored).slice(0, 200),
+  );
+  check(
+    `${pass}: M37 nothing reached the agent while it was down`,
+    !state.received.some((item) => item.text === one || item.text === two),
+  );
+
+  await scrollToEnd();
+  await page.screenshot({ path: shot(pass, 'm37-queued'), fullPage: false });
+
+  // ---- 3. reload: the queue survives ------------------------------------
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await sleep(900);
+  const restored = await snap();
+  check(
+    `${pass}: M37 the queue survives a reload`,
+    restored.pending.length === 2 &&
+      restored.pending[0].text === one &&
+      restored.pending[1].text === two &&
+      restored.pending.every((row) => row.state === 'queued'),
+    JSON.stringify(restored.pending),
+  );
+
+  // ---- 4. backend back: in order, once, no duplicate bubbles ------------
+  await startRelayProcess();
+  await sleep(300);
+  await connectAgent();
+  const delivered = await waitUntil(
+    () => state.received.filter((item) => item.text === one).length === 1 && state.received.filter((item) => item.text === two).length === 1,
+    20000,
+  );
+  const order = state.received
+    .filter((item) => item.text === one || item.text === two)
+    .map((item) => (item.text === one ? 1 : 2))
+    .join(',');
+  check(`${pass}: M37 both queued messages are delivered after reconnect`, delivered);
+  check(`${pass}: M37 delivery keeps queue order`, order === '1,2', order);
+  check(
+    `${pass}: M37 each queued message arrives exactly once`,
+    state.received.filter((item) => item.text === one).length === 1 &&
+      state.received.filter((item) => item.text === two).length === 1,
+    JSON.stringify(state.received.map((item) => item.text)),
+  );
+
+  const settled = await waitUntil(async () => {
+    const now = await snap();
+    return now.pending.length === 0 && now.userRows.includes(one) && now.userRows.includes(two);
+  }, 10000);
+  const after = await snap();
+  check(`${pass}: M37 the pending rows become ordinary bubbles`, settled, JSON.stringify(after.pending));
+  check(
+    `${pass}: M37 no message is shown twice`,
+    after.userRows.filter((text) => text === one).length === 1 &&
+      after.userRows.filter((text) => text === two).length === 1,
+    JSON.stringify(after.userRows.filter((text) => text === one || text === two)),
+  );
+  check(
+    `${pass}: M37 the drained queue is cleared from storage`,
+    (() => {
+      try {
+        const stored = JSON.parse(after.stored || '[]');
+        return Array.isArray(stored) && stored.filter((entry) => entry.chat === 'chat-alpha').length === 0;
+      } catch {
+        return false;
+      }
+    })(),
+    String(after.stored).slice(0, 200),
+  );
+
+  // ---- 5. connected but agent offline (plugin restart window) -----------
+  // The two replies must be finished first: a dead agent can never send `end`,
+  // and the composer would be stuck on 停止.
+  await waitUntil(() => !state.streaming.has('chat-alpha'), 20000);
+  await disconnectMockAgent();
+  await sleep(600);
+  const stale = await snap();
+  // Documented gap (docs/m37-report.md): the relay tells only the *agent* when
+  // the other side goes away, so a browser with a live socket keeps its last
+  // `ready` value. Nothing may treat that as proof the agent is there.
+  check(
+    `${pass}: M37 a dead agent behind a live socket stays invisible (stale 在线)`,
+    stale.labels[0] === '已连接' && stale.labels[1] === 'Agent 在线',
+    JSON.stringify(stale.labels),
+  );
+
+  // The observable form of "agent offline" is the handshake: reconnect while
+  // it is down, and `ready{agentOnline:false}` is authoritative.
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await sleep(1200);
+  const offlineReady = await snap();
+  check(
+    `${pass}: M37 a reconnect while the agent is down reports Agent 离线`,
+    offlineReady.labels[0] === '已连接' && offlineReady.labels[1] === 'Agent 离线',
+    JSON.stringify(offlineReady.labels),
+  );
+
+  const off = `M37 离线入队-${pass}`;
+  await sendText(off);
+  const queuedOffline = await snap();
+  check(
+    `${pass}: M37 sending while the agent is offline queues instead of faking delivery`,
+    queuedOffline.pending.length === 1 &&
+      queuedOffline.pending[0].text === off &&
+      queuedOffline.pending[0].state === 'queued' &&
+      !queuedOffline.userRows.includes(off),
+    JSON.stringify({ pending: queuedOffline.pending, users: queuedOffline.userRows }),
+  );
+  check(
+    `${pass}: M37 nothing is handed to the relay while the agent is offline`,
+    !state.received.some((item) => item.text === off),
+  );
+
+  // Single-item cancel: the row goes away, its text returns to the composer,
+  // and the queue forgets it (no ghost that would send later).
+  await page.locator('.row.pending button[aria-label="撤销这条待发送消息"]').click();
+  await sleep(200);
+  const cancelled = await snap();
+  check(
+    `${pass}: M37 撤销 drops exactly that entry and restores its text`,
+    cancelled.pending.length === 0 && cancelled.input === off,
+    JSON.stringify({ pending: cancelled.pending, input: cancelled.input }),
+  );
+  check(
+    `${pass}: M37 a cancelled entry is gone from storage`,
+    (() => {
+      try {
+        const stored = JSON.parse(cancelled.stored || '[]');
+        return Array.isArray(stored) && stored.every((entry) => entry.id !== 'x' && !String(entry.text).includes(off));
+      } catch {
+        return false;
+      }
+    })(),
+    String(cancelled.stored).slice(0, 160),
+  );
+  await sendText(off);
+  check(`${pass}: M37 the re-sent offline message queues again`, (await snap()).pending.length === 1);
+
+  await connectAgent();
+  const statusFlushed = await waitUntil(
+    () => state.received.filter((item) => item.text === off).length === 1,
+    12000,
+  );
+  const drained = await waitUntil(async () => (await snap()).pending.length === 0, 8000);
+  check(`${pass}: M37 the agent's status push flushes the queue`, statusFlushed);
+  check(`${pass}: M37 the queued row disappears once delivered`, drained);
+  check(
+    `${pass}: M37 the agent-offline message is shown exactly once`,
+    state.received.filter((item) => item.text === off).length === 1 &&
+      (await snap()).userRows.filter((text) => text === off).length === 1,
+  );
+
+  // ---- 6. interrupted flush: history is the only proof ------------------
+  // Two entries claim "handed to a socket, connection lost". One of them is
+  // really in the chat's history, the other never arrived. The reconcile must
+  // remove the first, flag the second, and append no duplicate history rows.
+  const known = `M37 已在历史-${pass}`;
+  const unknown = `M37 未确认-${pass}`;
+  state.history['chat-alpha'] = [...(state.history['chat-alpha'] || []), { role: 'user', text: known }];
+  await page.evaluate(
+    ([knownText, unknownText]) => {
+      const entry = (id, text, ts) => ({
+        id,
+        chat: 'chat-alpha',
+        text,
+        display: text,
+        raw: text,
+        status: 'sent',
+        unconfirmed: true,
+        echo: true,
+        attempts: 1,
+        ts,
+      });
+      localStorage.setItem(
+        'webchannel.outbox',
+        JSON.stringify([entry('m37-known', knownText, 1), entry('m37-unknown', unknownText, 2)]),
+      );
+    },
+    [known, unknown],
+  );
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  const reconciled = await waitUntil(
+    async () => {
+      const now = await snap();
+      return (
+        now.pending.length === 1 &&
+        now.pending[0].state === 'unconfirmed' &&
+        now.pending[0].text.includes(unknown)
+      );
+    },
+    15000,
+  );
+  const recon = await snap();
+  check(`${pass}: M37 history confirms the entry that did arrive`, reconciled, JSON.stringify(recon.pending));
+  check(
+    `${pass}: M37 the unconfirmed entry is kept, flagged for the user`,
+    recon.pending.length === 1 &&
+      recon.pending[0].state === 'unconfirmed' &&
+      recon.pending[0].hasCancel,
+    JSON.stringify(recon.pending),
+  );
+  check(
+    `${pass}: M37 the reconcile adds no duplicate history row`,
+    recon.userRows.filter((text) => text === known).length === 1,
+    JSON.stringify(recon.userRows.filter((text) => text.includes('M37'))),
+  );
+
+  await scrollToEnd();
+  await page.screenshot({ path: shot(pass, 'm37-unconfirmed'), fullPage: false });
+}
+
 async function runPass(browser, pass, viewport, mobile) {
   resetState();
   const contextOptions = mobile
@@ -3968,6 +4345,12 @@ async function runPass(browser, pass, viewport, mobile) {
 
     if (process.env.M36_ONLY === '1') {
       await runM36Checks(page, pass, mobile);
+      check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
+      return;
+    }
+
+    if (process.env.M37_ONLY === '1') {
+      await runM37Checks(page, pass, mobile);
       check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
       return;
     }
@@ -4460,6 +4843,9 @@ async function runPass(browser, pass, viewport, mobile) {
     // ---- 15. M36: LaTeX math (lazy, frozen blocks, code/currency) --------
     await runM36Checks(page, pass, mobile);
 
+    // ---- 16. M37: offline send queue (last: it restarts the relay) -------
+    await runM37Checks(page, pass, mobile);
+
     check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
   } finally {
     await context.close().catch(() => {});
@@ -4498,8 +4884,7 @@ async function main() {
   }
 
   log('starting relay-node…');
-  background('node', ['server.js'], RELAY_DIR, 'relay');
-  await waitHttp(`http://127.0.0.1:${RELAY_PORT}/health`, 'relay-node');
+  await startRelayProcess();
 
   log('connecting the mock agent…');
   await connectAgent();

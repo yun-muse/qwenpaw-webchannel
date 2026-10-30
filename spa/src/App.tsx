@@ -28,6 +28,7 @@ import {
   BookmarkPlus,
   Check,
   ChevronUp,
+  Clock,
   Cloud,
   Code2,
   Command,
@@ -142,6 +143,24 @@ import {
   shouldAdoptEffortLevel,
 } from './lib/effort';
 import {
+  MAX_QUEUE_PER_CHAT,
+  MAX_QUEUE_TOTAL,
+  canRetry,
+  enqueueOutbox,
+  failOutboxEntry,
+  hasQueuedWork,
+  loadOutbox,
+  markOutboxSent,
+  markOutboxUnconfirmed,
+  pruneSentOutbox,
+  reconcileOutbox,
+  removeOutboxEntry,
+  retryOutboxEntry,
+  saveOutbox,
+  visibleOutbox,
+} from './lib/outbox';
+import type { OutboxEntry } from './lib/outbox';
+import {
   DEFAULT_SKILLS,
   FEYNMAN_AGENTS_MD,
   FEYNMAN_SOUL_MD,
@@ -166,6 +185,20 @@ const CHUNK_PACE_MS = 40;
 
 /** §7 — a v1 container ignores `file_begin`, so `file_end` must not wait forever. */
 const UPLOAD_TIMEOUT_MS = 60_000;
+
+/**
+ * M37: wait this long after `live` before asking the history what an
+ * interrupted flush delivered. A queued message that reached the plugin a
+ * moment before the drop is persisted within this window, so the first answer
+ * already contains it (no false "unconfirmed").
+ */
+const OUTBOX_RECONCILE_DELAY_MS = 1_200;
+
+/**
+ * M37: how long a handed-over entry is kept in memory waiting for a possible
+ * disconnect. Past this it can no longer become 未确认 and is forgotten.
+ */
+const OUTBOX_SENT_GRACE_MS = 8_000;
 
 /** Raw size above which an inline v1 frame cannot fit: skip the base64 probe. */
 const INLINE_PROBE_BYTES = 180 * 1024;
@@ -518,6 +551,12 @@ interface ChatRuntime {
   histPending: boolean;
   histOpen: boolean;
   loaded: boolean;
+  /**
+   * M37: a `hist` sent to prove what an interrupted flush delivered. Its
+   * answer feeds the outbox instead of the message list, so a reconcile can
+   * never duplicate the history already on screen.
+   */
+  histPurpose?: 'view' | 'reconcile';
 }
 
 let nextId = 1;
@@ -1300,6 +1339,88 @@ function AttachmentList({
   );
 }
 
+/**
+ * M37: one queued message in the thread.
+ *
+ * Deliberately *not* a `ChatMessage`: it must never be mistaken for something
+ * the server has. The bubble carries an explicit state label, and the only
+ * actions are 撤销 (always) and 重试 (failed, while attempts remain).
+ *
+ * An entry that was already handed to a socket has its ordinary bubble in
+ * `messages` (`echo`), so it renders here as a compact status strip instead:
+ * the same sentence never appears twice.
+ */
+const PendingRow = memo(function PendingRow({
+  entry,
+  onCancel,
+  onRetry,
+}: {
+  entry: OutboxEntry;
+  onCancel: () => void;
+  onRetry: () => void;
+}) {
+  const failed = entry.status === 'failed';
+  const label = failed ? (entry.unconfirmed ? '未确认' : '发送失败') : '待发送';
+  const hint = failed
+    ? entry.unconfirmed
+      ? `连接中断，无法确认是否送达（已尝试 ${entry.attempts} 次）`
+      : `已尝试 ${entry.attempts} 次，仍未能发出`
+    : '连接恢复后自动发出';
+  const preview = entry.display.length > 40 ? `${entry.display.slice(0, 40)}…` : entry.display;
+  const actions = (
+    <div className="pending-actions">
+      <button type="button" className="pending-btn" onClick={onCancel} aria-label="撤销这条待发送消息">
+        撤销
+      </button>
+      {failed && canRetry(entry) ? (
+        <button type="button" className="pending-btn pending-retry" onClick={onRetry} aria-label="重试发送这条消息">
+          重试
+        </button>
+      ) : null}
+    </div>
+  );
+
+  if (entry.echo) {
+    return (
+      <div
+        className={`row user pending pending-strip${failed ? ' pending-failed' : ''}`}
+        data-outbox-id={entry.id}
+        data-outbox-state={failed ? (entry.unconfirmed ? 'unconfirmed' : 'failed') : 'queued'}
+      >
+        <div className="pending-strip-body">
+          <div className="pending-head">
+            <Clock size={12} />
+            <span className="pending-badge">{label}</span>
+            <span className="pending-hint">{hint}</span>
+          </div>
+          <div className="pending-preview">「{preview}」</div>
+          {actions}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`row user pending${failed ? ' pending-failed' : ''}`}
+      data-outbox-id={entry.id}
+      data-outbox-state={failed ? (entry.unconfirmed ? 'unconfirmed' : 'failed') : 'queued'}
+    >
+      <div className="bubble">
+        <div className="pending-head">
+          <Clock size={12} />
+          <span className="pending-badge">{label}</span>
+          <span className="pending-hint">{hint}</span>
+        </div>
+        <div className="bubble-text">
+          <span className="plain">{entry.display}</span>
+        </div>
+        {actions}
+      </div>
+    </div>
+  );
+});
+
 const MessageView = memo(function MessageView({
   message,
   chat,
@@ -2018,6 +2139,13 @@ export default function App() {
   });
   const [drafts, setDrafts] = useState<Drafts>(loadDrafts);
   const [input, setInput] = useState<string>(() => draftOf(drafts, session.active));
+  /**
+   * M37: messages the user sent while the relay socket or the agent was
+   * unavailable. Not drafts (those are text the user never sent) and not
+   * messages (the plugin never saw them): they render as their own 待发送 rows
+   * until a flush hands them to the wire.
+   */
+  const [outbox, setOutbox] = useState<OutboxEntry[]>(loadOutbox);
   // M35: one message may carry several attachments; the order is the order
   // they appear in the bubble and in `msg.files[]`.
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -2166,6 +2294,18 @@ export default function App() {
   // M22: write-through mirror of `drafts` so a chat switch in the same event
   // (type → click another chat) always reads the newest text.
   const draftsRef = useRef<Drafts>(drafts);
+  // M37: the outbox is read by socket callbacks that were created long before
+  // the next render, so state and ref are written together.
+  const outboxRef = useRef<OutboxEntry[]>(outbox);
+  const connRef = useRef<ConnState>('idle');
+  /**
+   * The relay never tells a browser that the agent went away; the only
+   * trustworthy "agent is up" signals are the `ready` handshake and a `status`
+   * push from the agent itself (M37, docs/m37-report.md).
+   */
+  const agentOnlineRef = useRef(false);
+  const outboxReconcile = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const outboxSentPrune = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const runtimes = useRef<Map<string, ChatRuntime>>(new Map());
   const listRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -2305,6 +2445,155 @@ export default function App() {
     const next = { ...effortLevelsRef.current, [chat]: level };
     effortLevelsRef.current = next;
     setEffortLevels(next);
+  };
+
+  // ---- M37: offline send queue (outbox) ----
+  /** State + write-through ref, like `rememberDraft`. */
+  const setOutboxState = (next: OutboxEntry[]) => {
+    outboxRef.current = next;
+    setOutbox(next);
+  };
+
+  /** True only when the frame would actually be written to a live socket. */
+  const canReachAgent = () => connRef.current === 'live' && agentOnlineRef.current;
+
+  /**
+   * Turn composer text into a queue entry. The draft is cleared exactly like a
+   * successful send: from this moment the text is "sent, not delivered", which
+   * is the outbox's business, not the draft store's.
+   */
+  const queueMessage = (chat: string, text: string, display: string, raw: string): boolean => {
+    const result = enqueueOutbox(outboxRef.current, { chat, text, display, raw });
+    if (result.refused) {
+      setAttachNotice(
+        result.refused === 'full-chat'
+          ? `待发送队列已满（每会话 ${MAX_QUEUE_PER_CHAT} 条）——请恢复连接后再发送。`
+          : `待发送队列已满（共 ${MAX_QUEUE_TOTAL} 条）——请恢复连接后再发送。`,
+      );
+      return false;
+    }
+    if (!result.entry) return false;
+    setOutboxState(result.entries);
+    ensureChat(chat);
+    touchedChatsRef.current.add(chat);
+    return true;
+  };
+
+  /**
+   * Hand every queued entry to the socket, in queue order. Called on every
+   * `live` transition, on an agent `status` push, and after a reconcile.
+   * Nothing here bypasses the normal path: the frame is the same `{t:"msg"}`
+   * the composer builds.
+   */
+  const flushOutbox = () => {
+    const client = clientRef.current;
+    if (!client || !canReachAgent()) return;
+    const queue = outboxRef.current;
+    if (!hasQueuedWork(queue)) return;
+    const sent: string[] = [];
+    for (const entry of queue) {
+      if (entry.status !== 'queued') continue;
+      if (!canRetry(entry)) {
+        // Over the cap: leave it in the queue, visibly red, for the user.
+        setOutboxState(failOutboxEntry(outboxRef.current, entry.id));
+        continue;
+      }
+      const frame: Frame = { t: 'msg', chat: entry.chat, text: entry.text };
+      if (byteSize(frame) > MAX_FRAME_BYTES) {
+        setOutboxState(failOutboxEntry(outboxRef.current, entry.id));
+        continue;
+      }
+      if (!client.send(frame)) break;
+      sent.push(entry.id);
+    }
+    if (sent.length === 0) return;
+    // The queued row becomes an ordinary bubble the moment the frame is on
+    // the wire -- exactly the echo `send()` has always produced. An entry that
+    // already echoed once (a retry) keeps its single bubble.
+    const ids = new Set(sent);
+    for (const entry of outboxRef.current) {
+      if (!ids.has(entry.id) || entry.echo) continue;
+      // A chat this visit has never loaded gets no echo: its first `hist`
+      // would append the server's copy of the same message and the thread
+      // would show it twice. The history is the echo in that case.
+      if (entry.chat !== activeRef.current && !runtimeOf(entry.chat).loaded) continue;
+      updateChat(entry.chat, (prev) => [
+        ...prev,
+        { id: nextId++, role: 'user', kind: 'text', text: entry.display, ts: entry.ts },
+      ]);
+      touchedChatsRef.current.add(entry.chat);
+    }
+    const touchedChats = new Set(
+      outboxRef.current.filter((entry) => ids.has(entry.id)).map((entry) => entry.chat),
+    );
+    setOutboxState(markOutboxSent(outboxRef.current, sent));
+    // A `sent` entry only has to outlive the connection it was written to:
+    // if that connection dies it is flagged unconfirmed first (onState), so a
+    // healthy grace period is enough to forget it.
+    for (const chat of touchedChats) {
+      const previous = outboxSentPrune.current.get(chat);
+      if (previous) clearTimeout(previous);
+      outboxSentPrune.current.set(
+        chat,
+        setTimeout(() => {
+          outboxSentPrune.current.delete(chat);
+          const pruned = pruneSentOutbox(outboxRef.current, chat);
+          if (pruned !== outboxRef.current) setOutboxState(pruned);
+        }, OUTBOX_SENT_GRACE_MS),
+      );
+    }
+  };
+
+  /**
+   * Ask for the chat's history to prove what an interrupted flush delivered.
+   * The answer is consumed by the `hist` handler below (never appended to the
+   * visible list), so it cannot duplicate anything on screen.
+   */
+  const requestOutboxReconcile = (chat: string) => {
+    if (outboxReconcile.current.has(chat)) return;
+    const timer = setTimeout(() => {
+      outboxReconcile.current.delete(chat);
+      const client = clientRef.current;
+      if (!client || connRef.current !== 'live') return;
+      const rt = runtimeOf(chat);
+      // A view load already in flight will reconcile as well (see `hist`);
+      // never stack a second request behind it.
+      if (rt.histPending) return;
+      rt.histPurpose = 'reconcile';
+      rt.histPending = true;
+      if (!client.send({ t: 'hist', chat })) {
+        rt.histPurpose = undefined;
+        rt.histPending = false;
+      }
+    }, OUTBOX_RECONCILE_DELAY_MS);
+    outboxReconcile.current.set(chat, timer);
+  };
+
+  /** A chat whose connection died has entries only history can settle. */
+  const siftOutboxAfterReconnect = () => {
+    for (const entry of outboxRef.current) {
+      if (entry.status === 'sent' && entry.unconfirmed) requestOutboxReconcile(entry.chat);
+    }
+  };
+
+  /** 撤销: drop one entry; the text returns to the composer (or its draft). */
+  const cancelOutboxEntry = (id: string) => {
+    const entry = outboxRef.current.find((item) => item.id === id);
+    if (!entry) return;
+    setOutboxState(removeOutboxEntry(outboxRef.current, id));
+    // An echoed entry already has its bubble in the thread; returning its text
+    // to the composer would put the same sentence on screen twice.
+    if (entry.echo) return;
+    if (entry.chat === activeRef.current) {
+      if (!input.trim()) setComposer(entry.raw);
+    } else if (!draftOf(draftsRef.current, entry.chat)) {
+      rememberDraft(entry.chat, entry.raw);
+    }
+  };
+
+  const retryOutbox = (id: string) => {
+    setOutboxState(retryOutboxEntry(outboxRef.current, id));
+    flushOutbox();
   };
 
   const mergeEffortMeta = (chat: string, patch: Partial<EffortMeta>) => {
@@ -2823,9 +3112,13 @@ export default function App() {
     const rt = runtimeOf(chat);
     if (rt.histPending) return;
     rt.histPending = true;
+    // M37: every request states its purpose, so a stale flag from an
+    // interrupted reconcile can never turn this answer into a silent one.
+    rt.histPurpose = 'view';
     const client = clientRef.current;
     if (!client || !client.send({ t: 'hist', chat })) {
       rt.histPending = false;
+      rt.histPurpose = undefined;
     }
   };
 
@@ -3021,6 +3314,20 @@ export default function App() {
   useEffect(() => {
     activeRef.current = activeChat;
   }, [activeChat]);
+
+  useEffect(() => {
+    // M37: the queue outlives the page. `saveOutbox` is best-effort, exactly
+    // like the drafts store -- a blocked quota never breaks a send.
+    saveOutbox(outbox);
+  }, [outbox]);
+
+  useEffect(() => {
+    // M37: a restored queue may name chats this visit has not seen yet; give
+    // them a row so the pending message is reachable (mirror of M19's rule:
+    // never prune, only add).
+    for (const chat of new Set(outboxRef.current.map((entry) => entry.chat))) ensureChat(chat);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount only
+  }, []);
 
   useEffect(() => {
     storageSet(CHATS_KEY, JSON.stringify(chatIds));
@@ -3504,8 +3811,37 @@ export default function App() {
         case 'hist': {
           ensureChat(chat);
           const rt = runtimeOf(chat);
+          const incoming = historyMessages(frame.messages);
+          const final = frame.more !== true;
+          // M37: a complete history answer is the only proof the protocol can
+          // give about what an interrupted flush delivered. Confirm those and
+          // freeze the rest; never touch entries that stayed in the queue.
+          if (final) {
+            const unsettled = outboxRef.current.some(
+              (entry) => entry.chat === chat && entry.status === 'sent' && entry.unconfirmed,
+            );
+            if (unsettled) {
+              const settled = reconcileOutbox(
+                outboxRef.current,
+                chat,
+                incoming.filter((message) => message.role === 'user').map((message) => message.text),
+              );
+              if (settled.entries !== outboxRef.current) setOutboxState(settled.entries);
+            }
+          }
+          if (rt.histPurpose === 'reconcile') {
+            // This answer belongs to the outbox only; the message list already
+            // shows this history, so appending it would duplicate every row.
+            rt.histPending = false;
+            if (final) {
+              rt.histPurpose = undefined;
+              rt.histOpen = false;
+              maybeRequestHist(chat);
+            }
+            break;
+          }
           rt.histPending = false;
-          appendHistory(chat, historyMessages(frame.messages));
+          appendHistory(chat, incoming);
           if (frame.more === true) {
             rt.histOpen = true;
           } else {
@@ -3638,6 +3974,14 @@ export default function App() {
         }
 
         case 'status': {
+          // M37: the plugin pushes `status` when it attaches (channel.py's
+          // `ready`/`peer` handler). It is the only browser-visible proof
+          // that an offline agent is back, so it also opens the outbox.
+          if (!agentOnlineRef.current) {
+            agentOnlineRef.current = true;
+            setAgentOnline(true);
+            flushOutbox();
+          }
           const name = asString(frame.agent_name);
           if (name) setAgentName(name);
           const provider = asString(frame.provider);
@@ -3960,8 +4304,15 @@ export default function App() {
       onState: (next, info) => {
         setState(next);
         setAgentOnline(info.agentOnline);
+        connRef.current = next;
+        agentOnlineRef.current = info.agentOnline;
         if (next === 'live') {
           maybeRequestHist(activeRef.current);
+          // M37: a reconnected socket is the moment queued messages go out.
+          // Entries whose delivery the drop left unknown are sifted by history
+          // first, so the flush can never send one twice.
+          siftOutboxAfterReconnect();
+          flushOutbox();
           // Control frames are not replayed, so re-align the visible chat's
           // thinking level on every (re)connect.
           clientRef.current?.send({
@@ -3982,9 +4333,15 @@ export default function App() {
           // M27: a set_effort sent on the old socket will never be answered,
           // so let the next completed turn dispatch it again.
           effortSentRef.current.clear();
+          // M37: anything handed to the dead socket may or may not have
+          // reached the plugin. Freeze it as unconfirmed instead of resending
+          // on a guess (see lib/outbox.ts).
+          const frozen = markOutboxUnconfirmed(outboxRef.current);
+          if (frozen !== outboxRef.current) setOutboxState(frozen);
           for (const rt of runtimes.current.values()) {
             rt.histPending = false;
             rt.histOpen = false;
+            rt.histPurpose = undefined;
           }
         }
       },
@@ -3998,11 +4355,21 @@ export default function App() {
       if (raf) cancelAnimationFrame(raf);
       client.close();
       clientRef.current = null;
+      connRef.current = 'idle';
+      agentOnlineRef.current = false;
+      for (const timer of outboxReconcile.current.values()) clearTimeout(timer);
+      outboxReconcile.current.clear();
+      for (const timer of outboxSentPrune.current.values()) clearTimeout(timer);
+      outboxSentPrune.current.clear();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reconnect when endpoint or login changes
   }, [needsLogin, activeWsUrl, requiresAuth]);
 
   const messages = messagesByChat[activeChat] ?? [];
+  // M37: rows the server has not seen. Kept out of `messagesByChat` on
+  // purpose: a resync/history reload may clear or rewrite that list, and a
+  // queued message must survive both without ever looking delivered.
+  const pendingOutbox = visibleOutbox(outbox, activeChat);
   const streaming = messages.some((m) => m.streaming);
   const activeEffort = effortLevels[activeChat] ?? 'default';
   const activeEffortSupported = effortMeta[activeChat]?.supported ?? null;
@@ -4019,7 +4386,9 @@ export default function App() {
     nearBottomRef.current = true;
     setNearBottom(true);
     el.scrollTop = el.scrollHeight;
-  }, [messages, activeChat]);
+    // M37: a queued row appears after a send without touching `messages`, so
+    // the queue length joins the trigger.
+  }, [messages, activeChat, pendingOutbox.length]);
 
   // M23: once the hit's chat history is on screen, find the message whose
   // text contains the archive snippet and centre it in the thread. The
@@ -4702,8 +5071,6 @@ export default function App() {
   };
 
   const sendTextDirect = (rawText: string) => {
-    const client = clientRef.current;
-    if (!client) return;
     const chat = activeChat;
     const text = rawText.trim();
     if (!text) return;
@@ -4713,8 +5080,11 @@ export default function App() {
       setComposerError(oversizeError(size));
       return;
     }
-    if (!client.send(frame)) {
-      setComposerError('未连接 — 正在重连，请稍后重试。');
+    const client = canReachAgent() ? clientRef.current : null;
+    if (!client || !client.send(frame)) {
+      // M37: regenerate is a send too -- offline it joins the queue rather
+      // than vanishing into a socket that is not there.
+      queueMessage(chat, text, text, text);
       return;
     }
     // M19: a chat the user has written in is never replaced by the stale-chat
@@ -4737,8 +5107,6 @@ export default function App() {
   };
 
   const send = () => {
-    const client = clientRef.current;
-    if (!client) return;
     const chat = activeChat;
     const rawInput = input.trim();
     const pending = attachments;
@@ -4774,8 +5142,27 @@ export default function App() {
       setComposerError(oversizeError(size));
       return;
     }
-    if (!client.send(frame)) {
-      setComposerError('未连接 — 正在重连，请稍后重试。');
+    // M37: only a socket that is live *and* has an agent behind it may take
+    // the frame. Otherwise the message is queued locally instead of being
+    // written into a relay buffer the user cannot see (or lost outright).
+    const client = canReachAgent() ? clientRef.current : null;
+    if (!client || !client.send(frame)) {
+      if (pending.length) {
+        // Attachments cannot survive a queue: an inline file would blow the
+        // localStorage budget and a chunked `ref` dies with the plugin's
+        // 10-minute staging TTL (plugin/util.py:712). Refuse loudly instead
+        // of queueing a message that would silently lose its files.
+        setAttachNotice('离线时无法排队带附件的消息：请恢复连接后重试，或移除附件只发送文字。');
+        return;
+      }
+      if (!queueMessage(chat, wireText, displayText, rawInput)) return;
+      nearBottomRef.current = true;
+      setNearBottom(true);
+      setInput('');
+      rememberDraft(chat, '');
+      setActiveSkill(null);
+      setAttachNotice(null);
+      setComposerError(null);
       return;
     }
     // M19: a chat the user has written in is never replaced by the stale-chat
@@ -5091,8 +5478,9 @@ export default function App() {
   const uploadBlocked = attachments.some(
     (file) => file.kind === 'chunked' && file.status !== 'ready',
   );
-  const canSend =
-    state === 'live' && (input.trim().length > 0 || attachments.length > 0) && !uploadBlocked;
+  // M37: sending is allowed offline on purpose -- the text becomes a queue
+  // entry with a 待发送 row instead of being refused.
+  const canSend = (input.trim().length > 0 || attachments.length > 0) && !uploadBlocked;
 
   if (needsLogin) {
     return (
@@ -5727,7 +6115,7 @@ export default function App() {
 
         <div className="thread">
           <div className="messages" ref={listRef} onScroll={onListScroll}>
-            {messages.length === 0 ? (
+            {messages.length === 0 && pendingOutbox.length === 0 ? (
               <>
                 <p className="empty">
                   No messages yet. Say hello — replies stream in through the relay.
@@ -5784,6 +6172,14 @@ export default function App() {
                 onAttachment={fetchAttachment}
                 onRegenerate={regenerateRow}
                 onEditResend={editResendRow}
+              />
+            ))}
+            {pendingOutbox.map((entry) => (
+              <PendingRow
+                key={entry.id}
+                entry={entry}
+                onCancel={() => cancelOutboxEntry(entry.id)}
+                onRetry={() => retryOutbox(entry.id)}
               />
             ))}
           </div>
@@ -5950,9 +6346,9 @@ export default function App() {
                 rows={1}
                 value={input}
                 placeholder={
-                  state === 'live'
+                  state === 'live' && agentOnline
                     ? '输入问题…（敲 @ 调用技能，敲 / 呼出指令与模型切换，支持粘贴截图）'
-                    : '正在连接 Relay 节点…'
+                    : '断线中 — 发送会先排队，连接恢复后自动发出'
                 }
                 onChange={(e) => setComposer(e.target.value)}
                 onKeyDown={onKeyDown}
@@ -6213,7 +6609,7 @@ export default function App() {
               </div>
 
               <div className="composer-tools-right">
-                {streaming ? (
+                {streaming && state === 'live' ? (
                   <button className="stop" onClick={stop}>
                     <Square size={12} />
                     <span>停止</span>

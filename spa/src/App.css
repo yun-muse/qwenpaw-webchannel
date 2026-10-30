@@ -4677,3 +4677,103 @@ button:disabled {
     display: none;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   M37 — queued messages (sent by the user, not yet on the server).
+   The bubble is dashed and labelled on purpose: it must never read as a
+   delivered message.
+   --------------------------------------------------------------------------- */
+.row.user.pending .bubble {
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--line);
+  color: var(--text);
+}
+
+.row.user.pending-failed .bubble {
+  background: var(--danger-bg);
+  border-color: var(--danger-line);
+}
+
+.pending-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 5px;
+  font-size: 11.5px;
+  line-height: 1.3;
+  color: var(--muted);
+}
+
+.pending-badge {
+  font-weight: 600;
+  color: var(--warn);
+}
+
+.row.user.pending-failed .pending-badge {
+  color: var(--danger);
+}
+
+.pending-hint {
+  opacity: 0.85;
+}
+
+.pending-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.pending-btn {
+  padding: 3px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--muted);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.pending-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.pending-retry {
+  color: var(--accent);
+  border-color: var(--accent-soft);
+}
+
+@media (max-width: 720px) {
+  /* M22 tap-target rule: a phone button is at least 44px tall. */
+  .pending-btn {
+    min-height: 44px;
+    padding: 0 14px;
+  }
+}
+
+/* An echoed entry (its bubble is already in the thread) shows a compact
+   status strip under the messages instead of repeating the text. */
+.row.user.pending-strip {
+  justify-content: flex-end;
+}
+
+.pending-strip-body {
+  max-width: 78%;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px dashed var(--line);
+  background: var(--card);
+  font-size: 12px;
+}
+
+.row.user.pending-failed .pending-strip-body {
+  border-color: var(--danger-line);
+  background: var(--danger-bg);
+}
+
+.pending-preview {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}

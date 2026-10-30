@@ -1,0 +1,348 @@
+[m37-probe] mock <- hist chat-alpha (2 messages)
+[m37-probe] mock <- msg "P1 在线基线" @1793395209512
+[m37-probe] mock <- msg "P3 Agent 离线发送" @1793395218747
+[m37-probe] mock <- hist chat-alpha (4 messages)
+[m37-probe] {
+  "p1": {
+    "labels": [
+      "已连接",
+      "Agent 在线"
+    ],
+    "sendDisabled": true,
+    "composerError": "",
+    "input": "",
+    "rows": [
+      {
+        "cls": "row user",
+        "text": "种子消息复制编辑"
+      },
+      {
+        "cls": "row assistant",
+        "text": "种子回答\n复制 Markdown重新生成"
+      },
+      {
+        "cls": "row user",
+        "text": "P1 在线基线21:20复制编辑"
+      },
+      {
+        "cls": "row assistant",
+        "text": "ack: P1 在线基线\n21:20复制 Markdown重新生成"
+      }
+    ],
+    "header": "AlphaAgent导出人设曜石暗黑已连接Agent 在线更多",
+    "received": [
+      "P1 在线基线"
+    ]
+  },
+  "p2": {
+    "offlineLive": {
+      "labels": [
+        "恢复中",
+        "Agent 离线"
+      ],
+      "sendDisabled": true,
+      "composerError": "",
+      "input": "",
+      "rows": [
+        {
+          "cls": "row user",
+          "text": "种子消息复制编辑"
+        },
+        {
+          "cls": "row assistant",
+          "text": "种子回答\n复制 Markdown重新生成"
+        },
+        {
+          "cls": "row user",
+          "text": "P1 在线基线21:20复制编辑"
+        },
+        {
+          "cls": "row assistant",
+          "text": "ack: P1 在线基线\n21:20复制 Markdown重新生成"
+        }
+      ],
+      "header": "AlphaAgent导出人设曜石暗黑恢复中Agent 离线更多"
+    },
+    "afterClick": {
+      "labels": [
+        "恢复中",
+        "Agent 离线"
+      ],
+      "sendDisabled": true,
+      "composerError": "",
+      "input": "P2 断线发送",
+      "rows": [
+        {
+          "cls": "row user",
+          "text": "种子消息复制编辑"
+        },
+        {
+          "cls": "row assistant",
+          "text": "种子回答\n复制 Markdown重新生成"
+        },
+        {
+          "cls": "row user",
+          "text": "P1 在线基线21:20复制编辑"
+        },
+        {
+          "cls": "row assistant",
+          "text": "ack: P1 在线基线\n21:20复制 Markdown重新生成"
+        }
+      ],
+      "header": "AlphaAgent导出人设曜石暗黑恢复中Agent 离线更多"
+    },
+    "afterEnter": {
+      "labels": [
+        "恢复中",
+        "Agent 离线"
+      ],
+      "sendDisabled": true,
+      "composerError": "未连接 — 正在重连，请稍后重试。",
+      "input": "P2 断线发送",
+      "rows": [
+        {
+          "cls": "row user",
+          "text": "种子消息复制编辑"
+        },
+        {
+          "cls": "row assistant",
+          "text": "种子回答\n复制 Markdown重新生成"
+        },
+        {
+          "cls": "row user",
+          "text": "P1 在线基线21:20复制编辑"
+        },
+        {
+          "cls": "row assistant",
+          "text": "ack: P1 在线基线\n21:20复制 Markdown重新生成"
+        }
+      ],
+      "header": "AlphaAgent导出人设曜石暗黑恢复中Agent 离线更多"
+    },
+    "received": [
+      "P1 在线基线"
+    ],
+    "afterReconnect": {
+      "labels": [
+        "已连接",
+        "Agent 在线"
+      ],
+      "sendDisabled": false,
+      "composerError": "未连接 — 正在重连，请稍后重试。",
+      "input": "P2 断线发送",
+      "rows": [
+        {
+          "cls": "row user",
+          "text": "种子消息复制编辑"
+        },
+        {
+          "cls": "row assistant",
+          "text": "种子回答\n复制 Markdown重新生成"
+        },
+        {
+          "cls": "row user",
+          "text": "P1 在线基线21:20复制编辑"
+        },
+        {
+          "cls": "row assistant",
+          "text": "ack: P1 在线基线\n21:20复制 Markdown重新生成"
+        }
+      ],
+      "header": "AlphaAgent导出人设曜石暗黑已连接Agent 在线更多",
+      "received": [
+        "P1 在线基线"
+      ]
+    }
+  },
+  "p3": {
+    "headerBeforeSend": [
+      "已连接",
+      "Agent 在线"
+    ],
+    "afterSend": {
+      "labels": [
+        "已连接",
+        "Agent 在线"
+      ],
+      "sendDisabled": true,
+      "composerError": "",
+      "input": "",
+      "rows": [
+        {
+          "cls": "row user",
+          "text": "种子消息复制编辑"
+        },
+        {
+          "cls": "row assistant",
+          "text": "种子回答\n复制 Markdown重新生成"
+        },
+        {
+          "cls": "row user",
+          "text": "P1 在线基线21:20复制编辑"
+        },
+        {
+          "cls": "row assistant",
+          "text": "ack: P1 在线基线\n21:20复制 Markdown重新生成"
+        },
+        {
+          "cls": "row user",
+          "text": "P3 Agent 离线发送21:20复制编辑"
+        }
+      ],
+      "header": "AlphaAgent导出人设曜石暗黑已连接Agent 在线更多"
+    },
+    "receivedWhileOffline": [
+      "P1 在线基线"
+    ],
+    "afterAgentBack": {
+      "received": [
+        "P1 在线基线",
+        "P3 Agent 离线发送"
+      ],
+      "rows": [
+        {
+          "cls": "row user",
+          "text": "种子消息复制编辑"
+        },
+        {
+          "cls": "row assistant",
+          "text": "种子回答\n复制 Markdown重新生成"
+        },
+        {
+          "cls": "row user",
+          "text": "P1 在线基线21:20复制编辑"
+        },
+        {
+          "cls": "row assistant",
+          "text": "ack: P1 在线基线\n21:20复制 Markdown重新生成"
+        },
+        {
+          "cls": "row user",
+          "text": "P3 Agent 离线发送21:20复制编辑"
+        },
+        {
+          "cls": "row assistant",
+          "text": "ack: P3 Agent 离线发送\n21:20复制 Markdown重新生成"
+        }
+      ]
+    }
+  },
+  "p4": {
+    "dropped": [
+      "P4 途中断线"
+    ],
+    "received": [
+      "P1 在线基线",
+      "P3 Agent 离线发送"
+    ],
+    "ui": {
+      "labels": [
+        "已连接",
+        "Agent 在线"
+      ],
+      "sendDisabled": true,
+      "composerError": "",
+      "input": "",
+      "rows": [
+        {
+          "cls": "row user",
+          "text": "种子消息复制编辑"
+        },
+        {
+          "cls": "row assistant",
+          "text": "种子回答\n复制 Markdown重新生成"
+        },
+        {
+          "cls": "row user",
+          "text": "P1 在线基线21:20复制编辑"
+        },
+        {
+          "cls": "row assistant",
+          "text": "ack: P1 在线基线\n21:20复制 Markdown重新生成"
+        },
+        {
+          "cls": "row user",
+          "text": "P3 Agent 离线发送21:20复制编辑"
+        },
+        {
+          "cls": "row assistant",
+          "text": "ack: P3 Agent 离线发送\n21:20复制 Markdown重新生成"
+        },
+        {
+          "cls": "row user",
+          "text": "P4 途中断线21:20复制编辑"
+        }
+      ],
+      "header": "Alphaprobe-agent导出人设曜石暗黑已连接Agent 在线更多"
+    },
+    "afterReconnect": {
+      "labels": [
+        "已连接",
+        "Agent 在线"
+      ],
+      "sendDisabled": true,
+      "composerError": "",
+      "input": "",
+      "rows": [
+        {
+          "cls": "row user",
+          "text": "种子消息复制编辑"
+        },
+        {
+          "cls": "row assistant",
+          "text": "种子回答\n复制 Markdown重新生成"
+        },
+        {
+          "cls": "row user",
+          "text": "P1 在线基线21:20复制编辑"
+        },
+        {
+          "cls": "row assistant",
+          "text": "ack: P1 在线基线\n21:20复制 Markdown重新生成"
+        },
+        {
+          "cls": "row user",
+          "text": "P3 Agent 离线发送21:20复制编辑"
+        },
+        {
+          "cls": "row assistant",
+          "text": "ack: P3 Agent 离线发送\n21:20复制 Markdown重新生成"
+        },
+        {
+          "cls": "row user",
+          "text": "P4 途中断线21:20复制编辑"
+        }
+      ],
+      "header": "Alphaprobe-agent导出人设曜石暗黑已连接Agent 在线更多"
+    },
+    "afterReload": {
+      "labels": [
+        "已连接",
+        "Agent 在线"
+      ],
+      "sendDisabled": true,
+      "composerError": "",
+      "input": "",
+      "rows": [
+        {
+          "cls": "row user",
+          "text": "种子消息复制编辑"
+        },
+        {
+          "cls": "row assistant",
+          "text": "种子回答\n复制 Markdown重新生成"
+        },
+        {
+          "cls": "row user",
+          "text": "P1 在线基线复制编辑"
+        },
+        {
+          "cls": "row user",
+          "text": "P3 Agent 离线发送复制编辑"
+        }
+      ],
+      "header": "AlphaAgent导出人设曜石暗黑已连接Agent 在线更多",
+      "drafts": "{}"
+    }
+  }
+}
