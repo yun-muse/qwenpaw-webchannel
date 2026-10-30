@@ -364,6 +364,19 @@ def _local_attachment_path(url):
     return url if os.path.isabs(url) else None
 
 
+def attachment_media_dir(url):
+    """Directory QwenPaw stored an attachment in, or "" (M35).
+
+    The URL an upload returns is the file's absolute path, so its parent is
+    the console channel's real media directory -- the one root no deployment
+    setting can make the plugin guess wrong. Non-local URLs return "".
+    """
+    path = _local_attachment_path(url)
+    if not path:
+        return ""
+    return os.path.dirname(path)
+
+
 def _attachment_size(url):
     """``os.stat`` size of a local attachment, or None (unknown, not 0)."""
     path = _local_attachment_path(url)
@@ -685,6 +698,13 @@ def approval_owner_ok(pending, agent_id):
 # One file may be far larger than the 256 KB frame budget when it travels in
 # ``file_chunk`` frames; both ends enforce this ceiling.
 MAX_FILE_BYTES = 10 * 1024 * 1024
+# M35: one message carries at most this many attachments. Ten is the product
+# cap (a phone screenshot batch, a log set, a few docs); it keeps one turn's
+# upload work bounded without touching the 10 MB total budget.
+MAX_MESSAGE_ATTACHMENTS = 10
+# M35: the 10 MB rule is per **message**, not per file, so ten 9 MB files
+# cannot become one 90 MB turn. The SPA enforces the same number.
+MAX_MESSAGE_ATTACHMENT_BYTES = MAX_FILE_BYTES
 # Raw bytes per ``file_chunk`` (96 KB -> ~128 KB of base64, well inside a
 # 256 KB frame).
 CHUNK_RAW_BYTES = 96 * 1024
@@ -1041,6 +1061,23 @@ def media_file_path(raw_path, media_dir, max_bytes=MAX_FILE_BYTES):
     except OSError:
         return None
     return target
+
+
+def media_file_path_in(raw_path, media_dirs, max_bytes=MAX_FILE_BYTES):
+    """Resolved path of *raw_path* inside **any** of *media_dirs*, else None.
+
+    M35: the console channel's media directory is not always the one the
+    plugin guessed -- a deployment may configure ``console.media_dir`` or set
+    ``CONSOLE_MEDIA_DIR`` (which the config-driven app path ignores). Every
+    candidate root is still an explicit QwenPaw-owned directory, so this is
+    the same containment rule as ``media_file_path`` applied to a root set,
+    not a relaxation: ``..`` and symlink escapes fail against every root.
+    """
+    for media_dir in media_dirs or []:
+        path = media_file_path(raw_path, media_dir, max_bytes)
+        if path is not None:
+            return path
+    return None
 
 
 def history_has_attachment(history, msg_id="", url=""):

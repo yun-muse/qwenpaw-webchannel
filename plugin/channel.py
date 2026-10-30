@@ -113,12 +113,15 @@ try:  # package-relative (tests, ``python -m plugin...``)
         ANSWER_STREAM_TYPE,
         MAX_EXPORT_BYTES,
         MAX_FILE_BYTES,
+        MAX_MESSAGE_ATTACHMENTS,
+        MAX_MESSAGE_ATTACHMENT_BYTES,
         PROMPT_FILES,
         AttachmentRefs,
         FileTransfers,
         SessionUsageStore,
         active_llm_detail,
         active_llm_of,
+        attachment_media_dir,
         aggregate_usage_stats,
         approval_owner_ok,
         build_export_markdown,
@@ -132,7 +135,7 @@ try:  # package-relative (tests, ``python -m plugin...``)
         history_has_attachment,
         history_messages,
         is_effort_level,
-        media_file_path,
+        media_file_path_in,
         model_items,
         pack_history,
         plan_model_switch,
@@ -183,12 +186,15 @@ except ImportError:  # loaded as a top-level module by the plugin loader
         ANSWER_STREAM_TYPE,
         MAX_EXPORT_BYTES,
         MAX_FILE_BYTES,
+        MAX_MESSAGE_ATTACHMENTS,
+        MAX_MESSAGE_ATTACHMENT_BYTES,
         PROMPT_FILES,
         AttachmentRefs,
         FileTransfers,
         SessionUsageStore,
         active_llm_detail,
         active_llm_of,
+        attachment_media_dir,
         aggregate_usage_stats,
         approval_owner_ok,
         build_export_markdown,
@@ -202,7 +208,7 @@ except ImportError:  # loaded as a top-level module by the plugin loader
         history_has_attachment,
         history_messages,
         is_effort_level,
-        media_file_path,
+        media_file_path_in,
         model_items,
         pack_history,
         plan_model_switch,
@@ -325,6 +331,11 @@ class WebChannel(BaseChannel):
         self._files = FileTransfers()
         # M31: opaque refs handed to the browser for history attachments.
         self._attachments = AttachmentRefs()
+        # M35: media roots. The upload's own directory beats every guess, and
+        # the console channel's configured media_dir is looked up once.
+        self._upload_media_root: str = ""
+        self._console_media_dir: str = ""
+        self._console_media_dir_checked = False
         # Rotating local log of the relay lifecycle (M7.2); owned by start().
         self._flog: Optional[FileLog] = None
         # Per-session token usage read from the agent's session files (M11).
@@ -652,6 +663,14 @@ class WebChannel(BaseChannel):
         files_meta: List[Dict[str, Any]] = []
         if isinstance(files, list):
             now = time.monotonic()
+            if len(files) > MAX_MESSAGE_ATTACHMENTS:
+                logger.warning(
+                    "webchannel: chat=%s sent %d attachments, only the first "
+                    "%d are accepted",
+                    chat, len(files), MAX_MESSAGE_ATTACHMENTS,
+                )
+                files = files[:MAX_MESSAGE_ATTACHMENTS]
+            total_bytes = 0
             for entry in files:
                 if not isinstance(entry, dict):
                     continue
@@ -662,9 +681,21 @@ class WebChannel(BaseChannel):
                 if isinstance(ref, str) and ref and "data" not in entry:
                     staged = self._files.peek(ref, now)
                 meta = self._file_meta(entry, staged)
+                size = self._entry_size(entry, staged)
+                # M35: the 10 MB rule is per message, not per file.
+                if (
+                    size is not None
+                    and total_bytes + size > MAX_MESSAGE_ATTACHMENT_BYTES
+                ):
+                    logger.warning(
+                        "webchannel: chat=%s attachment budget exceeded "
+                        "(%d bytes already staged); dropping the rest",
+                        chat, total_bytes,
+                    )
+                    break
                 if meta is not None:
                     files_meta.append(meta)
-            for entry in files:
+                total_bytes += size or 0
                 content_parts.extend(
                     await self._resolve_file_entry(chat, entry),
                 )
@@ -717,29 +748,39 @@ class WebChannel(BaseChannel):
         if not (isinstance(mime, str) and mime.strip()):
             mime = (staged or {}).get("mime") or ""
 
-        size: Optional[int] = None
+        return {
+            "name": bare,
+            "mime": str(mime),
+            "size": WebChannel._entry_size(entry, staged),
+        }
+
+    @staticmethod
+    def _entry_size(
+        entry: Dict[str, Any], staged: Optional[Dict[str, Any]] = None,
+    ) -> Optional[int]:
+        """Raw byte count of one ``files[]`` item, or None (M35 budget).
+
+        Inline entries are measured by decoding their base64 (best effort),
+        chunked ones fall back to the declared size and then to the staged
+        record. Unknown is None, never 0.
+        """
         raw = entry.get("data")
         if isinstance(raw, str) and raw:
             try:
-                size = len(base64.b64decode(raw))
-            except Exception:  # noqa: BLE001 - metadata is best effort
-                size = None
-        if size is None:
-            declared = entry.get("size")
-            if (
-                isinstance(declared, int)
-                and not isinstance(declared, bool)
-                and declared >= 0
-            ):
-                size = declared
-        if size is None:
-            staged_size = (staged or {}).get("size")
-            if isinstance(staged_size, int) and not isinstance(
-                staged_size, bool,
-            ):
-                size = staged_size
-
-        return {"name": bare, "mime": str(mime), "size": size}
+                return len(base64.b64decode(raw))
+            except Exception:  # noqa: BLE001 - fall back to a declared size
+                pass
+        declared = entry.get("size")
+        if (
+            isinstance(declared, int)
+            and not isinstance(declared, bool)
+            and declared >= 0
+        ):
+            return declared
+        staged_size = (staged or {}).get("size")
+        if isinstance(staged_size, int) and not isinstance(staged_size, bool):
+            return staged_size
+        return None
 
     async def _resolve_file_entry(
         self, chat: str, entry: Any,
@@ -828,6 +869,12 @@ class WebChannel(BaseChannel):
                 "webchannel: upload of %r for chat=%s returned no url", name, chat,
             )
             return []
+        # M35: remember where QwenPaw actually put the file. This is the one
+        # media root no deployment setting can make us guess wrong, and it is
+        # the root a history attachment from the same deployment lives in.
+        stored_dir = attachment_media_dir(str(url))
+        if stored_dir:
+            self._upload_media_root = stored_dir
         logger.info(
             "webchannel: chat=%s attached %r (%d bytes)", chat, name, len(data),
         )
@@ -1838,9 +1885,9 @@ class WebChannel(BaseChannel):
         1. the ref exists, is unexpired and belongs to **this** chat;
         2. a fresh ``GET /api/chats/{id}`` still contains the message (same
            ``metadata.original_id``) with the same attachment URL;
-        3. ``media_file_path`` resolves the file inside the console media
-           directory (``..`` and symlink escapes fail there), requires a
-           regular file and enforces the 10 MB ceiling.
+        3. ``media_file_path_in`` resolves the file inside one of QwenPaw's
+           media directories (``..`` and symlink escapes fail there), requires
+           a regular file and enforces the 10 MB ceiling.
 
         Success streams ``att_begin`` / ``att_chunk`` / ``att_end`` as control
         frames (no ``seq``, no replay), sharing the export pacing. Failure is
@@ -1880,8 +1927,19 @@ class WebChannel(BaseChannel):
                 )
                 return
 
-            path = media_file_path(entry["path"], self._media_dir())
+            # M35: validate against every root QwenPaw may have used. The
+            # config lookup is one extra call, and only when the cheap roots
+            # already failed -- a normal fetch never pays for it.
+            path = media_file_path_in(entry["path"], self._media_roots())
             if path is None:
+                await self._ensure_console_media_dir()
+                path = media_file_path_in(entry["path"], self._media_roots())
+            if path is None:
+                logger.warning(
+                    "webchannel: chat=%s attachment %r refused: not inside any "
+                    "media root (%d known)",
+                    chat, entry["name"], len(self._media_roots()),
+                )
                 await self._att_error(
                     chat, att_id, "attachment is unavailable",
                 )
@@ -2006,11 +2064,74 @@ class WebChannel(BaseChannel):
         ``media_dir``: ``CONSOLE_MEDIA_DIR`` when the deployment sets it,
         otherwise ``<workspace_dir>/media`` (the console channel's default).
         Attachment refs are only ever resolved inside this directory.
+
+        M35: this is only the *primary guess*. ``_media_roots`` is what the
+        byte fetch actually validates against, because the config-driven app
+        path (``ConsoleChannel.from_config``) reads ``channels.console.media_dir``
+        and ignores ``CONSOLE_MEDIA_DIR`` entirely -- so neither source alone
+        describes a real deployment.
         """
         override = os.getenv("CONSOLE_MEDIA_DIR", "").strip()
         if override:
             return Path(override).expanduser()
         return self._workspace_dir() / "media"
+
+    def _media_roots(self) -> List[Path]:
+        """Every directory an attachment may legitimately live in (M35).
+
+        Ordered most-authoritative first:
+
+        1. the directory QwenPaw itself just wrote an upload to (this process);
+        2. the live ``console.media_dir`` from ``GET /api/config/channels``;
+        3. ``_media_dir()`` -- ``CONSOLE_MEDIA_DIR`` or ``<workspace>/media``.
+
+        All three are QwenPaw-owned directories, never a client value, so
+        ``media_file_path_in`` keeps the M31 containment guarantee.
+        """
+        roots: List[Path] = []
+        seen = set()
+        candidates = [self._upload_media_root, self._console_media_dir]
+        for raw in candidates:
+            if not raw:
+                continue
+            try:
+                path = Path(raw).expanduser()
+            except (OSError, RuntimeError, ValueError):
+                continue
+            key = str(path)
+            if key in seen:
+                continue
+            seen.add(key)
+            roots.append(path)
+        primary = self._media_dir()
+        if str(primary) not in seen:
+            roots.append(primary)
+        return roots
+
+    async def _ensure_console_media_dir(self) -> None:
+        """Learn ``console.media_dir`` from QwenPaw once (M35, best effort).
+
+        The config-driven app path builds the console channel with
+        ``config.media_dir`` (``app/channels/console/channel.py``), so a
+        deployment that points uploads at a custom directory is only visible
+        through this endpoint. Failures are remembered and ignored: the other
+        roots still apply and an attachment must never break a chat.
+        """
+        if self._console_media_dir_checked:
+            return
+        self._console_media_dir_checked = True
+        status, payload = await self._api_json("GET", "/api/config/channels")
+        if not (200 <= status < 300) or not isinstance(payload, dict):
+            return
+        console = payload.get("console")
+        if not isinstance(console, dict):
+            return
+        value = console.get("media_dir")
+        if isinstance(value, str) and value.strip():
+            self._console_media_dir = value.strip()
+            logger.info(
+                "webchannel: using console media_dir from QwenPaw config",
+            )
 
     async def _handle_chats(self, frame: Dict[str, Any]) -> None:
         """Reply to ``{t:"chats"}`` with ``{t:"chats", items:[...]}``."""

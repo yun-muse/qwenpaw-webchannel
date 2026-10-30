@@ -1,0 +1,230 @@
+{
+  "_comment": "Real QwenPaw v2.2.2.post1 GET /api/chats/{id} bodies produced by ConsoleChannel.stream_one + Agent._handle_incoming_messages + SafeJSONSession + qwenpaw.app.chats.api.get_chat. Paths rewritten from a temp media dir to /app/workspaces/default/media/<uuid>_<name>.",
+  "single": {
+    "history": [
+      {
+        "id": "f743c9baf2594fe28c14c35b7356556a",
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "delta": false,
+            "index": null,
+            "status": null,
+            "object": "content",
+            "msg_id": null,
+            "text": "look at this"
+          },
+          {
+            "type": "file",
+            "delta": false,
+            "index": null,
+            "status": null,
+            "object": "content",
+            "msg_id": null,
+            "filename": "m31-acceptance.png",
+            "file_url": "/app/workspaces/default/media/3f9c1e0a6b7d4c2e8a5f0b1d2c3e4f5a_m31-acceptance.png"
+          },
+          {
+            "type": "image",
+            "delta": false,
+            "index": null,
+            "status": null,
+            "object": "content",
+            "msg_id": null,
+            "image_url": "/app/workspaces/default/media/3f9c1e0a6b7d4c2e8a5f0b1d2c3e4f5a_m31-acceptance.png"
+          }
+        ],
+        "status": "completed",
+        "metadata": {
+          "original_id": "0d68d699ee30496395d00988531c6ee7",
+          "original_name": "user",
+          "metadata": {
+            "qwenpaw_tag": "external_user_query"
+          },
+          "timestamp": "2026-10-30T19:19:14.836387+00:00",
+          "finished_at": null
+        }
+      },
+      {
+        "id": "353311ff487545649d767b3d50ad9997",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "delta": false,
+            "index": null,
+            "status": null,
+            "object": "content",
+            "msg_id": null,
+            "text": "收到，图片和文件都看到了。"
+          }
+        ],
+        "status": "completed",
+        "metadata": {
+          "original_id": "e65f17bb7a524158a6d7fdf7f913e78d",
+          "original_name": "Default",
+          "metadata": {},
+          "timestamp": "2026-10-30T19:19:14.837281+00:00",
+          "finished_at": null
+        }
+      }
+    ],
+    "hist": [
+      {
+        "role": "user",
+        "text": "look at this",
+        "files": [
+          {
+            "name": "m31-acceptance.png",
+            "kind": "image",
+            "mime": "image/png",
+            "size": 179,
+            "ref": "ref-1"
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "text": "收到，图片和文件都看到了。"
+      }
+    ]
+  },
+  "multi": {
+    "history": [
+      {
+        "id": "55e9faa52f9e4f60be5e6341b296e423",
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "delta": false,
+            "index": null,
+            "status": null,
+            "object": "content",
+            "msg_id": null,
+            "text": "两张图和一份笔记"
+          },
+          {
+            "type": "file",
+            "delta": false,
+            "index": null,
+            "status": null,
+            "object": "content",
+            "msg_id": null,
+            "filename": "m31-acceptance.png",
+            "file_url": "/app/workspaces/default/media/3f9c1e0a6b7d4c2e8a5f0b1d2c3e4f5a_m31-acceptance.png"
+          },
+          {
+            "type": "image",
+            "delta": false,
+            "index": null,
+            "status": null,
+            "object": "content",
+            "msg_id": null,
+            "image_url": "/app/workspaces/default/media/3f9c1e0a6b7d4c2e8a5f0b1d2c3e4f5a_m31-acceptance.png"
+          },
+          {
+            "type": "file",
+            "delta": false,
+            "index": null,
+            "status": null,
+            "object": "content",
+            "msg_id": null,
+            "filename": "second.png",
+            "file_url": "/app/workspaces/default/media/8b2d4c6e0f1a3b5c7d9e2f4a6b8c0d1e_second.png"
+          },
+          {
+            "type": "image",
+            "delta": false,
+            "index": null,
+            "status": null,
+            "object": "content",
+            "msg_id": null,
+            "image_url": "/app/workspaces/default/media/8b2d4c6e0f1a3b5c7d9e2f4a6b8c0d1e_second.png"
+          },
+          {
+            "type": "file",
+            "delta": false,
+            "index": null,
+            "status": null,
+            "object": "content",
+            "msg_id": null,
+            "filename": "notes.txt",
+            "file_url": "/app/workspaces/default/media/c1d2e3f4a5b60718293a4b5c6d7e8f90_notes.txt"
+          }
+        ],
+        "status": "completed",
+        "metadata": {
+          "original_id": "8d372be6a5d345a290ddadcbd2869935",
+          "original_name": "user",
+          "metadata": {
+            "qwenpaw_tag": "external_user_query"
+          },
+          "timestamp": "2026-10-30T19:19:14.842939+00:00",
+          "finished_at": null
+        }
+      },
+      {
+        "id": "984dc3d981cc4773b0197275877016e5",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "delta": false,
+            "index": null,
+            "status": null,
+            "object": "content",
+            "msg_id": null,
+            "text": "收到，图片和文件都看到了。"
+          }
+        ],
+        "status": "completed",
+        "metadata": {
+          "original_id": "41377a26485344589b74d24d0363a088",
+          "original_name": "Default",
+          "metadata": {},
+          "timestamp": "2026-10-30T19:19:14.843238+00:00",
+          "finished_at": null
+        }
+      }
+    ],
+    "hist": [
+      {
+        "role": "user",
+        "text": "两张图和一份笔记",
+        "files": [
+          {
+            "name": "m31-acceptance.png",
+            "kind": "image",
+            "mime": "image/png",
+            "size": 179,
+            "ref": "ref-1"
+          },
+          {
+            "name": "second.png",
+            "kind": "image",
+            "mime": "image/png",
+            "size": 179,
+            "ref": "ref-2"
+          },
+          {
+            "name": "notes.txt",
+            "kind": "file",
+            "mime": "text/plain",
+            "size": 5,
+            "ref": "ref-3"
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "text": "收到，图片和文件都看到了。"
+      }
+    ]
+  }
+}

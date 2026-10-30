@@ -96,6 +96,27 @@ const BROWSER_ENV = {
 const require = createRequire(join(ROOT, 'mock', 'package.json'));
 const WebSocket = require('ws');
 
+/**
+ * M35: the attachment entries the mock serves are the *real* plugin output,
+ * not a hand-shaped mock. `real_history_m35.json` was produced by
+ * `plugin/tests/test_m35.py` from a QwenPaw v2.2.2.post1
+ * `GET /api/chats/{id}` body (ConsoleChannel.stream_one + Agent ingestion +
+ * SafeJSONSession + chats.api.get_chat) projected through
+ * `plugin/util.py::history_messages`. The key order below is the projection's
+ * own, and `REAL_SINGLE_FILES` is what a reload of an uploaded image must
+ * look like.
+ */
+const REAL_HISTORY = JSON.parse(
+  readFileSync(join(HERE, 'fixtures', 'real_history_m35.json'), 'utf-8'),
+);
+const REAL_HIST_FILES = REAL_HISTORY.single.hist[0].files;
+const REAL_FILE_KEYS = Object.keys(REAL_HIST_FILES[0]);
+/** The 179-byte PNG the hosted acceptance used (also the M31 sample). */
+const ATT_PNG = readFileSync(join(HERE, 'fixtures', 'm31-acceptance.png'));
+/** IHDR dimensions of the fixture: the decoded <img> must match the bytes. */
+const ATT_PNG_WIDTH = ATT_PNG.readUInt32BE(16);
+const ATT_PNG_HEIGHT = ATT_PNG.readUInt32BE(20);
+
 mkdirSync(OUT_DIR, { recursive: true });
 const log = (...args) => console.log('[m19-e2e]', ...args);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -330,6 +351,8 @@ function resetState() {
   state.createDelay = 2500;
   state.recordSends = false;
   state.media = {};
+  state.staged = new Map();
+  state.attGets = [];
   state.attSeq = 0;
   for (const timer of state.streaming.values()) clearInterval(timer);
   state.streaming.clear();
@@ -521,27 +544,31 @@ function handleAgentFrame(frame) {
       if (state.notCreated.has(chat)) {
         setTimeout(() => state.notCreated.delete(chat), state.createDelay);
       }
-      // M31: mirror what QwenPaw persists -- a user turn with the attachment
-      // metadata (and an empty text when the turn was attachment-only).
+      // M31/M35: mirror what QwenPaw persists -- one user turn carrying every
+      // attachment of the message (empty text when the turn was
+      // attachment-only). The entry is built exactly like the plugin's
+      // `_project_history_files`: name, kind, mime, size, ref, in that order,
+      // deduplicated by URL (an inline image is one entry, not two).
       if (state.recordSends && Array.isArray(frame.files) && frame.files.length) {
-        const file = frame.files[0];
-        const bytes = Buffer.from(String(file.data || ''), 'base64');
-        const ref = `mock-att-${++state.attSeq}`;
-        const name = String(file.name || 'attachment');
-        const mime = String(file.mime || 'application/octet-stream');
-        state.media[ref] = { name, mime, bytes };
-        const list = state.history[chat] || (state.history[chat] = []);
-        list.push({
-          role: 'user',
-          text: String(frame.text || ''),
-          files: [{
+        const files = [];
+        for (const file of frame.files) {
+          const bytes = file.data
+            ? Buffer.from(String(file.data), 'base64')
+            : state.staged.get(String(file.ref || '')) || Buffer.alloc(0);
+          const ref = `mock-att-${++state.attSeq}`;
+          const name = String(file.name || 'attachment');
+          const mime = String(file.mime || 'application/octet-stream');
+          state.media[ref] = { name, mime, bytes };
+          files.push({
             name,
-            mime,
-            size: bytes.length,
             kind: mime.startsWith('image/') ? 'image' : 'file',
+            mime,
+            size: typeof file.size === 'number' ? file.size : bytes.length,
             ref,
-          }],
-        });
+          });
+        }
+        const list = state.history[chat] || (state.history[chat] = []);
+        list.push({ role: 'user', text: String(frame.text || ''), files });
       }
       streamReply(chat);
       break;
@@ -549,6 +576,7 @@ function handleAgentFrame(frame) {
     case 'att_get': {
       const chat = String(frame.chat || '');
       const id = String(frame.id || '');
+      state.attGets.push(String(frame.ref || ''));
       const media = state.media[String(frame.ref || '')];
       if (!media) {
         agentSend({
@@ -3227,11 +3255,6 @@ async function runM26Evidence(page, pass, mobile) {
 // ---------------------------------------------------------------------------
 
 /** 1x1 PNG: valid image bytes, small enough for the v1 inline path. */
-const ATT_PNG = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
-  'base64',
-);
-
 async function runM31Checks(page, pass, mobile) {
   resetState();
   state.recordSends = true;
@@ -3296,6 +3319,7 @@ async function runM31Checks(page, pass, mobile) {
       src: img ? img.getAttribute('src') || '' : '',
       alt: img ? img.getAttribute('alt') || '' : '',
       width: img ? img.naturalWidth : 0,
+      height: img ? img.naturalHeight : 0,
       rowText: row ? (row.textContent || '').trim() : '',
       bubbleText: row && row.querySelector('.bubble .plain')
         ? (row.querySelector('.bubble .plain').textContent || '')
@@ -3308,7 +3332,8 @@ async function runM31Checks(page, pass, mobile) {
     thumbLoaded &&
       thumb.src.startsWith('blob:') &&
       thumb.alt === '截图.png' &&
-      thumb.width === 1 &&
+      thumb.width === ATT_PNG_WIDTH &&
+      thumb.height === ATT_PNG_HEIGHT &&
       thumb.userRows >= 2,
     JSON.stringify(thumb),
   );
@@ -3364,6 +3389,180 @@ async function runM31Checks(page, pass, mobile) {
   check(
     `${pass}: the retried file turn still shows its text`,
     (await page.locator('.messages .row.user', { hasText: '请读一下附件' }).count()) === 1,
+  );
+
+  // ---- M35.0: the mock serves the real plugin's hist shape --------------
+  // The entry was built by the mock, but its fields and order are the
+  // projection's own (`name, kind, mime, size, ref`). A drift here means the
+  // suite is testing an idealized shape again -- exactly the M31 failure.
+  const servedEntry = (state.history['chat-alpha'] || [])
+    .flatMap((message) => message.files || [])
+    .find((file) => file.name === '截图.png');
+  check(
+    `${pass}: the served hist entry keeps the real projection's fields`,
+    Boolean(servedEntry) &&
+      JSON.stringify(Object.keys(servedEntry)) === JSON.stringify(REAL_FILE_KEYS),
+    JSON.stringify({ served: servedEntry && Object.keys(servedEntry), real: REAL_FILE_KEYS }),
+  );
+  check(
+    `${pass}: the thumbnail was fetched through an opaque ref`,
+    Boolean(servedEntry && servedEntry.ref) && state.attGets.includes(servedEntry.ref),
+    JSON.stringify({ ref: servedEntry && servedEntry.ref, gets: state.attGets }),
+  );
+
+  // ---- M35.1: three attachments in one message --------------------------
+  await page.locator('.composer textarea').fill('');
+  await page.setInputFiles('.composer input[type=file]', [
+    { name: '图一.png', mimeType: 'image/png', buffer: ATT_PNG },
+    { name: '图二.png', mimeType: 'image/png', buffer: ATT_PNG },
+    { name: '笔记二.txt', mimeType: 'text/plain', buffer: Buffer.from('多附件', 'utf-8') },
+  ]);
+  const threeChips = await waitUntil(
+    () => page.evaluate(() => document.querySelectorAll('.composer .chips .chip').length >= 3),
+    8000,
+  );
+  const chipNames = await page.evaluate(() =>
+    [...document.querySelectorAll('.composer .chips .chip')].map((el) =>
+      (el.textContent || '').replace('×', '').trim(),
+    ),
+  );
+  check(
+    `${pass}: three attachments are pending in one message`,
+    threeChips && JSON.stringify(chipNames) === JSON.stringify(['图一.png', '图二.png', '笔记二.txt']),
+    JSON.stringify(chipNames),
+  );
+
+  // One chip's × removes only that chip.
+  await page
+    .locator('.composer .chips .chip', { hasText: '图二.png' })
+    .locator('.chip-x')
+    .click();
+  const afterRemove = await page.evaluate(() =>
+    [...document.querySelectorAll('.composer .chips .chip')].map((el) =>
+      (el.textContent || '').replace('×', '').trim(),
+    ),
+  );
+  check(
+    `${pass}: a chip's × removes only that attachment`,
+    JSON.stringify(afterRemove) === JSON.stringify(['图一.png', '笔记二.txt']),
+    JSON.stringify(afterRemove),
+  );
+  // Put it back (a second pick appends instead of replacing).
+  await page.setInputFiles('.composer input[type=file]', [
+    { name: '图二.png', mimeType: 'image/png', buffer: ATT_PNG },
+  ]);
+  const restored = await waitUntil(
+    () => page.evaluate(() => document.querySelectorAll('.composer .chips .chip').length === 3),
+    8000,
+  );
+  check(`${pass}: a later pick appends to the pending list`, restored);
+  // 图二 was removed and re-picked, so it now sits last: the wire order is
+  // the chip order (append semantics), not the original pick order.
+  const pendingOrder = await page.evaluate(() =>
+    [...document.querySelectorAll('.composer .chips .chip')].map((el) =>
+      (el.textContent || '').replace('×', '').trim(),
+    ),
+  );
+
+  await page.locator('.composer .send').click();
+  const sentMulti = await waitUntil(
+    () => (state.history['chat-alpha'] || []).some(
+      (m) => m.files && m.files.length === 3,
+    ),
+    10000,
+  );
+  await waitUntil(() => !state.streaming.has('chat-alpha'), 20000);
+  const multiEntry = (state.history['chat-alpha'] || []).find(
+    (m) => m.files && m.files.length === 3,
+  );
+  check(
+    `${pass}: one message carries three attachments in order`,
+    sentMulti &&
+      JSON.stringify(pendingOrder) === JSON.stringify(['图一.png', '笔记二.txt', '图二.png']) &&
+      JSON.stringify(multiEntry.files.map((f) => f.name)) === JSON.stringify(pendingOrder) &&
+      JSON.stringify(multiEntry.files.map((f) => f.kind)) ===
+        JSON.stringify(['image', 'file', 'image']),
+    JSON.stringify(multiEntry && multiEntry.files),
+  );
+  const optimisticMulti = await page.evaluate(() => ({
+    names: [...document.querySelectorAll('.messages .bubble-files .att-name')].map(
+      (el) => (el.textContent || '').trim(),
+    ),
+    thumbs: document.querySelectorAll('.messages img.att-thumb').length,
+  }));
+  check(
+    `${pass}: the optimistic bubble lists every attachment`,
+    optimisticMulti.names.includes('图一.png') &&
+      optimisticMulti.names.includes('图二.png') &&
+      optimisticMulti.names.includes('笔记二.txt'),
+    JSON.stringify(optimisticMulti),
+  );
+
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await waitForHistory(page);
+  const multiThumbs = await waitUntil(
+    () => page.evaluate(() => {
+      const first = document.querySelector('.messages img.att-thumb[alt="图一.png"]');
+      const second = document.querySelector('.messages img.att-thumb[alt="图二.png"]');
+      return Boolean(
+        first && first.complete && first.naturalWidth > 0 &&
+        second && second.complete && second.naturalWidth > 0,
+      );
+    }),
+    15000,
+  );
+  const multiChip = await page.evaluate(() =>
+    [...document.querySelectorAll('.messages .att-chip .att-name')].some(
+      (el) => (el.textContent || '').trim() === '笔记二.txt',
+    ),
+  );
+  check(
+    `${pass}: a three-attachment turn renders two thumbnails and one file chip`,
+    multiThumbs && multiChip,
+    JSON.stringify({ multiThumbs, multiChip }),
+  );
+
+  const multiDownload = page.waitForEvent('download', { timeout: 15000 });
+  await page
+    .locator('.messages .att-chip', { hasText: '笔记二.txt' })
+    .first()
+    .locator('.att-download')
+    .click();
+  const multiFile = await multiDownload;
+  check(
+    `${pass}: a multi-attachment turn downloads the non-image file`,
+    multiFile.suggestedFilename() === '笔记二.txt',
+    multiFile.suggestedFilename(),
+  );
+
+  // ---- M35.2: the 10-attachment cap -------------------------------------
+  await page.locator('.composer textarea').fill('');
+  await page.setInputFiles(
+    '.composer input[type=file]',
+    Array.from({ length: 11 }, (_, index) => ({
+      name: `批${index}.txt`,
+      mimeType: 'text/plain',
+      buffer: Buffer.from('x', 'utf-8'),
+    })),
+  );
+  const capped = await waitUntil(
+    () => page.evaluate(() => document.querySelectorAll('.composer .chips .chip').length === 10),
+    8000,
+  );
+  const capError = await page.locator('.composer-error').textContent().catch(() => '');
+  check(
+    `${pass}: an 11th attachment is refused with the cap stated`,
+    capped && Boolean(capError && capError.includes('10')),
+    JSON.stringify({ chips: capped, error: capError }),
+  );
+  const chipXs = page.locator('.composer .chips .chip .chip-x');
+  for (let left = await chipXs.count(); left > 0; left = await chipXs.count()) {
+    await chipXs.first().click();
+    await sleep(20);
+  }
+  check(
+    `${pass}: every pending chip can be removed`,
+    (await page.evaluate(() => document.querySelectorAll('.composer .chips .chip').length)) === 0,
   );
 }
 

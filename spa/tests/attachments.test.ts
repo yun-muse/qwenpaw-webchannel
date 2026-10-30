@@ -4,8 +4,12 @@ import type { Frame } from '../src/relay';
 import {
   AttachmentFetcher,
   MAX_ATTACHMENT_BYTES,
+  MAX_MESSAGE_ATTACHMENTS,
+  MAX_MESSAGE_ATTACHMENT_BYTES,
   attachmentKindOf,
+  describeRejections,
   historyFilesOf,
+  planAttachments,
 } from '../src/lib/attachments';
 import type { HistoryFile } from '../src/lib/attachments';
 
@@ -219,5 +223,52 @@ describe('AttachmentFetcher', () => {
       ok: false,
       reason: 'ref',
     });
+  });
+});
+
+describe('multi-attachment limits (M35)', () => {
+  const file = (name: string, size: number) => ({ name, size });
+
+  it('mirrors the plugin ceilings', () => {
+    expect(MAX_MESSAGE_ATTACHMENTS).toBe(10);
+    expect(MAX_MESSAGE_ATTACHMENT_BYTES).toBe(MAX_ATTACHMENT_BYTES);
+  });
+
+  it('accepts a batch that fits', () => {
+    const plan = planAttachments([], [file('a.png', 10), file('b.txt', 20)]);
+    expect(plan.accepted.map((f) => f.name)).toEqual(['a.png', 'b.txt']);
+    expect(plan.rejected).toEqual([]);
+  });
+
+  it('stops at ten files and says why', () => {
+    const pending = Array.from({ length: 9 }, (_, i) => file(`p${i}.png`, 1));
+    const plan = planAttachments(pending, [file('ok.png', 1), file('no1.png', 1), file('no2.png', 1)]);
+    expect(plan.accepted.map((f) => f.name)).toEqual(['ok.png']);
+    expect(plan.rejected).toEqual([
+      { name: 'no1.png', reason: 'count' },
+      { name: 'no2.png', reason: 'count' },
+    ]);
+    expect(describeRejections(plan.rejected)).toContain('10');
+  });
+
+  it('keeps the whole message inside 10 MB', () => {
+    const plan = planAttachments(
+      [file('one.bin', 6 * 1024 * 1024)],
+      [file('two.bin', 3 * 1024 * 1024), file('three.bin', 3 * 1024 * 1024)],
+    );
+    expect(plan.accepted.map((f) => f.name)).toEqual(['two.bin']);
+    expect(plan.rejected).toEqual([{ name: 'three.bin', reason: 'total' }]);
+    expect(describeRejections(plan.rejected)).toContain('总大小');
+  });
+
+  it('rejects one file over the per-file ceiling even when the budget is free', () => {
+    const plan = planAttachments([], [file('huge.bin', MAX_ATTACHMENT_BYTES + 1), file('ok.txt', 1)]);
+    expect(plan.accepted.map((f) => f.name)).toEqual(['ok.txt']);
+    expect(plan.rejected).toEqual([{ name: 'huge.bin', reason: 'single' }]);
+    expect(describeRejections(plan.rejected)).toContain('10MB');
+  });
+
+  it('has nothing to say without a rejection', () => {
+    expect(describeRejections([])).toBe('');
   });
 });

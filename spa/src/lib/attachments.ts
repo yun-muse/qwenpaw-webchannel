@@ -31,6 +31,92 @@ export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 export const MAX_ATTACHMENT_CHUNKS = 2048;
 const ATTACHMENT_TIMEOUT_MS = 30_000;
 
+/**
+ * M35: one message carries at most this many attachments (mirrors
+ * `plugin/util.MAX_MESSAGE_ATTACHMENTS`). Ten covers a screenshot sweep, a
+ * log set or a few documents; it keeps one turn's upload work and one
+ * optimistic bubble bounded.
+ */
+export const MAX_MESSAGE_ATTACHMENTS = 10;
+/**
+ * M35: the 10 MB rule is per **message**, not per file -- ten 9 MB files must
+ * not become one 90 MB turn. Mirrors `MAX_MESSAGE_ATTACHMENT_BYTES`.
+ */
+export const MAX_MESSAGE_ATTACHMENT_BYTES = MAX_ATTACHMENT_BYTES;
+
+export type AttachRejectReason = 'single' | 'count' | 'total';
+
+export interface AttachRejection {
+  name: string;
+  reason: AttachRejectReason;
+}
+
+export interface AttachPlan<T> {
+  accepted: T[];
+  rejected: AttachRejection[];
+}
+
+interface SizedFile {
+  name: string;
+  size: number;
+}
+
+/**
+ * Decide which files fit in the composer's pending list (M35).
+ *
+ * Files are taken in order and the first one that breaks a limit stops the
+ * batch, so the outcome matches what the user sees ("the last two were
+ * skipped"). Unknown sizes (0) count as 0 -- the plugin still enforces its
+ * own per-file ceiling on the wire.
+ */
+export function planAttachments<T extends SizedFile>(
+  pending: SizedFile[],
+  incoming: T[],
+): AttachPlan<T> {
+  const accepted: T[] = [];
+  const rejected: AttachRejection[] = [];
+  let count = pending.length;
+  let total = pending.reduce((sum, file) => sum + (file.size || 0), 0);
+  let closed = false;
+  for (const file of incoming) {
+    if (closed) {
+      rejected.push({ name: file.name, reason: 'count' });
+      continue;
+    }
+    if ((file.size || 0) > MAX_ATTACHMENT_BYTES) {
+      rejected.push({ name: file.name, reason: 'single' });
+      continue;
+    }
+    if (count + 1 > MAX_MESSAGE_ATTACHMENTS) {
+      rejected.push({ name: file.name, reason: 'count' });
+      closed = true;
+      continue;
+    }
+    if (total + (file.size || 0) > MAX_MESSAGE_ATTACHMENT_BYTES) {
+      rejected.push({ name: file.name, reason: 'total' });
+      closed = true;
+      continue;
+    }
+    accepted.push(file);
+    count += 1;
+    total += file.size || 0;
+  }
+  return { accepted, rejected };
+}
+
+/** One short sentence for the composer's error line. */
+export function describeRejections(rejected: AttachRejection[]): string {
+  if (!rejected.length) return '';
+  const first = rejected[0];
+  if (first.reason === 'single') {
+    return `附件太大：单个附件上限 10MB（${first.name}）`;
+  }
+  if (first.reason === 'count') {
+    return `一条消息最多 ${MAX_MESSAGE_ATTACHMENTS} 个附件，其余已忽略`;
+  }
+  return `附件总大小上限 10MB，其余已忽略（${first.name}）`;
+}
+
 function textOf(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }

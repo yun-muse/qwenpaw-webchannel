@@ -131,6 +131,9 @@ def _channel():
     channel = WebChannel(process=None)
     channel._agent_id = lambda: "agent-31"
     channel._relay = _RecordingRelay()
+    # M35: no config lookup / network in a unit test; the media root is the
+    # one this harness injects via ``_media_dir``.
+    channel._console_media_dir_checked = True
     channel_module._ATT_CHUNK_PACE_S = 0.0
     channel_module._EXPORT_CHUNK_PACE_S = 0.0
     return channel

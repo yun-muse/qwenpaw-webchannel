@@ -104,7 +104,13 @@ import {
 } from './lib/backup';
 import type { BackupProduced } from './lib/backup';
 import { ZipWriter, utf8Encode } from './lib/zip';
-import { AttachmentFetcher, attachmentKindOf, historyFilesOf } from './lib/attachments';
+import {
+  AttachmentFetcher,
+  attachmentKindOf,
+  describeRejections,
+  historyFilesOf,
+  planAttachments,
+} from './lib/attachments';
 import type { AttachmentResult, HistoryFile } from './lib/attachments';
 import type { BulkRunResult, BulkTarget } from './lib/bulkExport';
 import {
@@ -427,6 +433,8 @@ const COMMANDS: CommandSpec[] = [
 
 interface AttachmentInline {
   kind: 'inline';
+  /** Composer-only identity so every chip can be removed by id (M35). */
+  id: string;
   name: string;
   mime: string;
   data: string;
@@ -513,6 +521,7 @@ interface ChatRuntime {
 
 let nextId = 1;
 let uploadCounter = 1;
+let attachmentCounter = 1;
 let exportCounter = 1;
 let searchCounter = 1;
 
@@ -567,6 +576,28 @@ function chipNote(file: Attachment): string {
   if (file.status === 'uploading') return `正在分片上传… ${uploadPercent(file)}%`;
   if (file.status === 'ready') return '已上传 · 随下一条消息发送';
   return '上传失败 — 请移除后重新选择';
+}
+
+/**
+ * M35: one line under the pending chips. The plural form never hides a
+ * failure, and "已就绪" stays the marker the composer uses for "can send".
+ */
+function attachmentsNote(files: Attachment[]): string {
+  if (!files.length) return '';
+  const failed = files.filter((file) => file.kind === 'chunked' && file.status === 'failed');
+  if (failed.length) return `${failed.length} 个附件上传失败 — 请移除后重新选择`;
+  const uploading = files.filter(
+    (file) => file.kind === 'chunked' && file.status === 'uploading',
+  );
+  if (uploading.length) {
+    const percent = Math.round(
+      uploading.reduce((sum, file) => sum + uploadPercent(file as AttachmentChunked), 0) /
+        uploading.length,
+    );
+    return `正在上传 ${uploading.length}/${files.length}… ${percent}%`;
+  }
+  if (files.length === 1) return chipNote(files[0]);
+  return `${files.length} 个附件 · 已就绪 · 随下一条消息发送`;
 }
 
 function oversizeError(sizeBytes: number): string {
@@ -1959,7 +1990,17 @@ export default function App() {
   });
   const [drafts, setDrafts] = useState<Drafts>(loadDrafts);
   const [input, setInput] = useState<string>(() => draftOf(drafts, session.active));
-  const [attachment, setAttachment] = useState<Attachment | null>(null);
+  // M35: one message may carry several attachments; the order is the order
+  // they appear in the bubble and in `msg.files[]`.
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  /**
+   * M35: a rejected file (11th, over 10 MB, over the message budget) is a
+   * batch-level notice, not a transient error. Upload progress and the
+   * per-file success paths clear `composerError`, which would erase the cap
+   * sentence a moment after it appeared; this state survives them and is
+   * cleared by the next clean pick, a removal, a send or a chat switch.
+   */
+  const [attachNotice, setAttachNotice] = useState<string | null>(null);
   const [composerError, setComposerError] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastNotice | null>(null);
   const [state, setState] = useState<ConnState>('idle');
@@ -2102,7 +2143,11 @@ export default function App() {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const answeredApprovals = useRef<Set<string>>(new Set());
-  const uploadRef = useRef<Upload | null>(null);
+  // M35: one in-flight chunked upload per attachment, keyed by its id.
+  const uploadsRef = useRef<Map<string, Upload>>(new Map());
+  // Mirror of `attachments` for the async pick/upload path (state updates are
+  // batched, so the next file must read the list this handler already built).
+  const attachmentsRef = useRef<Attachment[]>([]);
   // M12: the export being collected (chunks arrive as control frames).
   const exportRef = useRef<ExportJob | null>(null);
   // M31: attachment chunk collector (att_begin/chunk/end control frames).
@@ -2818,15 +2863,29 @@ export default function App() {
     });
   };
 
+  /** Replace the pending list (state + the async-path mirror together). */
+  const setPendingAttachments = (next: Attachment[]) => {
+    attachmentsRef.current = next;
+    setAttachments(next);
+  };
+
+  const patchAttachment = (id: string, patch: Partial<AttachmentChunked>) => {
+    setPendingAttachments(
+      attachmentsRef.current.map((item) =>
+        item.kind === 'chunked' && item.id === id ? { ...item, ...patch } : item,
+      ),
+    );
+  };
+
   const cancelUpload = () => {
-    const up = uploadRef.current;
-    uploadRef.current = null;
-    if (!up) return;
-    up.cancelled = true;
-    if (up.timer) {
-      clearTimeout(up.timer);
-      up.timer = null;
+    for (const up of uploadsRef.current.values()) {
+      up.cancelled = true;
+      if (up.timer) {
+        clearTimeout(up.timer);
+        up.timer = null;
+      }
     }
+    uploadsRef.current.clear();
   };
 
   const failUpload = (up: Upload, message: string) => {
@@ -2834,22 +2893,16 @@ export default function App() {
       clearTimeout(up.timer);
       up.timer = null;
     }
-    if (uploadRef.current === up) uploadRef.current = null;
+    uploadsRef.current.delete(up.id);
     setComposerError(message);
-    setAttachment((prev) =>
-      prev && prev.kind === 'chunked' && prev.id === up.id ? { ...prev, status: 'failed' } : prev,
-    );
+    patchAttachment(up.id, { status: 'failed' });
   };
 
   const sendUploadFrame = (frame: Frame): boolean => clientRef.current?.send(frame) ?? false;
 
   const runUpload = async (up: Upload) => {
     if (up.cancelled) return;
-    setAttachment((prev) =>
-      prev && prev.kind === 'chunked' && prev.id === up.id
-        ? { ...prev, sent: 0, status: 'uploading' }
-        : prev,
-    );
+    patchAttachment(up.id, { sent: 0, status: 'uploading' });
 
     if (!up.sha256) {
       try {
@@ -2887,9 +2940,7 @@ export default function App() {
         failUpload(up, '未连接 — 正在重连，请稍后重试。');
         return;
       }
-      setAttachment((prev) =>
-        prev && prev.kind === 'chunked' && prev.id === up.id ? { ...prev, sent: i + 1 } : prev,
-      );
+      patchAttachment(up.id, { sent: i + 1 });
     }
 
     if (up.chunks > 0) await sleep(CHUNK_PACE_MS);
@@ -2902,7 +2953,7 @@ export default function App() {
     if (up.timer) clearTimeout(up.timer);
     up.timer = setTimeout(() => {
       up.timer = null;
-      if (up.cancelled || uploadRef.current !== up) return;
+      if (up.cancelled || uploadsRef.current.get(up.id) !== up) return;
       failUpload(up, '文件传输超时：插件未确认收到（可能插件版本不支持分片传输）');
     }, UPLOAD_TIMEOUT_MS);
   };
@@ -2921,18 +2972,21 @@ export default function App() {
       retried: false,
       timer: null,
     };
-    uploadRef.current = up;
+    uploadsRef.current.set(up.id, up);
     setComposerError(null);
-    setAttachment({
-      kind: 'chunked',
-      id: up.id,
-      name: up.name,
-      mime: up.mime,
-      size: up.size,
-      chunks: up.chunks,
-      sent: 0,
-      status: 'uploading',
-    });
+    setPendingAttachments([
+      ...attachmentsRef.current,
+      {
+        kind: 'chunked',
+        id: up.id,
+        name: up.name,
+        mime: up.mime,
+        size: up.size,
+        chunks: up.chunks,
+        sent: 0,
+        status: 'uploading',
+      },
+    ]);
     void runUpload(up);
   };
 
@@ -3437,26 +3491,29 @@ export default function App() {
 
         case 'file_ready': {
           const id = asString(frame.id);
-          const up = uploadRef.current;
-          if (!up || up.id !== id) break;
+          const up = uploadsRef.current.get(id);
+          if (!up) break;
           if (up.timer) {
             clearTimeout(up.timer);
             up.timer = null;
           }
-          uploadRef.current = null;
+          uploadsRef.current.delete(id);
           setComposerError(null);
-          setAttachment((prev) =>
-            prev && prev.kind === 'chunked' && prev.id === id
-              ? { ...prev, status: 'ready', ref: id, sent: prev.chunks }
-              : prev,
+          const ready = attachmentsRef.current.find(
+            (item) => item.kind === 'chunked' && item.id === id,
           );
+          patchAttachment(id, {
+            status: 'ready',
+            ref: id,
+            sent: ready && ready.kind === 'chunked' ? ready.chunks : up.chunks,
+          });
           break;
         }
 
         case 'file_error': {
           const id = asString(frame.id);
-          const up = uploadRef.current;
-          if (!up || up.id !== id) break;
+          const up = uploadsRef.current.get(id);
+          if (!up) break;
           if (up.timer) {
             clearTimeout(up.timer);
             up.timer = null;
@@ -4379,7 +4436,8 @@ export default function App() {
     setUsageOpen(false);
     cancelUpload();
     setComposerError(null);
-    setAttachment(null);
+    setAttachNotice(null);
+    setPendingAttachments([]);
     setInput(draftOf(draftsRef.current, id));
     maybeRequestHist(id);
   };
@@ -4416,7 +4474,8 @@ export default function App() {
     setUsageOpen(false);
     cancelUpload();
     setComposerError(null);
-    setAttachment(null);
+    setAttachNotice(null);
+    setPendingAttachments([]);
     setInput(draftOf(draftsRef.current, id));
     maybeRequestHist(id);
   };
@@ -4598,9 +4657,19 @@ export default function App() {
     }
   };
 
-  const removeAttachment = () => {
-    cancelUpload();
-    setAttachment(null);
+  /** M35: drop one pending attachment (its upload, if any, is cancelled). */
+  const removeAttachment = (id: string) => {
+    const up = uploadsRef.current.get(id);
+    if (up) {
+      up.cancelled = true;
+      if (up.timer) {
+        clearTimeout(up.timer);
+        up.timer = null;
+      }
+      uploadsRef.current.delete(id);
+    }
+    setPendingAttachments(attachmentsRef.current.filter((item) => item.id !== id));
+    setAttachNotice(null);
     setComposerError(null);
   };
 
@@ -4644,9 +4713,9 @@ export default function App() {
     if (!client) return;
     const chat = activeChat;
     const rawInput = input.trim();
-    const file = attachment;
-    if (!rawInput && !file) return;
-    if (file && file.kind === 'chunked' && file.status !== 'ready') return;
+    const pending = attachments;
+    if (!rawInput && pending.length === 0) return;
+    if (pending.some((file) => file.kind === 'chunked' && file.status !== 'ready')) return;
 
     // If a skill is attached, prepend its structured instruction for the agent while keeping display clean
     const wireText = activeSkill
@@ -4655,19 +4724,21 @@ export default function App() {
     const displayText = activeSkill ? `@${activeSkill.id} ${rawInput}` : rawInput;
 
     const frame: Frame = { t: 'msg', chat, text: wireText };
-    if (file) {
+    if (pending.length) {
       // M31/G4: a chunked message names its file too. The plugin already
       // staged name/mime/size, but sending them keeps the archive correct
       // even when the staged record expired between upload and send.
-      frame.files =
+      // M35: every pending attachment goes in this one message, in order.
+      frame.files = pending.map((file) =>
         file.kind === 'inline'
-          ? [{ name: file.name, mime: file.mime, data: file.data }]
-          : [{
+          ? { name: file.name, mime: file.mime, data: file.data }
+          : {
               ref: file.ref ?? file.id,
               name: file.name,
               mime: file.mime,
               size: file.size,
-            }];
+            },
+      );
     }
 
     const size = byteSize(frame);
@@ -4693,21 +4764,22 @@ export default function App() {
         role: 'user',
         kind: 'text',
         text: displayText,
-        attachments: file
-          ? [{
+        attachments: pending.length
+          ? pending.map((file) => ({
               name: file.name,
               mime: file.mime,
               size: file.size,
               kind: attachmentKindOf(file.name, file.mime),
-            }]
+            }))
           : undefined,
         ts: Date.now(),
       },
     ]);
     setInput('');
     rememberDraft(chat, '');
-    setAttachment(null);
+    setPendingAttachments([]);
     setActiveSkill(null);
+    setAttachNotice(null);
     setComposerError(null);
   };
 
@@ -4876,65 +4948,96 @@ export default function App() {
     }
   };
 
-  const handleFileObject = (file: File) => {
-    cancelUpload();
-    const mime = file.type || 'application/octet-stream';
-    const reader = new FileReader();
-    reader.onerror = () => setComposerError('无法读取该文件。');
-    reader.onload = () => {
-      const buffer = reader.result;
-      if (!(buffer instanceof ArrayBuffer)) {
+  const readFileBytes = (file: File) =>
+    new Promise<ArrayBuffer | null>((resolve) => {
+      const reader = new FileReader();
+      reader.onerror = () => resolve(null);
+      reader.onload = () => resolve(reader.result instanceof ArrayBuffer ? reader.result : null);
+      reader.readAsArrayBuffer(file);
+    });
+
+  /**
+   * M35: stage one pick / paste / drop batch.
+   *
+   * Caps come first (10 files and 10 MB per message, see `planAttachments`),
+   * then each accepted file is read in order and either kept inline (when the
+   * whole message, text plus every inline attachment, still fits the 256 KB
+   * frame) or handed to the chunked upload. Attachments already pending stay
+   * -- picking a second file no longer replaces the first.
+   */
+  const addFiles = async (incoming: File[]) => {
+    if (!incoming.length) return;
+    const plan = planAttachments(attachmentsRef.current, incoming);
+    // M35: set the rejection notice before the accepted files start their
+    // inline/chunked path. Those paths clear `composerError` on success, but
+    // the cap has to stay on screen -- hence the separate notice state.
+    setAttachNotice(plan.rejected.length ? describeRejections(plan.rejected) : null);
+    for (const file of plan.accepted) {
+      const buffer = await readFileBytes(file);
+      if (!buffer) {
         setComposerError('无法读取该文件。');
-        return;
+        continue;
       }
+      const mime = file.type || 'application/octet-stream';
       if (file.size <= INLINE_PROBE_BYTES) {
         const data = base64Of(new Uint8Array(buffer));
-        if (!data) {
-          setComposerError('无法读取该文件。');
-          return;
-        }
-        const probe: Frame = {
-          t: 'msg',
-          chat: activeRef.current,
-          text: input.trim(),
-          files: [{ name: file.name, mime, data }],
-        };
-        if (byteSize(probe) <= MAX_FRAME_BYTES) {
-          setComposerError(null);
-          setAttachment({ kind: 'inline', name: file.name, mime, data, size: file.size });
-          return;
+        if (data) {
+          const inline = attachmentsRef.current.filter(
+            (item): item is AttachmentInline => item.kind === 'inline',
+          );
+          const probe: Frame = {
+            t: 'msg',
+            chat: activeRef.current,
+            text: input.trim(),
+            files: [
+              ...inline.map((item) => ({ name: item.name, mime: item.mime, data: item.data })),
+              { name: file.name, mime, data },
+            ],
+          };
+          if (byteSize(probe) <= MAX_FRAME_BYTES) {
+            setComposerError(null);
+            setPendingAttachments([
+              ...attachmentsRef.current,
+              {
+                kind: 'inline',
+                id: `att-${Date.now().toString(36)}-${attachmentCounter++}`,
+                name: file.name,
+                mime,
+                data,
+                size: file.size,
+              },
+            ]);
+            continue;
+          }
         }
       }
       if (file.size > MAX_FILE_BYTES) {
-        setAttachment(null);
         setComposerError(`附件太大：单个附件上限 10MB，当前约 ${fmtKb(file.size)}`);
-        return;
+        continue;
       }
       startChunkedUpload(file, buffer, mime);
-    };
-    reader.readAsArrayBuffer(file);
+    }
   };
 
   const onPickFile = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const files = Array.from(e.target.files ?? []);
     e.target.value = '';
-    if (!file) return;
-    handleFileObject(file);
+    if (files.length) void addFiles(files);
   };
 
   const onPaste = (e: ReactClipboardEvent<HTMLTextAreaElement>) => {
     const items = e.clipboardData?.items;
     if (!items) return;
+    const files: File[] = [];
     for (let i = 0; i < items.length; i += 1) {
       const item = items[i];
-      if (item.kind === 'file') {
-        const file = item.getAsFile();
-        if (file) {
-          e.preventDefault();
-          handleFileObject(file);
-          return;
-        }
-      }
+      if (item.kind !== 'file') continue;
+      const file = item.getAsFile();
+      if (file) files.push(file);
+    }
+    if (files.length) {
+      e.preventDefault();
+      void addFiles(files);
     }
   };
 
@@ -4953,13 +5056,15 @@ export default function App() {
   const onDrop = (e: ReactDragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setDraggingFile(false);
-    const file = e.dataTransfer?.files?.[0];
-    if (file) handleFileObject(file);
+    const files = Array.from(e.dataTransfer?.files ?? []);
+    if (files.length) void addFiles(files);
   };
 
-  const uploadBlocked = attachment?.kind === 'chunked' && attachment.status !== 'ready';
+  const uploadBlocked = attachments.some(
+    (file) => file.kind === 'chunked' && file.status !== 'ready',
+  );
   const canSend =
-    state === 'live' && (input.trim().length > 0 || attachment != null) && !uploadBlocked;
+    state === 'live' && (input.trim().length > 0 || attachments.length > 0) && !uploadBlocked;
 
   if (needsLogin) {
     return (
@@ -5748,7 +5853,9 @@ export default function App() {
             </div>
           ) : null}
 
-          {composerError ? <div className="composer-error">{composerError}</div> : null}
+          {attachNotice || composerError ? (
+            <div className="composer-error">{attachNotice || composerError}</div>
+          ) : null}
 
           <ContextMeter
             usage={activeUsage}
@@ -5761,7 +5868,7 @@ export default function App() {
           />
 
           <div className="composer-card">
-            {activeSkill || attachment ? (
+            {activeSkill || attachments.length ? (
               <div className="chips">
                 {activeSkill ? (
                   <span className="skill-chip" title={activeSkill.description}>
@@ -5777,35 +5884,35 @@ export default function App() {
                   </span>
                 ) : null}
 
-                {attachment ? (
-                  <>
-                    <span
-                      className={`chip${attachment.kind === 'chunked' ? ` upload-${attachment.status}` : ''}`}
-                      title={`${attachment.name} (${fmtKb(attachment.size)})`}
-                    >
-                      <FileText size={12} />
-                      {attachment.name}
-                      {attachment.kind === 'chunked' && attachment.status === 'uploading' ? (
-                        <span className="chip-upload">
-                          <span className="chip-bar">
-                            <i style={{ width: `${uploadPercent(attachment)}%` }} />
-                          </span>
-                          <span className="chip-count">
-                            {attachment.sent}/{attachment.chunks}
-                          </span>
+                {/* M35: one chip per pending attachment, each removable. */}
+                {attachments.map((file, index) => (
+                  <span
+                    key={file.id || `${file.name}-${index}`}
+                    className={`chip${file.kind === 'chunked' ? ` upload-${file.status}` : ''}`}
+                    title={`${file.name} (${fmtKb(file.size)})`}
+                  >
+                    <FileText size={12} />
+                    {file.name}
+                    {file.kind === 'chunked' && file.status === 'uploading' ? (
+                      <span className="chip-upload">
+                        <span className="chip-bar">
+                          <i style={{ width: `${uploadPercent(file)}%` }} />
                         </span>
-                      ) : null}
-                      <button
-                        className="chip-x"
-                        aria-label="Remove attachment"
-                        onClick={removeAttachment}
-                      >
-                        ×
-                      </button>
-                    </span>
-                    <span className="chip-note">{chipNote(attachment)}</span>
-                  </>
-                ) : null}
+                        <span className="chip-count">
+                          {file.sent}/{file.chunks}
+                        </span>
+                      </span>
+                    ) : null}
+                    <button
+                      className="chip-x"
+                      aria-label={`移除附件 ${file.name}`}
+                      onClick={() => removeAttachment(file.id)}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+                <span className="chip-note">{attachmentsNote(attachments)}</span>
               </div>
             ) : null}
 
@@ -5830,12 +5937,12 @@ export default function App() {
                 <button
                   className="attach"
                   onClick={() => fileRef.current?.click()}
-                  title="上传文件或直接 Ctrl+V 粘贴截图（最大 10MB）"
+                  title="上传文件或直接 Ctrl+V 粘贴截图（单条消息最多 10 个、合计 10MB）"
                 >
                   <Paperclip size={13} />
                   <span>附件</span>
                 </button>
-                <input ref={fileRef} type="file" hidden onChange={onPickFile} />
+                <input ref={fileRef} type="file" hidden multiple onChange={onPickFile} />
 
                 <button
                   className="tool-pill"
