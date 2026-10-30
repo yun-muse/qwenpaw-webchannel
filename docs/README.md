@@ -43,4 +43,39 @@ M8 – M15 没有单独的 `*-report.md`。这些能力直接记录在协议文�
 | M14 | 移动端单手布局 | `spa/src/App.css` 的 `max-width: 720px` 段 |
 | M15 | 每轮用量回执、上下文仪表 | `protocol/frames.md` §11.2、`plugin/util.py::history_messages`、`spa/src/App.tsx::ContextMeter` |
 
+## M16 – M26
+
+这一段没有单独的 `*-report.md`，能力以代码、协议文档和测试为准（`docs/m21-test-notes.md` 记录了测试加固那一次）。
+
+| 里程碑 | 能力 | 从哪里读 |
+|---|---|---|
+| M16 | 各组件 README（根 / plugin / spa / relay-cf）与索引 | 各目录 `README.md` |
+| M17 | SPA 打磨：导出 toast、去掉误导性的 0.0s 耗时 | `spa/src/App.tsx`、`git show a9eedcb` |
+| M18 | GitHub Actions CI（按路径门控）+ gitignore 卫生 | `.github/workflows/ci.yml` |
+| M19 | 复制按钮、回到底部、跨设备失效会话回退、置顶、快捷键 | `spa/src/App.tsx`、`tests/e2e_m19.mjs` |
+| M20 | 导出 v2：元数据头 + 每轮用量脚注；重新生成/编辑重发探测后跳过 | `plugin/util.py::build_export_markdown`、`protocol/frames.md` §12 |
+| M21 | 测试加固：SPA vitest、3 个插件套件、relay-node smoke，以及 `e2e_cf` 的取舍结论 | [`m21-test-notes.md`](m21-test-notes.md) |
+| M22 | SPA 体验包：深色主题、粘贴附件、每会话草稿、提示词库、44px 点击区 | `spa/src/lib/{drafts,promptLibrary}.ts`、`spa/src/App.css` |
+| M23 | 会话标签与筛选、`⌘/Ctrl+K` 命令面板、搜索命中跳转 | `spa/src/lib/{palette,jump}.ts` |
+| M24 | 用量看板：`stats` 帧（总量/按天/排行/覆盖）与视图 | `protocol/frames.md` §14、`plugin/util.py::aggregate_usage_stats` |
+| M25 | 批量导出（进度/取消/失败计数/100 上限）；fork 探测后跳过；e2e 固定 UTF-8 locale | `spa/src/lib/bulkExport.ts`、`tests/e2e_m19.mjs` |
+| M26 | 侧栏重构：单行会话、⋯ 菜单、移动端底部弹层、密度目标 | `spa/src/App.tsx`、`spa/src/App.css` |
+
+## M27 – M38
+
+| 里程碑 | 文档 | 主题 |
+|---|---|---|
+| M27 | [`m27-report.md`](m27-report.md) | 思考等级 404 是“会话还没创建”的预期状态，不再上报为错误 |
+| M28 | [`m28-report.md`](m28-report.md) | 用量 v3：缓存命中/未命中/命中率、按模型明细（`—` 不冒充 0%） |
+| M29 | [`m29-report.md`](m29-report.md) | PWA 白屏：构建期缓存命名空间、worker 接管后才 reload、内联 splash + 看门狗自愈 |
+| M30 | [`m30-report.md`](m30-report.md) | **探测后跳过**：`/poll` 兜底不做（relay 是无状态广播，控制帧不可重放，轮询要第二套游标且抵消 DO 休眠收益） |
+| M31 | [`m31-report.md`](m31-report.md) | 附件历史：`hist.files`、`att_*` opaque ref 回取、媒体根守卫（协议 v10） |
+| M32 | [`m32-report.md`](m32-report.md) | 长会话流式性能：冻结头 + 活尾、`MessageView` memo；窗口化被否决 |
+| M33 | [`m33-report.md`](m33-report.md) | 分发卫生：plugin-dist 是唯一 ZIP 渠道，CI 拒绝任何被跟踪的 `*.zip` |
+| M34 | [`m34-report.md`](m34-report.md) | 单文件备份：手写 store-only ZIP + `index.md` + `backup.json`，与单会话导出逐字节一致 |
+| M35 | [`m35-report.md`](m35-report.md) | 历史缩略图修复：`att_get` 在多个媒体根上做包含校验，而不是猜一个 `media_dir` |
+| M36 | [`m36-report.md`](m36-report.md) | 数学公式：KaTeX 懒加载、占位符水合、代码豁免与货币守卫、woff2 单格式 |
+| M37 | [`m37-report.md`](m37-report.md) | 离线 outbox：只在浏览器可观测的离线入队，永不自动重发已写 socket 的条目 |
+| M38 | [`m38-report.md`](m38-report.md) | 生产验收扫荡（版本/中继/功能/卫生）+ 文档收尾 |
+
 进度与验证记录还可以看仓库根目录的 `AGENTS.md`（只记非显然的约定和教训）以及 `tasks/` 下的任务书。
