@@ -22,12 +22,317 @@
         }
       })();
     </script>
+    <style>
+      /* M29 — inline boot surface. It must exist without the bundle and
+         without App.css: this is what a broken/cold PWA shows instead of a
+         pure-white document. */
+      #boot-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483646;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: calc(24px + env(safe-area-inset-top)) 24px calc(24px + env(safe-area-inset-bottom));
+        background: #faf8f4;
+        color: #191816;
+        font: 15px/1.6 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+          'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+        text-align: center;
+      }
+      html[data-theme='dark'] #boot-splash {
+        background: #0a0b0e;
+        color: #ece9e4;
+      }
+      .boot-card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        max-width: 300px;
+      }
+      .boot-mark {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 56px;
+        height: 56px;
+        margin-bottom: 2px;
+        border-radius: 18px;
+        background: #c96442;
+        color: #fff;
+        font-size: 26px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        box-shadow: 0 10px 24px -10px rgba(201, 100, 66, 0.65);
+      }
+      .boot-name {
+        margin: 0;
+        font-size: 17px;
+        font-weight: 650;
+        letter-spacing: -0.01em;
+      }
+      .boot-hint {
+        margin: 0;
+        color: #78716c;
+        font-size: 13px;
+      }
+      html[data-theme='dark'] .boot-hint {
+        color: #a8a29e;
+      }
+      .boot-bar {
+        width: 132px;
+        height: 3px;
+        margin-top: 6px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: rgba(28, 25, 23, 0.1);
+      }
+      html[data-theme='dark'] .boot-bar {
+        background: rgba(255, 255, 255, 0.14);
+      }
+      .boot-bar span {
+        display: block;
+        width: 42%;
+        height: 100%;
+        border-radius: inherit;
+        background: #c96442;
+        animation: boot-slide 1.15s ease-in-out infinite;
+      }
+      #boot-retry {
+        min-height: 44px;
+        margin-top: 8px;
+        padding: 10px 20px;
+        border: 1px solid rgba(201, 100, 66, 0.5);
+        border-radius: 999px;
+        background: #c96442;
+        color: #fff;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      #boot-retry[hidden] {
+        display: none;
+      }
+      #boot-splash[data-state='stuck'] .boot-bar {
+        display: none;
+      }
+      #boot-splash[data-state='stuck'] .boot-hint {
+        color: #a63f1f;
+      }
+      @keyframes boot-slide {
+        0% {
+          transform: translateX(-110%);
+        }
+        100% {
+          transform: translateX(320%);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .boot-bar span {
+          animation: none;
+          width: 100%;
+        }
+      }
+    </style>
+    <script id="boot-watchdog">
+      /*
+       * M29 cold-start watchdog. Inline on purpose: it must run even when the
+       * hashed bundle 404s or a service worker hands back a stale shell.
+       *
+       * - Shows the splash until React calls window.__webchannelBootReady().
+       * - If the app is not mounted in DEADLINE ms, or a script/stylesheet/
+       *   dynamic chunk fails to load, self-heal once: clear Cache Storage,
+       *   then reload.
+       * - The self-heal marker lives in localStorage WITH A TIMESTAMP, so it
+       *   survives the user killing the PWA (sessionStorage does not) without
+       *   creating a reload loop. Inside the cooldown the splash turns into a
+       *   visible "retry" card instead.
+       */
+      (function () {
+        'use strict';
+
+        var HEAL_KEY = 'webchannel.selfHealAt';
+        var HEAL_COOLDOWN_MS = 10 * 60 * 1000;
+        var DEADLINE_MS = 12000;
+        var CACHE_CLEAR_CAP_MS = 1500;
+
+        try {
+          var override = Number(window.__webchannelBootDeadlineMs);
+          if (override > 0) DEADLINE_MS = override;
+        } catch (e) {
+          /* keep the default */
+        }
+
+        var mounted = false;
+        var handled = false;
+        var timer = null;
+
+        function splash() {
+          return document.getElementById('boot-splash');
+        }
+
+        function hint(text) {
+          var node = document.getElementById('boot-hint');
+          if (node) node.textContent = text;
+        }
+
+        function dismiss() {
+          if (mounted) return;
+          mounted = true;
+          if (timer) {
+            clearTimeout(timer);
+            timer = null;
+          }
+          var node = splash();
+          if (node && node.parentNode) node.parentNode.removeChild(node);
+        }
+
+        window.__webchannelBootReady = dismiss;
+
+        function readMarker() {
+          var value = 0;
+          try {
+            value = Number(localStorage.getItem(HEAL_KEY));
+          } catch (e) {
+            /* private mode / storage disabled */
+          }
+          if (!(isFinite(value) && value > 0)) {
+            try {
+              // Fallback so a storage-blocked tab cannot reload-loop either.
+              value = Number(sessionStorage.getItem(HEAL_KEY));
+            } catch (e) {
+              value = 0;
+            }
+          }
+          return isFinite(value) && value > 0 ? value : 0;
+        }
+
+        function writeMarker(value) {
+          try {
+            localStorage.setItem(HEAL_KEY, String(value));
+          } catch (e) {
+            /* keep the session-scoped copy as the last line of defence */
+          }
+          try {
+            sessionStorage.setItem(HEAL_KEY, String(value));
+          } catch (e) {
+            /* nothing else we can do; a broken shell may retry once per tab */
+          }
+        }
+
+        function clearCaches() {
+          if (!window.caches || typeof caches.keys !== 'function') return Promise.resolve();
+          return caches
+            .keys()
+            .then(function (names) {
+              return Promise.all(
+                names.map(function (name) {
+                  return caches.delete(name);
+                }),
+              );
+            })
+            .catch(function () {
+              /* cache storage can be unavailable; reload anyway */
+            });
+        }
+
+        function showStuck() {
+          var node = splash();
+          if (!node) return;
+          node.setAttribute('data-state', 'stuck');
+          hint('启动没有完成，可能是网络不稳定。');
+          var button = document.getElementById('boot-retry');
+          if (button) {
+            button.hidden = false;
+            button.onclick = function () {
+              location.reload();
+            };
+          }
+        }
+
+        function fail() {
+          if (mounted || handled) return;
+          handled = true;
+          if (timer) {
+            clearTimeout(timer);
+            timer = null;
+          }
+
+          var now = Date.now();
+          var last = readMarker();
+          if (last && now - last < HEAL_COOLDOWN_MS) {
+            // One automatic attempt already happened for this device; never
+            // loop. Give the user an explicit way out.
+            showStuck();
+            return;
+          }
+
+          writeMarker(now);
+
+          var node = splash();
+          if (node) node.setAttribute('data-state', 'healing');
+          hint('正在修复启动…');
+
+          var capped = new Promise(function (resolve) {
+            setTimeout(resolve, CACHE_CLEAR_CAP_MS);
+          });
+          Promise.race([clearCaches(), capped]).then(
+            function () {
+              location.reload();
+            },
+            function () {
+              location.reload();
+            },
+          );
+        }
+
+        window.addEventListener(
+          'error',
+          function (event) {
+            var target = event.target;
+            if (!target) return;
+            var isScript = target.tagName === 'SCRIPT';
+            var isStyle =
+              target.tagName === 'LINK' && /stylesheet/i.test(target.getAttribute('rel') || '');
+            if (isScript || isStyle) fail();
+          },
+          true,
+        );
+
+        window.addEventListener('unhandledrejection', function (event) {
+          var reason = event && event.reason;
+          var text = String((reason && (reason.message || reason.name)) || reason || '');
+          if (/Importing a module script failed|dynamically imported module|ChunkLoadError|Loading chunk/i.test(text)) {
+            fail();
+          }
+        });
+
+        window.__webchannelBoot = {
+          deadline: DEADLINE_MS,
+          fail: fail,
+          dismiss: dismiss,
+        };
+
+        timer = setTimeout(fail, DEADLINE_MS);
+      })();
+    </script>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="icon" type="image/png" href="/icons/icon-192.png" />
     <title>QwenPaw WebChannel</title>
   </head>
   <body>
+    <div id="boot-splash" role="status" aria-live="polite" data-state="loading">
+      <div class="boot-card">
+        <div class="boot-mark" aria-hidden="true">Q</div>
+        <p class="boot-name">QwenPaw WebChannel</p>
+        <p class="boot-hint" id="boot-hint">正在启动…</p>
+        <div class="boot-bar" aria-hidden="true"><span></span></div>
+        <button id="boot-retry" type="button" hidden>重新加载</button>
+      </div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

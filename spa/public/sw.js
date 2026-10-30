@@ -11,20 +11,38 @@
  *    /webchannel.zip (plugin distribution archive, filename is not hashed).
  * 3. Non-GET requests always pass through untouched (login POST, etc.).
  *
- * The cache name is a version tag: bumping it drops every older bucket on
- * activate. Hashed files live under /assets/ and are safe to cache forever.
+ * M29 — cold-start blank page:
+ * - CACHE_NAME carries the build id, injected at build time by
+ *   `serviceWorkerBuildPlugin` in vite.config.ts. A redeploy therefore changes
+ *   sw.js bytes, installs a new worker, and the new worker's `activate` — not
+ *   the page — owns the purge. The page reloads only after `controllerchange`,
+ *   so it can never land on a half-purged shell.
+ * - Navigation is network-first with a timeout. The shell is cached only from
+ *   a successful navigation (and under a stable `/index.html` key), and the
+ *   cached shell is used only when the network genuinely fails. A 404/5xx is
+ *   returned as-is and never cached as the app shell.
+ * - Hashed /assets/ stay cache-first: they are immutable and only ever
+ *   referenced by a shell from the same cache generation.
  */
 
-const CACHE_NAME = 'webchannel-static-v1';
+const BUILD = '__WE_CHANNEL_BUILD__';
+const CACHE_NAME = `webchannel-static-${BUILD}`;
+const SHELL_KEY = '/index.html';
+
+/** A sleeping phone radio must not hold the navigation white for minutes. */
+const NAV_TIMEOUT_MS = 5000;
 
 self.addEventListener('install', () => {
   // No precache: index.html is network-first so a redeploy is never masked.
+  // A new build changes this file (see BUILD), which is what installs us.
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
+      // Purge *before* claiming: once controllerchange reaches a page, every
+      // stale bucket is already gone. No page ever triggers this purge.
       const names = await caches.keys();
       await Promise.all(
         names.filter((name) => name !== CACHE_NAME).map((name) => caches.delete(name)),
@@ -33,6 +51,14 @@ self.addEventListener('activate', (event) => {
     })(),
   );
 });
+
+function withTimeout(promise, ms) {
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('navigation timeout')), ms);
+  });
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
+}
 
 async function cacheFirst(request) {
   const cache = await caches.open(CACHE_NAME);
@@ -62,13 +88,30 @@ async function networkFirst(request) {
   }
 }
 
-async function navigationFallback(request) {
+/**
+ * Network-first navigation. The shell is stored under one stable key so the
+ * offline fallback does not depend on which URL the PWA was launched from.
+ * Fallback happens only when fetch throws (offline / DNS / radio asleep) or
+ * exceeds NAV_TIMEOUT_MS; an HTTP error response is surfaced, never cached.
+ */
+async function navigation(request) {
+  const cache = await caches.open(CACHE_NAME);
+  // no-cache forces revalidation of the shell even if a host forgot the
+  // `_headers` rule; a stale index.html must never mask a deploy.
+  const network = fetch(request, { cache: 'no-cache' }).then((response) => {
+    if (response && response.ok) {
+      cache.put(SHELL_KEY, response.clone()).catch(() => {});
+    }
+    return response;
+  });
+
   try {
-    return await fetch(request);
+    return await withTimeout(network, NAV_TIMEOUT_MS);
   } catch (error) {
-    const cached = await caches.match('/index.html');
+    const cached = await cache.match(SHELL_KEY);
     if (cached) return cached;
-    // No offline shell: reject so the browser reports a network error.
+    // First install with no shell yet: report the network error instead of
+    // leaving the navigation pending forever.
     throw error;
   }
 }
@@ -93,7 +136,7 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (request.mode === 'navigate') {
-    event.respondWith(navigationFallback(request));
+    event.respondWith(navigation(request));
     return;
   }
 

@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
@@ -47,12 +47,43 @@ function versionJsonPlugin(): Plugin {
   };
 }
 
+/**
+ * Stamps the build id into the emitted `sw.js`.
+ *
+ * The worker's cache namespace and its bytes must change together on every
+ * deploy: a byte-identical sw.js means `registration.update()` installs
+ * nothing, so `activate` would never purge the old caches (M29). The
+ * placeholder lives in `public/sw.js`; dev serves it literally and never
+ * registers the worker (`startVersionWatch` is a no-op outside PROD).
+ */
+function serviceWorkerBuildPlugin(): Plugin {
+  let outDir = 'dist';
+  return {
+    name: 'webchannel-sw-build-id',
+    apply: 'build',
+    configResolved(config) {
+      outDir = isAbsolute(config.build.outDir)
+        ? config.build.outDir
+        : resolve(config.root, config.build.outDir);
+    },
+    writeBundle() {
+      const file = join(outDir, 'sw.js');
+      if (!existsSync(file)) return;
+      const source = readFileSync(file, 'utf8');
+      if (!source.includes('__WE_CHANNEL_BUILD__')) {
+        throw new Error('sw.js lost its __WE_CHANNEL_BUILD__ placeholder');
+      }
+      writeFileSync(file, source.replaceAll('__WE_CHANNEL_BUILD__', buildInfo.build), 'utf8');
+    },
+  };
+}
+
 export default defineConfig({
   define: {
     __BUILD_ID__: JSON.stringify(buildInfo.build),
     __BUILD_GIT__: JSON.stringify(buildInfo.git),
     __BUILD_TIME__: JSON.stringify(buildInfo.time),
   },
-  plugins: [react(), versionJsonPlugin()],
+  plugins: [react(), versionJsonPlugin(), serviceWorkerBuildPlugin()],
   server: { port: 5173 },
 });

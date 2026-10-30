@@ -113,6 +113,7 @@ import {
   STARTER_PROMPTS,
 } from './prompts';
 import type { SkillItem, StarterPrompt } from './prompts';
+import { notifyAppMounted } from './lib/boot';
 import { BUILD_GIT, formatBuildLabel } from './version';
 import './App.css';
 
@@ -1642,6 +1643,12 @@ function LoginGate({
 }
 
 export default function App() {
+  // M29: the inline boot watchdog removes the splash as soon as React commits,
+  // whichever branch (login gate or workspace) ends up on screen.
+  useEffect(() => {
+    notifyAppMounted();
+  }, []);
+
   const [session] = useState(restoreSession);
   const [chatIds, setChatIds] = useState<string[]>(() => [...session.chats]);
   const [activeChat, setActiveChat] = useState<string>(session.active);

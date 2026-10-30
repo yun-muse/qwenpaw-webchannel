@@ -4,13 +4,26 @@
  * `__BUILD_ID__` / `__BUILD_GIT__` / `__BUILD_TIME__` come from the `define`
  * block in vite.config.ts. Everything here is independent of React: the
  * watcher and its fallback banner must work even when the login gate is shown.
+ *
+ * M29: this module never deletes caches. The service worker's `activate` owns
+ * the purge (its cache name carries the build id), and we reload only after
+ * the new worker has taken control. A reload can therefore never land on a
+ * half-purged shell, and a failed update leaves the old cache intact.
  */
+
+import { decideUpdate } from './lib/versionGuard';
 
 const DEV_BUILD = 'dev';
 const RELOADED_KEY = 'webchannel.reloadedFor';
 const LAST_RELOAD_KEY = 'webchannel.lastReloadAt';
-const RELOAD_COOLDOWN_MS = 60_000;
 const BANNER_ID = 'webchannel-update-banner';
+
+/** `/version.json` must answer quickly; a sleeping radio must not pin it. */
+const VERSION_TIMEOUT_MS = 6_000;
+/** How long `registration.update()` may take before we reload anyway. */
+const UPDATE_TIMEOUT_MS = 4_000;
+/** How long to wait for the new worker to claim this page. */
+const TAKEOVER_TIMEOUT_MS = 4_000;
 
 /** `typeof` keeps this safe when the constants were not injected at all. */
 const injected =
@@ -38,11 +51,24 @@ function readRemoteBuild(payload: unknown): string {
   return typeof build === 'string' ? build.trim() : '';
 }
 
-function readSession(key: string): string | null {
+/**
+ * Update markers must survive a process kill: a PWA reopens as a brand-new
+ * tab with an empty sessionStorage, which disabled M10's anti-loop gates on
+ * exactly the cold start that goes wrong.
+ */
+function readLocal(key: string): string | null {
   try {
-    return sessionStorage.getItem(key);
+    return localStorage.getItem(key);
   } catch {
     return null;
+  }
+}
+
+function writeLocal(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* storage may be unavailable; the caller still reloads */
   }
 }
 
@@ -99,38 +125,95 @@ function showManualUpdateBanner(): void {
   (document.body || document.documentElement).appendChild(banner);
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve(null);
+    }, ms);
+    promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(null);
+      },
+    );
+  });
+}
+
+/** Resolves true when a new worker has claimed this page, false on timeout. */
+function waitForController(timeoutMs: number): Promise<boolean> {
+  if (!('serviceWorker' in navigator)) return Promise.resolve(false);
+  const container = navigator.serviceWorker;
+  if (!container.controller) return Promise.resolve(false);
+
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (value: boolean) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      container.removeEventListener('controllerchange', onChange);
+      resolve(value);
+    };
+    const onChange = () => finish(true);
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    container.addEventListener('controllerchange', onChange);
+  });
+}
+
 /**
- * Refresh the service worker, drop every cached response, remember which
- * build we are reloading for, then reload.
+ * Refresh the service worker, wait for it to take over, remember which build
+ * we are reloading for, then reload. The purge happens inside the worker's
+ * `activate` — never here.
  */
 async function activateUpdate(targetBuild: string): Promise<void> {
   try {
     const registration = await navigator.serviceWorker?.getRegistration();
-    await registration?.update();
+    if (registration) {
+      // Attach before update(): activation can be quick enough to race us.
+      const takeover = waitForController(TAKEOVER_TIMEOUT_MS);
+      await withTimeout(registration.update(), UPDATE_TIMEOUT_MS);
+      await takeover;
+    }
   } catch {
-    /* the worker may be unsupported or not installed yet */
+    /* the worker may be unsupported or the update may be offline */
   }
 
-  try {
-    const names = await caches.keys();
-    await Promise.all(names.map((name) => caches.delete(name)));
-  } catch {
-    /* Cache Storage can be unavailable (e.g. private mode) */
-  }
-
-  try {
-    sessionStorage.setItem(RELOADED_KEY, targetBuild);
-    sessionStorage.setItem(LAST_RELOAD_KEY, String(Date.now()));
-  } catch {
-    /* storage may be unavailable; still reload below */
-  }
-
+  writeLocal(RELOADED_KEY, targetBuild);
+  writeLocal(LAST_RELOAD_KEY, String(Date.now()));
   location.reload();
+}
+
+/** One no-store probe; aborts instead of hanging on a waking radio. */
+async function fetchRemoteBuild(): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), VERSION_TIMEOUT_MS);
+  try {
+    const response = await fetch('/version.json', {
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    if (!response.ok) return '';
+    return readRemoteBuild((await response.json()) as unknown);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
  * Polls `/version.json` and reloads once a newer build is served. No-op in
- * development and when the build id was not injected.
+ * development and when the build id was not injected. Every network failure
+ * is swallowed: this watcher can never delay or block first render.
  */
 export function startVersionWatch(): void {
   if (!import.meta.env.PROD || BUILD_ID === DEV_BUILD) return;
@@ -148,23 +231,17 @@ export function startVersionWatch(): void {
     if (inFlight) return;
     inFlight = true;
     try {
-      const response = await fetch('/version.json', { cache: 'no-store' });
-      if (!response.ok) return;
+      const remoteBuild = await fetchRemoteBuild();
+      const decision = decideUpdate({
+        remoteBuild,
+        localBuild: BUILD_ID,
+        reloadedFor: readLocal(RELOADED_KEY),
+        lastReloadAt: Number(readLocal(LAST_RELOAD_KEY) ?? '0'),
+        now: Date.now(),
+      });
 
-      const remoteBuild = readRemoteBuild((await response.json()) as unknown);
-      if (!remoteBuild || remoteBuild === BUILD_ID) return;
-
-      const reloadedFor = readSession(RELOADED_KEY);
-      const lastReloadAt = Number(readSession(LAST_RELOAD_KEY) ?? '0');
-      const recentlyReloaded =
-        Number.isFinite(lastReloadAt) && Date.now() - lastReloadAt < RELOAD_COOLDOWN_MS;
-
-      if (remoteBuild === reloadedFor || recentlyReloaded) {
-        showManualUpdateBanner();
-        return;
-      }
-
-      await activateUpdate(remoteBuild);
+      if (decision === 'banner') showManualUpdateBanner();
+      else if (decision === 'update') await activateUpdate(remoteBuild);
     } catch {
       /* offline, 404 or invalid JSON: stay quiet and retry on the next trigger */
     } finally {
