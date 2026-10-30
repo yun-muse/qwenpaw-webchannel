@@ -251,7 +251,9 @@ describe('sw.js navigation', () => {
 });
 
 describe('sw.js passthrough', () => {
-  it.each(['/version.json', '/sw.js', '/webchannel.zip'])('never intercepts %s', (path) => {
+  // M33 removed the SPA-hosted /webchannel.zip (plugin-dist is the only
+  // distribution channel), so its dedicated bypass was dropped too.
+  it.each(['/version.json', '/sw.js'])('never intercepts %s', (path) => {
     const worker = createWorker();
     expect(worker.fire('fetch', { request: makeRequest(path) })).toBeUndefined();
   });

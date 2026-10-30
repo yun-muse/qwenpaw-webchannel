@@ -7,8 +7,9 @@
  *    endpoint. Any request whose URL origin differs from this worker's origin
  *    returns immediately below, without respondWith, so the browser handles it
  *    normally. Never intercept, cache or rewrite cross-origin requests.
- * 2. Never cache /version.json (it is the update probe) and never cache
- *    /webchannel.zip (plugin distribution archive, filename is not hashed).
+ * 2. Never cache /version.json (it is the update probe). This origin serves no
+ *    other unhashed download: the plugin ZIP ships from the plugin-dist Pages
+ *    project, not from here (M33 removed the tracked copy under public/).
  * 3. Non-GET requests always pass through untouched (login POST, etc.).
  *
  * M29 — cold-start blank page:
@@ -126,12 +127,8 @@ self.addEventListener('fetch', (event) => {
   // Non-GET (e.g. the login POST): pass through.
   if (request.method !== 'GET') return;
 
-  // Update probe, plugin archive and the worker itself always go to network.
-  if (
-    url.pathname === '/version.json' ||
-    url.pathname === '/webchannel.zip' ||
-    url.pathname === '/sw.js'
-  ) {
+  // Update probe and the worker itself always go to network.
+  if (url.pathname === '/version.json' || url.pathname === '/sw.js') {
     return;
   }
 

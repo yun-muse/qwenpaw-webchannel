@@ -63,6 +63,28 @@ jobs:
               - 'protocol/**'
               - '.github/workflows/ci.yml'
 
+  # Tracked ZIPs are build output, never source. A ZIP committed under
+  # spa/public/ is copied verbatim into the Pages build and served at a stable
+  # URL, so it silently drifts from plugin/ the moment either side changes
+  # (M33 removed one that predated M9 and lacked every later feature).
+  # The plugin ships from the plugin-dist Pages project. dist/ holds the local
+  # build + rollback archives and is gitignored, so it never appears here.
+  artifacts:
+    name: artifact hygiene (no tracked ZIPs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Fail on tracked ZIP artifacts
+        run: |
+          tracked=$(git ls-files -- '*.zip')
+          if [ -n "$tracked" ]; then
+            echo "::error::ZIP artifacts are build output and must not be tracked:"
+            printf '%s\n' "$tracked"
+            exit 1
+          fi
+          echo "ok: no tracked ZIP artifacts"
+
   plugin:
     name: plugin tests (python 3.12)
     needs: changes

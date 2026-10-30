@@ -49,8 +49,9 @@ npx wrangler pages deploy dist \
 
 `public/` 会原样复制到 `dist/`，因此 Pages 站点同时提供：
 
-- `/manifest.webmanifest`、`/sw.js`、图标；
-- `/webchannel.zip` — QwenPaw 插件的安装包，可作为 `POST /api/plugins/install` 的 `source` URL。
+- `/manifest.webmanifest`、`/sw.js`、图标。
+
+插件安装包**不**随 SPA 分发：它由 `tools/package_plugin.sh` 从 `plugin/` 构建，发布在 Pages 项目 `qwenpaw-plugin-dist`（`https://qwenpaw-plugin-dist.pages.dev/webchannel.zip`），步骤见 [`../plugin/README.md`](../plugin/README.md)。SPA 站点曾提供的 `/webchannel.zip` 已于 M33 下架——那份二进制与 `plugin/` 无同步机制，长期漂移；构建产物里不再包含 ZIP（CI 有守卫）。
 
 ### 缓存头
 
@@ -58,7 +59,7 @@ npx wrangler pages deploy dist \
 
 | 路径 | Cache-Control |
 |---|---|
-| `/`、`/index.html`、`/sw.js`、`/manifest.webmanifest`、`/webchannel.zip` | `no-cache` |
+| `/`、`/index.html`、`/sw.js`、`/manifest.webmanifest` | `no-cache` |
 | `/version.json` | `no-store` |
 | `/assets/*` | `public, max-age=31536000, immutable` |
 
@@ -71,7 +72,7 @@ npx wrangler pages deploy dist \
 - `install` 不预缓存任何东西，直接 `skipWaiting()`；`index.html` 优先走网络，避免重新部署被旧缓存掩盖。
 - `activate` 删除所有非当前缓存并 `clients.claim()`。
 - 导航请求 network-first，离线时回退到缓存的 `/index.html`；`/assets/*` cache-first（文件名带哈希，可永久缓存）；其余同源 GET network-first。
-- **永不拦截**：跨源请求（relay 的 WS/HTTP）、非 GET 请求（登录 POST）、`/version.json`、`/webchannel.zip`、`/sw.js` 本身。
+- **永不拦截**：跨源请求（relay 的 WS/HTTP）、非 GET 请求（登录 POST）、`/version.json`、`/sw.js` 本身。站内没有其他无哈希下载物（插件包走 `qwenpaw-plugin-dist`，M33）。
 
 ### version.json 与 `__BUILD_ID__`
 
@@ -168,7 +169,6 @@ SPA 只存 token 和过期时间，**从不存密码**（`src/App.tsx::rememberA
 | `public/manifest.webmanifest` | PWA manifest（standalone，中文，暖陶色主题） |
 | `public/_headers` | Pages 缓存头 |
 | `public/icons/`、`public/apple-touch-icon.png` | 图标 |
-| `public/webchannel.zip` | 插件安装包 |
 | `scripts/gen_icons.py` | 生成图标 |
 
 ## 测试
