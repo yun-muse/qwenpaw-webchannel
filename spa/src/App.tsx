@@ -101,6 +101,12 @@ import type { ChatUsage, TurnUsage } from './lib/usage';
 import { statsBars, statsOf } from './lib/stats';
 import type { StatsBar, UsageStats } from './lib/stats';
 import {
+  effortErrorAction,
+  effortNeedsApply,
+  pendingEffortLevel,
+  shouldAdoptEffortLevel,
+} from './lib/effort';
+import {
   DEFAULT_SKILLS,
   FEYNMAN_AGENTS_MD,
   FEYNMAN_SOUL_MD,
@@ -151,9 +157,6 @@ const TOKEN_EXPIRES_KEY = 'webchannel.tokenExpires';
 const NAMES_KEY = 'webchannel.chatNames';
 /** Per-chat thinking level, keyed by chat id (M9). */
 const EFFORT_KEY = 'webchannel.effort';
-/** A chat gets its server record on the first message; retry the pending
- *  level once that message has had time to be processed (M9). */
-const EFFORT_REAPPLY_MS = 1200;
 /** 'light' | 'dark' (M7). */
 const THEME_KEY = 'webchannel.theme';
 /** The PWA status bar follows the active theme (M22). */
@@ -1687,7 +1690,9 @@ export default function App() {
   const effortLevelsRef = useRef<Record<string, EffortLevel>>(effortLevels);
   const effortMetaRef = useRef<Record<string, EffortMeta>>({});
   const effortRollbackRef = useRef<Record<string, EffortLevel>>({});
-  const effortRetryTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  // M27: chats with an outstanding `set_effort` (cleared by its reply) so the
+  // turn-completion trigger cannot dispatch the same level twice.
+  const effortSentRef = useRef<Set<string>>(new Set());
   // M11: debounced usage refresh per chat (set after a reply finishes).
   const usageTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   // M24: the newest stats request; a late/duplicate reply must not overwrite
@@ -1765,11 +1770,7 @@ export default function App() {
   };
 
   const forgetEffort = (chat: string) => {
-    const timer = effortRetryTimers.current.get(chat);
-    if (timer) {
-      clearTimeout(timer);
-      effortRetryTimers.current.delete(chat);
-    }
+    effortSentRef.current.delete(chat);
     delete effortRollbackRef.current[chat];
     if (chat in effortLevelsRef.current) {
       const next = { ...effortLevelsRef.current };
@@ -1787,6 +1788,29 @@ export default function App() {
 
   const requestEffort = (chat: string) => {
     clientRef.current?.send({ t: 'get_effort', chat, id: 'effort-get' });
+  };
+
+  /**
+   * M27: send a still-unconfirmed local level to a chat that now exists.
+   *
+   * The only trigger is a completed turn (see `applyPendingEffort` call sites
+   * at `end` / the closing `msg`): that is the moment QwenPaw has persisted
+   * the `ChatSpec`, so `set_effort` can stop answering 404. No timers, and no
+   * repeated probing while the chat is still absent.
+   */
+  const applyPendingEffort = (chat: string) => {
+    const meta = effortMetaRef.current[chat];
+    const level = pendingEffortLevel(effortLevelsRef.current[chat], meta);
+    if (!level || effortSentRef.current.has(chat)) return false;
+    const client = clientRef.current;
+    if (!client) return false;
+    effortRollbackRef.current[chat] = meta?.confirmed ?? 'default';
+    effortSentRef.current.add(chat);
+    if (!client.send({ t: 'set_effort', chat, level, id: 'effort-set' })) {
+      effortSentRef.current.delete(chat);
+      return false;
+    }
+    return true;
   };
 
   const requestUsage = (chat: string) => {
@@ -2313,8 +2337,6 @@ export default function App() {
   useEffect(
     () => () => {
       if (toastTimer.current) clearTimeout(toastTimer.current);
-      for (const timer of effortRetryTimers.current.values()) clearTimeout(timer);
-      effortRetryTimers.current.clear();
       for (const timer of usageTimers.current.values()) clearTimeout(timer);
       usageTimers.current.clear();
       const exportJob = exportRef.current;
@@ -2336,9 +2358,9 @@ export default function App() {
     // replayed, so every chat switch asks explicitly).
     requestUsage(activeChat);
     // The local value is already rendered from localStorage; align it with
-    // the server's stored choice (a chat with no record yet answers 404 and
-    // keeps the local value).
-    if (effortMetaRef.current[activeChat]?.pending) return;
+    // the server's stored choice. A chat with no record yet answers 404 and
+    // keeps the local value (M27); `shouldAdoptEffortLevel` protects a level
+    // that is still waiting to be applied.
     requestEffort(activeChat);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only chat switches
   }, [activeChat]);
@@ -2599,6 +2621,10 @@ export default function App() {
               prev.map((m) => (m.id === id ? { ...m, streaming: false } : m)),
             );
           }
+          // M27: the turn is over, so QwenPaw has persisted this chat's
+          // ChatSpec -- the one deterministic moment a deferred level can be
+          // applied (see `applyPendingEffort`).
+          applyPendingEffort(chat);
           if (chat === activeRef.current) scheduleUsageRefresh(chat);
           break;
         }
@@ -2629,6 +2655,9 @@ export default function App() {
             );
             // The turn is complete; refresh this chat's usage after the app
             // has had a moment to persist the turn's usage metadata (M11).
+            // M27: this is also the "chat now exists" trigger for a deferred
+            // thinking level.
+            applyPendingEffort(chat);
             if (chat === activeRef.current) scheduleUsageRefresh(chat);
             break;
           }
@@ -2676,6 +2705,8 @@ export default function App() {
             ];
           });
           // Non-streamed replies close the turn here; refresh like `end` does.
+          // M27: same trigger for a level that was waiting for the ChatSpec.
+          applyPendingEffort(chat);
           if (chat === activeRef.current) scheduleUsageRefresh(chat);
           break;
         }
@@ -2912,13 +2943,24 @@ export default function App() {
         case 'effort': {
           const level = asEffortLevel(frame.level);
           if (!level) break;
-          applyEffortLevel(chat, level);
+          effortSentRef.current.delete(chat);
+          const meta = effortMetaRef.current[chat];
+          const adopt = shouldAdoptEffortLevel(
+            effortLevelsRef.current[chat],
+            meta,
+            level,
+          );
+          if (adopt) applyEffortLevel(chat, level);
           mergeEffortMeta(chat, {
+            // A pending local choice survives a differing `get_effort`
+            // reply; the reply still tells us the server's value (used as
+            // the rollback target), while the `set_effort` reply echoes the
+            // choice and confirms it (M27).
             confirmed: level,
             supported: effortSupportedOf(frame.supported),
             kind: asString(frame.kind),
             modelKey: asString(frame.model_key),
-            pending: false,
+            pending: !adopt,
           });
           break;
         }
@@ -3086,24 +3128,31 @@ export default function App() {
           if (code === 'E_EFFORT') {
             const effortReq = asString(frame.id);
             const effortChat = asString(frame.chat) || activeRef.current;
-            const status = typeof frame.status === 'number' ? frame.status : 0;
-            if (effortReq === 'effort-set') {
-              // 404 means "the chat has no server record yet" (it is created
-              // by its first message). Keep the local choice; send() retries
-              // it after that message. Everything else is a real rejection.
-              if (status !== 404) {
-                const meta = effortMetaRef.current[effortChat];
-                const rollback =
-                  meta?.confirmed ?? effortRollbackRef.current[effortChat] ?? 'default';
-                applyEffortLevel(effortChat, rollback);
-              }
+            const action = effortErrorAction(effortReq, frame.status);
+            if (action === 'not-created') {
+              // Expected: the chat gets its ChatSpec with its first message.
+              // Keep the local choice, arm the re-apply trigger and stay
+              // silent -- this is not a failure the user can act on.
+              effortSentRef.current.delete(effortChat);
+              mergeEffortMeta(effortChat, {
+                pending: effortNeedsApply(
+                  effortLevelsRef.current[effortChat],
+                  effortMetaRef.current[effortChat]?.confirmed,
+                ),
+              });
+            } else if (action === 'rejected') {
+              // A real rejection (422 unsupported level, unresolvable chat
+              // list, ...): restore the confirmed level and say so.
+              effortSentRef.current.delete(effortChat);
+              const meta = effortMetaRef.current[effortChat];
+              const rollback =
+                meta?.confirmed ?? effortRollbackRef.current[effortChat] ?? 'default';
+              applyEffortLevel(effortChat, rollback);
               mergeEffortMeta(effortChat, { pending: false });
               showToastBriefly(detail ? `思考等级未生效 — ${detail}` : '思考等级未生效');
-            } else if (effortReq !== 'effort-get') {
-              showToastBriefly(detail ? `思考等级未生效 — ${detail}` : '思考等级未生效');
             }
-            // get_effort failures are silent: a new chat has no record yet,
-            // and the local selection is still the best thing to show.
+            // 'get-unavailable' is silent: a failed read leaves the local
+            // selection as the best thing to show.
             break;
           }
           setToast({ text: detail ? `${code} — ${detail}` : code, tone: 'danger' });
@@ -3152,6 +3201,9 @@ export default function App() {
           }
         } else if (next === 'connecting' || next === 'resuming') {
           modelsRequested.current = false;
+          // M27: a set_effort sent on the old socket will never be answered,
+          // so let the next completed turn dispatch it again.
+          effortSentRef.current.clear();
           for (const rt of runtimes.current.values()) {
             rt.histPending = false;
             rt.histOpen = false;
@@ -3428,37 +3480,13 @@ export default function App() {
     effortRollbackRef.current[chat] = current;
     applyEffortLevel(chat, level);
     mergeEffortMeta(chat, { pending: true });
+    effortSentRef.current.add(chat);
     if (!client.send({ t: 'set_effort', chat, level, id: 'effort-set' })) {
+      effortSentRef.current.delete(chat);
       applyEffortLevel(chat, current);
       mergeEffortMeta(chat, { pending: false });
       showToastBriefly('未连接 — 思考等级未设置');
     }
-  };
-
-  /**
-   * A chat only gets its server record on its first message. If the user has
-   * an unconfirmed local level, retry it once that turn had time to create
-   * the chat; the 404 reply itself deliberately keeps the local choice.
-   */
-  const scheduleEffortReapply = (chat: string) => {
-    const level = effortLevelsRef.current[chat] ?? 'default';
-    const meta = effortMetaRef.current[chat];
-    if (level === 'default' || meta?.confirmed === level) return;
-    if (effortRetryTimers.current.has(chat)) return;
-    const timer = setTimeout(() => {
-      effortRetryTimers.current.delete(chat);
-      const current = effortLevelsRef.current[chat] ?? 'default';
-      const now = effortMetaRef.current[chat];
-      if (current === 'default' || now?.confirmed === current) return;
-      const client = clientRef.current;
-      if (!client) return;
-      effortRollbackRef.current[chat] = now?.confirmed ?? 'default';
-      mergeEffortMeta(chat, { pending: true });
-      if (!client.send({ t: 'set_effort', chat, level: current, id: 'effort-set' })) {
-        mergeEffortMeta(chat, { pending: false });
-      }
-    }, EFFORT_REAPPLY_MS);
-    effortRetryTimers.current.set(chat, timer);
   };
 
   const openModelPicker = () => {
@@ -3898,7 +3926,8 @@ export default function App() {
     // M19: a chat the user has written in is never replaced by the stale-chat
     // fallback, even if the server list predates this turn.
     touchedChatsRef.current.add(chat);
-    scheduleEffortReapply(chat);
+    // M27: do NOT push the effort here -- the chat may not exist for a while.
+    // The completed-turn handler re-applies it once QwenPaw has the ChatSpec.
     nearBottomRef.current = true;
     setNearBottom(true);
     updateChat(chat, (prev) => [
@@ -3948,7 +3977,8 @@ export default function App() {
     // M19: a chat the user has written in is never replaced by the stale-chat
     // fallback, even if the server list predates this turn.
     touchedChatsRef.current.add(chat);
-    scheduleEffortReapply(chat);
+    // M27: do NOT push the effort here -- the chat may not exist for a while.
+    // The completed-turn handler re-applies it once QwenPaw has the ChatSpec.
     nearBottomRef.current = true;
     setNearBottom(true);
     updateChat(chat, (prev) => [

@@ -404,6 +404,29 @@ def test_get_effort_without_chat_spec_is_404():
     asyncio.run(scenario())
 
 
+def test_get_effort_chat_list_failure_is_not_404():
+    async def scenario():
+        # M27: an unreadable /api/chats is a real failure -- reporting it as
+        # 404 would let the SPA mistake an outage for "no chat yet".
+        app = _FakeApp()
+        app.specs_status = 500
+        channel, app, relay = _channel(app)
+        await channel._on_relay_frame(
+            {"t": "get_effort", "chat": WEB_CHAT, "id": "effort-get"},
+        )
+
+        errors = _of_kind(relay.sent, "error")
+        assert len(errors) == 1, relay.sent
+        assert errors[0]["code"] == "E_EFFORT"
+        assert errors[0]["status"] == 500
+        assert errors[0]["id"] == "effort-get"
+        assert "chat list unavailable" in errors[0]["detail"]
+        assert "no QwenPaw chat" not in errors[0]["detail"]
+        assert _thinking_calls(app, "GET") == []
+
+    asyncio.run(scenario())
+
+
 def test_get_effort_http_404_is_e_effort():
     async def scenario():
         app = _FakeApp()
@@ -596,6 +619,75 @@ def test_set_effort_without_chat_spec_is_404():
         assert errors[0]["status"] == 404
         assert errors[0]["id"] == "effort-set"
         assert _of_kind(relay.sent, "effort") == []
+
+    asyncio.run(scenario())
+
+
+def test_set_effort_chat_list_failure_is_not_404():
+    async def scenario():
+        app = _FakeApp()
+        app.specs_status = 500
+        channel, app, relay = _channel(app)
+        await channel._on_relay_frame({
+            "t": "set_effort", "chat": WEB_CHAT, "level": "high",
+            "id": "effort-set",
+        })
+
+        assert _thinking_calls(app, "GET") == []
+        assert _thinking_calls(app, "PUT") == []
+        errors = _of_kind(relay.sent, "error")
+        assert len(errors) == 1, relay.sent
+        assert errors[0]["code"] == "E_EFFORT"
+        assert errors[0]["status"] == 500
+        assert errors[0]["id"] == "effort-set"
+        assert "chat list unavailable" in errors[0]["detail"]
+        assert _of_kind(relay.sent, "effort") == []
+
+    asyncio.run(scenario())
+
+
+def test_effort_lookup_transport_failure_has_no_status():
+    async def scenario():
+        for handler, frame in (
+            ("get_effort", {"t": "get_effort", "chat": WEB_CHAT}),
+            ("set_effort", {
+                "t": "set_effort", "chat": WEB_CHAT, "level": "high",
+            }),
+        ):
+            app = _FakeApp()
+            app.specs_status = 0  # app unreachable
+            channel, app, relay = _channel(app)
+            await channel._on_relay_frame(frame)
+
+            errors = _of_kind(relay.sent, "error")
+            assert len(errors) == 1, (handler, relay.sent)
+            assert errors[0]["code"] == "E_EFFORT"
+            # No HTTP status was produced, so none is invented -- and in
+            # particular this must not look like the 404 expected state.
+            assert "status" not in errors[0], errors[0]
+            assert "app unreachable" in errors[0]["detail"]
+            assert _of_kind(relay.sent, "effort") == []
+
+    asyncio.run(scenario())
+
+
+def test_effort_list_endpoint_404_is_not_the_expected_state():
+    async def scenario():
+        # A 404 from /api/chats itself is a broken lookup, not "this chat has
+        # no spec": the frame must not carry status 404 (the SPA treats that
+        # as the expected pre-creation state and stays silent).
+        app = _FakeApp()
+        app.specs_status = 404
+        channel, app, relay = _channel(app)
+        await channel._on_relay_frame({
+            "t": "set_effort", "chat": WEB_CHAT, "level": "high",
+        })
+
+        errors = _of_kind(relay.sent, "error")
+        assert len(errors) == 1, relay.sent
+        assert "status" not in errors[0], errors[0]
+        assert "chat list unavailable (HTTP 404)" in errors[0]["detail"]
+        assert "no QwenPaw chat" not in errors[0]["detail"]
 
     asyncio.run(scenario())
 

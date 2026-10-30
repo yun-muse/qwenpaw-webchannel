@@ -5,9 +5,11 @@
  * paste-to-attach, per-chat drafts, prompt library), the M23 pack (chat
  * tags, Ctrl/⌘+K command palette, archive search jump) and the M24 pack
  * (all-chats usage dashboard: totals, day chart, ranking, empty state), and
- * the M25 pack (导出全部: progress, failure accounting, cancel), and the M26
+ * the M25 pack (导出全部: progress, failure accounting, cancel), the M26
  * pack (compact sidebar rows, the per-row ⋯ menu on phone + desktop, and
- * BEFORE/AFTER drawer evidence).
+ * BEFORE/AFTER drawer evidence), and the M27 pack (a thinking level chosen
+ * before the chat's ChatSpec exists: silent 404, applied after the first turn,
+ * while a real 422 stays visible).
  * Runs entirely local against a production build:
  *
  *   1. `npm run build` in spa/ (fails the run if the build fails)
@@ -31,6 +33,7 @@
  *   M19_HEADED=1       visible browser
  *   OUT_DIR            screenshot directory; default ./m19-shots
  *   M26_ONLY=1         run only the M26 menu checks + evidence (fast loop)
+ *   M27_ONLY=1         run only the M27 effort checks (fast before/after loop)
  *
  * M26 evidence (BEFORE vs AFTER) is the same structure-agnostic block, so the
  * BEFORE shots come from the unmodified build:
@@ -244,6 +247,16 @@ const state = {
   /** M25: chats whose mock export fails, and an artificial per-export delay. */
   exportFail: [],
   exportDelay: 0,
+  /** M27: chats without a ChatSpec yet, their accepted level, and every
+   *  set_effort the SPA sent (`created` says whether the mock had the chat). */
+  notCreated: new Set(),
+  efforts: {},
+  effortLog: [],
+  effortGetLog: [],
+  /** M27: a level the mock refuses with 422, per chat. */
+  effortReject: {},
+  /** M27: how long the first `msg` takes to create the ChatSpec. */
+  createDelay: 2500,
 };
 
 function resetState() {
@@ -264,6 +277,12 @@ function resetState() {
   state.stats = JSON.parse(JSON.stringify(DEFAULT_STATS));
   state.exportFail = [];
   state.exportDelay = 0;
+  state.notCreated = new Set();
+  state.efforts = {};
+  state.effortLog = [];
+  state.effortGetLog = [];
+  state.effortReject = {};
+  state.createDelay = 2500;
   for (const timer of state.streaming.values()) clearInterval(timer);
   state.streaming.clear();
 }
@@ -366,25 +385,82 @@ function handleAgentFrame(frame) {
     case 'get_stats':
       agentSend({ t: 'stats', id: frame.id, ...state.stats });
       break;
-    case 'get_effort':
+    case 'get_effort': {
+      // M27: a chat that has never been sent to has no ChatSpec yet, so the
+      // plugin answers E_EFFORT 404 -- an expected state, not a failure.
+      const chat = String(frame.chat || '');
+      state.effortGetLog.push(chat);
+      if (state.notCreated.has(chat)) {
+        agentSend({
+          t: 'error',
+          code: 'E_EFFORT',
+          chat,
+          status: 404,
+          id: frame.id,
+          detail: 'no QwenPaw chat exists for this session yet',
+        });
+        break;
+      }
+      const level = state.efforts[chat] || 'default';
       agentSend({
         t: 'effort',
-        chat: String(frame.chat || ''),
-        level: 'default',
-        effective: 'default',
+        chat,
+        level,
+        effective: level === 'default' ? 'inherit' : level,
+        supported: ['low', 'medium', 'high', 'max'],
+        kind: 'budget',
+        model_key: 'mock:mock-1',
       });
       break;
-    case 'set_effort':
+    }
+    case 'set_effort': {
+      const chat = String(frame.chat || '');
+      const level = String(frame.level || 'default');
+      state.effortLog.push({ chat, level, created: !state.notCreated.has(chat) });
+      if (state.notCreated.has(chat)) {
+        agentSend({
+          t: 'error',
+          code: 'E_EFFORT',
+          chat,
+          status: 404,
+          id: frame.id,
+          detail: 'no QwenPaw chat exists for this session yet',
+        });
+        break;
+      }
+      if (state.effortReject[chat] === level) {
+        agentSend({
+          t: 'error',
+          code: 'E_EFFORT',
+          chat,
+          status: 422,
+          id: frame.id,
+          detail: 'mock model rejects this level',
+        });
+        break;
+      }
+      state.efforts[chat] = level;
       agentSend({
         t: 'effort',
-        chat: String(frame.chat || ''),
-        level: frame.level || 'default',
-        effective: frame.level || 'default',
+        chat,
+        level,
+        effective: level === 'default' ? 'inherit' : level,
+        supported: ['low', 'medium', 'high', 'max'],
+        kind: 'budget',
+        model_key: 'mock:mock-1',
       });
       break;
-    case 'msg':
-      streamReply(String(frame.chat || ''));
+    }
+    case 'msg': {
+      // M27: the ChatSpec is created while the first message is processed,
+      // deliberately slower than the old 1.2 s re-apply timer.
+      const chat = String(frame.chat || '');
+      if (state.notCreated.has(chat)) {
+        setTimeout(() => state.notCreated.delete(chat), state.createDelay);
+      }
+      streamReply(chat);
       break;
+    }
     case 'stop': {
       const chat = String(frame.chat || '');
       const timer = state.streaming.get(chat);
@@ -2232,6 +2308,167 @@ async function runM26Checks(page, pass, mobile) {
 }
 
 // ---------------------------------------------------------------------------
+// M27 — thinking effort before the chat exists
+// ---------------------------------------------------------------------------
+
+async function activeEffortLabel(page) {
+  return page.evaluate(
+    () => (document.querySelector('.effort-opt.active') || {}).textContent || '',
+  );
+}
+
+async function toastText(page) {
+  return page.evaluate(
+    () => (document.querySelector('.toast') || {}).textContent || '',
+  );
+}
+
+/**
+ * The two paths from the field report, plus the one that must stay loud:
+ *
+ *  1. open the page on a chat that has never been sent to (its `ChatSpec`
+ *     does not exist, so `get_effort` answers 404): no error popup, the
+ *     saved level is still selected, and the first completed turn applies it;
+ *  2. a new chat where the level is chosen before the first message: silent,
+ *     then applied after that message;
+ *  3. an existing chat whose model rejects a level with 422: visible toast
+ *     and a rollback to the confirmed level (no global swallowing).
+ */
+async function runM27Checks(page, pass, mobile) {
+  const openDrawer = async () => {
+    if (!mobile) return;
+    if (await page.locator('.app.sidebar-open').count()) return;
+    await page.locator('.hamburger').click();
+    await sleep(350);
+  };
+
+  // ---- M27.1: restoring a chat that has never been sent to ---------------
+  resetState();
+  const fresh = 'chat-fresh';
+  // Listed so M19's stale-restored-chat check keeps it active; its thinking
+  // record is deliberately still missing (the 404 the plugin emits until the
+  // first turn creates the session).
+  state.chats.unshift({ chat: fresh, title: '未发送会话', updated_at: '2026-10-29T09:00:00Z' });
+  state.history[fresh] = [];
+  state.notCreated.add(fresh);
+  await page.evaluate(() => {
+    localStorage.setItem('webchannel.chats', JSON.stringify(['chat-fresh', 'chat-alpha']));
+    localStorage.setItem('webchannel.activeChat', 'chat-fresh');
+    localStorage.setItem('webchannel.chatNames', '{}');
+    localStorage.setItem('webchannel.pinnedChats', '[]');
+    localStorage.removeItem('webchannel.chatTags');
+    localStorage.setItem('webchannel.effort', JSON.stringify({ 'chat-fresh': 'high' }));
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  const restoredAsked = await waitUntil(() => state.effortGetLog.includes(fresh), 15000);
+  await sleep(600); // let the 404 reply land
+  const restoredToast = await toastText(page);
+  check(
+    `${pass}: restoring an unsent chat keeps its level without an error`,
+    restoredAsked && (await activeEffortLabel(page)) === '高' && !/思考等级/.test(restoredToast),
+    JSON.stringify({ asked: restoredAsked, toast: restoredToast }),
+  );
+
+  await page.locator('.composer textarea').fill('恢复后的第一条消息');
+  await page.keyboard.press('Enter');
+  const restoredApplied = await waitUntil(() => state.efforts[fresh] === 'high', 20000);
+  await sleep(200);
+  const restoredSent = state.effortLog.filter((item) => item.chat === fresh);
+  check(
+    `${pass}: the restored level is applied after the first turn`,
+    restoredApplied &&
+      restoredSent.length > 0 &&
+      restoredSent[restoredSent.length - 1].created,
+    JSON.stringify(restoredSent),
+  );
+  check(
+    `${pass}: applying a deferred level is silent`,
+    !/思考等级/.test(await toastText(page)),
+    await toastText(page),
+  );
+
+  // ---- M27.2: new chat — pick the level before the first message ---------
+  resetState();
+  await page.evaluate(() => {
+    localStorage.setItem('webchannel.chats', JSON.stringify(['chat-alpha']));
+    localStorage.setItem('webchannel.activeChat', 'chat-alpha');
+    localStorage.setItem('webchannel.chatNames', '{}');
+    localStorage.setItem('webchannel.pinnedChats', '[]');
+    localStorage.removeItem('webchannel.chatTags');
+    localStorage.removeItem('webchannel.effort');
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await waitForHistory(page);
+  await openDrawer();
+  await page.locator('.new-chat').click();
+  await sleep(300);
+  const newId = await page.evaluate(
+    () => localStorage.getItem('webchannel.activeChat') || '',
+  );
+  state.notCreated.add(newId);
+  await page.locator('.effort-opt', { hasText: /^高$/ }).click();
+  const pickLogged = await waitUntil(
+    () => state.effortLog.some((item) => item.chat === newId && item.level === 'high'),
+    15000,
+  );
+  await sleep(600);
+  const pickToast = await toastText(page);
+  check(
+    `${pass}: picking a level before the chat exists is silent and kept`,
+    Boolean(newId) &&
+      pickLogged &&
+      !/思考等级/.test(pickToast) &&
+      (await activeEffortLabel(page)) === '高',
+    JSON.stringify({ newId, pickLogged, toast: pickToast }),
+  );
+  check(
+    `${pass}: the pre-creation write really was a 404`,
+    state.effortLog.some((item) => item.chat === newId && !item.created),
+    JSON.stringify(state.effortLog.filter((item) => item.chat === newId)),
+  );
+
+  await page.locator('.composer textarea').fill('新会话的第一条消息');
+  await page.keyboard.press('Enter');
+  const newApplied = await waitUntil(() => state.efforts[newId] === 'high', 20000);
+  await sleep(200);
+  const attempts = state.effortLog.filter((item) => item.chat === newId);
+  check(
+    `${pass}: the pre-creation choice is applied after the first message`,
+    newApplied && attempts.length >= 2 && attempts[attempts.length - 1].created,
+    JSON.stringify({ newApplied, attempts }),
+  );
+  check(
+    `${pass}: the server-confirmed level matches the choice`,
+    (await activeEffortLabel(page)) === '高' && state.efforts[newId] === 'high',
+    `${await activeEffortLabel(page)} / ${state.efforts[newId]}`,
+  );
+  check(
+    `${pass}: the deferred apply is silent`,
+    !/思考等级/.test(await toastText(page)),
+    await toastText(page),
+  );
+
+  // ---- M27.3: a real rejection on an existing chat stays visible ---------
+  state.effortReject[newId] = 'max';
+  await page.locator('.effort-opt', { hasText: /^最大$/ }).click();
+  await page.waitForSelector('.toast', { timeout: 5000 }).catch(() => {});
+  const rejectToast = await toastText(page);
+  check(
+    `${pass}: a 422 on an existing chat is still reported`,
+    /思考等级未生效/.test(rejectToast) && /mock model rejects this level/.test(rejectToast),
+    rejectToast,
+  );
+  check(
+    `${pass}: a rejected level rolls back to the confirmed one`,
+    (await activeEffortLabel(page)) === '高',
+    await activeEffortLabel(page),
+  );
+
+  state.effortReject = {};
+  resetState();
+}
+
+// ---------------------------------------------------------------------------
 // M26 — sidebar evidence: BEFORE/AFTER screenshots + density
 // ---------------------------------------------------------------------------
 
@@ -2407,6 +2644,12 @@ async function runPass(browser, pass, viewport, mobile) {
     if (process.env.M26_ONLY === '1') {
       await runM26Checks(page, pass, mobile);
       await runM26Evidence(page, pass, mobile);
+      check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
+      return;
+    }
+
+    if (process.env.M27_ONLY === '1') {
+      await runM27Checks(page, pass, mobile);
       check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
       return;
     }
@@ -2886,6 +3129,9 @@ async function runPass(browser, pass, viewport, mobile) {
 
     // ---- 12. M26: sidebar evidence (BEFORE/AFTER shots + density) ---------
     await runM26Evidence(page, pass, mobile);
+
+    // ---- 13. M27: deferred thinking level (pre-creation 404) -------------
+    await runM27Checks(page, pass, mobile);
 
     check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
   } finally {

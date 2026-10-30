@@ -22,7 +22,7 @@ import logging
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -397,19 +397,30 @@ class WebChannel(BaseChannel):
         """Headers for the local QwenPaw API (selects the bound agent)."""
         return {"X-Agent-Id": self._agent_id()}
 
-    async def _resolve_chat_id(self, chat: str) -> Optional[str]:
-        """``ChatSpec.id`` backing this web chat, or None when it has none yet.
+    async def _resolve_chat_id_state(
+        self, chat: str,
+    ) -> Tuple[Optional[str], int, bool]:
+        """``(ChatSpec.id, status, readable)`` for this web chat (M27).
 
-        ``GET /api/chats`` answers every ``ChatSpec`` of the agent; the one for
-        this chat is the entry with ``channel == "web"`` whose ``session_id``
-        equals our own ``resolve_session_id(SENDER_ID, {chat_id: chat})``.
-        A chat is created by the manager on its first message, so a client that
-        asks for history before saying anything gets no id (empty history, not
-        an error). The id is cached per chat once found.
+        ``readable`` tells the two "no id" cases apart, which callers that
+        face the user must not conflate:
+
+        * ``(id, 200, True)`` — a spec was found;
+        * ``(None, 404, True)`` — ``GET /api/chats`` answered and this chat
+          simply has no spec yet (it is created by its first message). This
+          is an expected state, not a failure;
+        * ``(None, status, False)`` — the lookup itself failed (``status`` is
+          ``0`` when the app was unreachable, else the list call's HTTP
+          status; a 404 from the list endpoint lands here too, never in the
+          expected state above).
+
+        ``_resolve_chat_id`` keeps the old id-or-None contract for callers
+        that only branch on existence; the effort handlers use this one so a
+        broken ``/api/chats`` is never reported as "no chat yet".
         """
         cached = self._chat_ids.get(chat)
         if cached:
-            return cached
+            return cached, 200, True
 
         session_id = self.resolve_session_id(SENDER_ID, {"chat_id": chat})
         status, specs = await self._api_json(
@@ -420,10 +431,15 @@ class WebChannel(BaseChannel):
                 "webchannel: GET /api/chats failed for chat=%s: HTTP %s",
                 chat, status,
             )
-            return None
+            return None, status, False
 
         if not isinstance(specs, list):
-            specs = []
+            logger.warning(
+                "webchannel: GET /api/chats returned %s, expected a list",
+                type(specs).__name__,
+            )
+            return None, 0, False
+
         for spec in specs:
             if not isinstance(spec, dict):
                 continue
@@ -437,9 +453,22 @@ class WebChannel(BaseChannel):
                 logger.debug(
                     "webchannel: chat=%s -> ChatSpec.id=%s", chat, chat_id,
                 )
-                return str(chat_id)
+                return str(chat_id), 200, True
         logger.debug("webchannel: no ChatSpec yet for chat=%s", chat)
-        return None
+        return None, 404, True
+
+    async def _resolve_chat_id(self, chat: str) -> Optional[str]:
+        """``ChatSpec.id`` backing this web chat, or None when it has none yet.
+
+        ``GET /api/chats`` answers every ``ChatSpec`` of the agent; the one for
+        this chat is the entry with ``channel == "web"`` whose ``session_id``
+        equals our own ``resolve_session_id(SENDER_ID, {chat_id: chat})``.
+        A chat is created by the manager on its first message, so a client that
+        asks for history before saying anything gets no id (empty history, not
+        an error). The id is cached per chat once found.
+        """
+        chat_id, _status, _readable = await self._resolve_chat_id_state(chat)
+        return chat_id
 
     async def _get_history(self, chat_id: str) -> Optional[Dict[str, Any]]:
         """``ChatHistory`` for *chat_id* (``{messages: [...], status}``)."""
@@ -1202,6 +1231,41 @@ class WebChannel(BaseChannel):
             return "%s: app unreachable" % fallback
         return "%s (HTTP %s)" % (fallback, status)
 
+    @staticmethod
+    def _chat_lookup_detail(status):
+        """Reason for a failed ``GET /api/chats`` lookup (never a 404)."""
+        if status == 0:
+            return "chat list unavailable: app unreachable"
+        return "chat list unavailable (HTTP %s)" % status
+
+    async def _effort_chat_id(self, chat, req_id):
+        """``ChatSpec.id`` for an effort request, or None after answering.
+
+        A readable chat list without a spec is the expected pre-creation
+        state (``E_EFFORT`` with ``status: 404``). A failed lookup is a real
+        error and is never labeled 404, so the client can keep a 404 silent
+        without hiding an outage (M27).
+        """
+        chat_id, lookup, readable = await self._resolve_chat_id_state(chat)
+        if chat_id:
+            return chat_id
+        if readable and lookup == 404:
+            await self._effort_error(
+                chat,
+                "no QwenPaw chat exists for this session yet",
+                status=404,
+                req_id=req_id,
+            )
+            return None
+        reported = lookup if lookup not in (0, 404) else None
+        await self._effort_error(
+            chat,
+            self._chat_lookup_detail(lookup),
+            status=reported,
+            req_id=req_id,
+        )
+        return None
+
     async def _effort_error(self, chat, detail, status=None, req_id=None):
         """Send an ``E_EFFORT`` control frame; never raises.
 
@@ -1228,14 +1292,8 @@ class WebChannel(BaseChannel):
         chat = str(frame.get("chat") or "default")
         req_id = frame.get("id") if isinstance(frame.get("id"), str) else None
         try:
-            chat_id = await self._resolve_chat_id(chat)
+            chat_id = await self._effort_chat_id(chat, req_id)
             if not chat_id:
-                await self._effort_error(
-                    chat,
-                    "no QwenPaw chat exists for this session yet",
-                    status=404,
-                    req_id=req_id,
-                )
                 return
 
             status, payload = await self._api_json(
@@ -1286,14 +1344,8 @@ class WebChannel(BaseChannel):
             return
 
         try:
-            chat_id = await self._resolve_chat_id(chat)
+            chat_id = await self._effort_chat_id(chat, req_id)
             if not chat_id:
-                await self._effort_error(
-                    chat,
-                    "no QwenPaw chat exists for this session yet",
-                    status=404,
-                    req_id=req_id,
-                )
                 return
 
             path = "/api/chats/%s/thinking" % chat_id

@@ -209,7 +209,7 @@ Error frame: `{"t":"error","code":"...","id":"<offending frame id, if any>"}`.
 | `E_BADFRAME` | not JSON, not an object, missing/non-string `t`, binary message | drop frame; sender may fix and retry |
 | `E_RESYNC` | resume buffer miss | client reloads history |
 | `E_MODEL` | model list unavailable, unknown provider/model, or the app rejected the switch | client shows the error; the connection is unaffected |
-| `E_EFFORT` | thinking setting unavailable, unknown level, unsupported by the current model, or the app rejected the write | client restores the last confirmed level (except a 404: the chat has no server record yet); the connection is unaffected |
+| `E_EFFORT` | thinking setting unavailable, unknown level, unsupported by the current model, or the app rejected the write | client restores the last confirmed level and shows the error; a 404 is different: the chat has no server record yet, so the local choice is kept **without any error UI** and re-applied after the first completed turn (§10.2); the connection is unaffected |
 | `E_EXPORT` | export requested for a chat with no server record, or its history could not be read or rendered | client shows the error; the connection is unaffected |
 | `E_SEARCH` | search with an empty query, an archive that is not configured, or a Turso request that failed | client shows "search unavailable"; the connection is unaffected |
 
@@ -402,7 +402,10 @@ Agent → client:
 
 - `GET`/`PUT` use the chat's `ChatSpec.id`; the plugin resolves the web chat to that id first. A chat
   that has never received a message has no `ChatSpec` yet, so both requests answer
-  `E_EFFORT` with `status: 404`.
+  `E_EFFORT` with `status: 404`. A failed lookup (the plugin could not read `/api/chats`) is **not**
+  that state: it answers `E_EFFORT` with the lookup's HTTP status (or no `status` when the app is
+  unreachable) and a `chat list unavailable…` detail, so clients never mistake an outage for "the
+  chat does not exist yet".
 - `default` is always accepted: the plugin sends `{"level":"inherit"}`, which clears this session's
   override.
 - For any other level the plugin inspects `control` **before** writing:
@@ -418,7 +421,9 @@ Agent → client:
   preference/default, so clients MUST re-request `get_effort` after `model_changed`.
 - `E_EFFORT` carries `chat` and, when the local app produced an HTTP status, `status`; it echoes the
   request's optional envelope `id` (`effort-get` / `effort-set` in the SPA). A 404 is not a validation
-  failure: the client should keep its local selection and retry after the chat's first message.
+  failure: the client keeps its local selection **silently** and re-applies it once the chat's first
+  turn has completed (the point where the `ChatSpec` exists). Every other `E_EFFORT` for `set_effort`
+  is a real rejection and must stay visible to the user.
 
 ### 10.3 Control frames
 
