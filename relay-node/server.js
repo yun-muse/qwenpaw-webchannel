@@ -16,6 +16,14 @@ const REPLACED_CODE = 4000; // close code: agent slot replaced or hello supersed
 let agent = null;
 /** @type {{ started: number, session: string } | null} */
 let agentMeta = null;
+/**
+ * M39 presence: the last value broadcast to clients (`null` = never
+ * published). It mirrors "the slot is occupied" and is *not* rebuilt from
+ * anything — this relay has no hibernation, and a fresh process starts
+ * unknown, so the first client only relies on `ready{agentOnline}`.
+ * @type {boolean | null}
+ */
+let presence = null;
 /** @type {Set<import('ws').WebSocket>} */
 const clients = new Set();
 /** client -> agent frames buffered while the agent is offline */
@@ -34,6 +42,43 @@ const sendPong = (ws, frame) => {
 };
 const clientCount = () => clients.size;
 const notifyPeer = () => sendJson(agent, { t: 'peer', clients: clientCount() });
+
+/** Fan a pre-serialized frame out to every open client socket. */
+const broadcast = (text) => {
+  for (const client of clients) {
+    if (!isOpen(client)) continue;
+    try {
+      client.send(text);
+    } catch {
+      /* the close event drops it; a fan-out must never throw */
+    }
+  }
+};
+
+/**
+ * M39 presence: tell every client whether the agent slot is occupied.
+ *
+ * Called only from the two real transition points — a winning hello (after
+ * the offline buffer is flushed, so a client that reacts to "online" can
+ * never overtake the frames already waiting) and the holder's own
+ * close/error. A parked or superseded socket never reaches this function,
+ * and a slot that did not change (same-generation re-hello, a generation
+ * handover) emits nothing: clients must see edges, not a heartbeat.
+ */
+function publishPresence() {
+  const online = agent !== null;
+  if (presence === online) return;
+  presence = online;
+  broadcast(JSON.stringify({ t: 'status', agentOnline: online }));
+}
+
+/** Drop the slot holder (close or error); a non-holder is ignored. */
+function dropAgent(ws) {
+  if (agent !== ws) return;
+  agent = null;
+  agentMeta = null;
+  publishPresence();
+}
 
 /** Validate the envelope without looking at business fields. */
 function readFrame(raw, isBinary) {
@@ -111,24 +156,19 @@ function handleAgent(ws) {
 
       sendJson(ws, { t: 'peer', clients: clientCount() });
       flushOutbox();
+      // M39: after the buffer is out, before the winner hears `ready`.
+      publishPresence();
       sendJson(ws, { t: 'ready', agentOnline: true });
       return;
     }
 
     if (ws !== agent) return;
 
-    for (const client of clients) {
-      if (isOpen(client)) client.send(text);
-    }
+    broadcast(text);
   });
 
-  ws.on('close', () => {
-    if (agent === ws) {
-      agent = null;
-      agentMeta = null;
-    }
-  });
-  ws.on('error', () => {});
+  ws.on('close', () => dropAgent(ws));
+  ws.on('error', () => dropAgent(ws));
 }
 
 function handleClient(ws) {

@@ -147,8 +147,24 @@ instance owns the slot.
 - Agent frames are broadcast to all clients; client frames go to the agent.
 - A new client gets `{"t":"ready","agentOnline":<bool>}`. The agent gets
   `{"t":"peer","clients":<n>}` on winning the slot and whenever a client joins
-  or leaves. Clients are **not** told when the agent drops (same as
-  relay-node).
+  or leaves. Clients are told about **slot transitions** with
+  `{"t":"status","agentOnline":<bool>}` (M39, below).
+
+### Agent presence (M39)
+
+The DO broadcasts `{"t":"status","agentOnline":true}` after a winning `hello`
+(once the offline buffer has been flushed, just before the winner's `ready`)
+and `{"t":"status","agentOnline":false}` when the **holder's** socket closes
+or errors. It is an edge, not a beat: no frame is sent when the value did not
+change, so a generation handover, a re-hello or a same-value event is silent.
+A parked or superseded socket never triggers it — it never held the slot.
+
+"Offline" uses the same death points as `/health` and the offline buffer: the
+holder's `close`/`error` (and, in practice, the plugin's own `hb` timeout
+closing the socket). The DO adds no heartbeat timeout and no grace period; see
+`protocol/frames.md` §16 for why a delayed "offline" is worse than a fast flip.
+The frame is also the one the plugin uses for its identity push (`agent_name`,
+no `agentOnline`), so a client must key on the field.
 
 ### `ping` and `hb`
 

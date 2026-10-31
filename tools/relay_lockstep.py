@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""M38 — code-level lockstep check for the two relay implementations.
+"""M38/M39 — code-level lockstep check for the two relay implementations.
 
 `relay-cf` (production Durable Object) and `relay-node` (local dev) must agree
-on the two rules that used to break the channel silently:
+on the rules that used to break the channel silently:
 
   * M7.3 heartbeat — `hb` is acked by the relay process itself, only for the
     socket that owns the agent slot, never forwarded, and costs no rate-limit
@@ -10,6 +10,10 @@ on the two rules that used to break the channel silently:
   * M7.1 slot generations — the slot changes hands at `hello` time by
     `started`; an older hello is closed with 4000 and never evicts the holder,
     and nothing evicts at WebSocket-upgrade time.
+  * M39 presence — the slot holder's edge is broadcast to clients as
+    `{t:"status", agentOnline}`: online after a winning hello (buffer already
+    flushed), offline only when the holder itself goes away, never from the
+    parked/superseded path, and only on a real change (edges, not a beat).
 
 The two files are different languages in different shapes, so this is not a
 textual diff: each rule is a normalized-snippet assertion that must match both
@@ -30,8 +34,15 @@ NODE = ROOT / "relay-node" / "server.js"
 
 
 def normalize(source: str) -> str:
-    """Strip the noise that only reflects each implementation's shape."""
+    """Strip the noise that only reflects each implementation's shape.
+
+    Comments go first: they are the one place where the two files are allowed
+    to explain themselves differently without failing a rule. `://` in a URL
+    literal is not a comment (the lookbehind keeps it).
+    """
     text = source
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    text = re.sub(r"(?<!:)//[^\n]*", "", text)
     text = text.replace("this.", "")
     text = text.replace("await ", "")
     text = text.replace("agentMeta?.started ?? 0", "agentMeta.started")
@@ -96,14 +107,64 @@ def main() -> int:
 
     # ---- hello win order -------------------------------------------------
     # cf awaits flushOutbox() between peer and ready; normalization removed the
-    # `await`, so both must now read exactly `peer; flushOutbox(); ready;`.
+    # `await`, so both must now read exactly
+    # `peer; flushOutbox(); publishPresence(); ready;`. The presence edge is
+    # deliberately after the buffer flush: a client that reacts to "online" by
+    # sending must not overtake the frames already waiting for this agent.
     win_order = (
-        r"sendJson\(ws, \{ t: 'peer',[^;]*\); flushOutbox\(\); "
+        r"sendJson\(ws, \{ t: 'peer',[^;]*\); flushOutbox\(\); publishPresence\(\); "
         r"sendJson\(ws, \{ t: 'ready', agentOnline: true \}\);"
     )
     cf_order = find(win_order, cf)
     node_order = find(win_order, node)
-    check("hello win order is peer -> flushOutbox -> ready", bool(cf_order and node_order), (cf_order or "no match")[:90])
+    check("hello win order is peer -> flushOutbox -> presence -> ready", bool(cf_order and node_order), (cf_order or "no match")[:110])
+
+    # ---- M39 presence ----------------------------------------------------
+    # One helper per file, same body after normalization: change-gated edge,
+    # serialized `{t:"status",agentOnline}`, fanned out to clients only.
+    presence_helper = (
+        r"const online = agent !== null; if \(presence === online\) return; "
+        r"presence = online; broadcast\(JSON\.stringify\(\{ t: 'status', agentOnline: online \}\)\);"
+    )
+    cf_presence, node_presence = find(presence_helper, cf), find(presence_helper, node)
+    check(
+        "presence: one change-gated status broadcast helper in both",
+        bool(cf_presence and node_presence),
+        (cf_presence or "no match")[:110],
+    )
+
+    check(
+        "cf: presence offline only from the holder branch",
+        bool(find(
+            r"if \(ws === agent\) \{ agent = null; agentMeta = null; "
+            r"agentLastSeenAt = 0; publishPresence\(\); return; \}",
+            cf,
+        )),
+    )
+    check(
+        "node: presence offline only from the holder branch",
+        bool(find(r"if \(agent !== ws\) return; agent = null; agentMeta = null; publishPresence\(\);", node)),
+    )
+
+    # A superseded hello is closed 4000 and returns: that socket never held the
+    # slot, so its departure is not an edge. 200 normalized chars is the whole
+    # branch; the next publishPresence() is much further down the win path.
+    for label, text, anchor in (
+        ("cf", cf, "close(REPLACED_CODE, SUPERSEDED_REASON)"),
+        ("node", node, "close(REPLACED_CODE, 'superseded by newer agent connection')"),
+    ):
+        at = text.find(anchor)
+        check(
+            f"{label}: a superseded hello never publishes presence",
+            at != -1 and "publishPresence" not in text[at : at + 200],
+        )
+
+    check(
+        "presence: fanned out to clients, never to the agent",
+        bool(find(r"for \(const client of (?:Array\.from\(clients\)|clients)\)", cf))
+        and bool(find(r"for \(const client of (?:Array\.from\(clients\)|clients)\)", node)),
+        "broadcast() iterates the client set in both",
+    )
 
     failed = [r for r in results if not r[1]]
     print(f"\nchecks: {len(results)}, failed: {len(failed)}")

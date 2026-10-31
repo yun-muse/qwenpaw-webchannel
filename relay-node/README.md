@@ -57,6 +57,11 @@ If your shell sets `HTTP_PROXY`, add `--noproxy '*'` so curl talks to localhost 
   `relay-cf`.
 - A new client gets `{"t":"ready","agentOnline":<bool>}`. The agent gets
   `{"t":"peer","clients":<n>}` on winning the slot and whenever a client joins or leaves.
+- **M39 presence.** Clients are told about slot transitions with
+  `{"t":"status","agentOnline":<bool>}`: `true` after a winning `hello` (once the offline buffer is
+  flushed), `false` when the holder's socket closes or errors. Only real edges are sent, and a
+  parked or superseded socket never triggers one. Lockstep with `relay-cf`; semantics in
+  `protocol/frames.md` §16.
 - While the agent is offline, client→agent frames are buffered in memory (max **500 frames /
   1 MB**, oldest dropped first) and flushed in order on agent reconnect.
 - Rate limiting (30 frames/s per tenant, see `protocol/frames.md`) is specified for the hosted

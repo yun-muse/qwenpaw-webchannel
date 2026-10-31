@@ -123,10 +123,21 @@ async function main() {
 
     // 2. client connects -> ready{agentOnline:true}; agent sees peer{clients:1}
     client = await connect(CLIENT_URL);
+    // M39: every presence edge the client is told about, in order.
+    const presence = [];
+    client.on('message', (raw) => {
+      const frame = JSON.parse(raw.toString());
+      if (frame.t === 'status' && typeof frame.agentOnline === 'boolean') {
+        presence.push(frame.agentOnline);
+      }
+    });
     const ready = await waitFor(client, (f) => f.t === 'ready', 'client ready frame');
     check(ready.agentOnline === true, 'client ready should say agentOnline=true');
     const peer = await waitFor(agent, (f) => f.t === 'peer', 'peer after client join');
     check(peer.clients === 1, `expected 1 client, got ${peer.clients}`);
+    // Joining is not a slot edge: `ready` carries the snapshot, nothing is broadcast.
+    await sleep(120);
+    check(presence.length === 0, `client join must not broadcast presence, got ${JSON.stringify(presence)}`);
 
     // 3. client -> agent
     client.send(JSON.stringify({ t: 'msg', chat: 'c1', text: 'hi' }));
@@ -156,6 +167,8 @@ async function main() {
     // 5. offline buffering: client frame waits for the agent and is flushed in order
     agent.close();
     await waitHealth((h) => h.agentOnline === false, 'agent disconnect');
+    // M39: the holder left -> exactly one offline edge.
+    await waitUntil(() => presence.length === 1 && presence[0] === false, 'offline presence frame');
     client.send(JSON.stringify({ t: 'msg', chat: 'c1', text: 'buffered' }));
 
     agent = await connect(AGENT_URL, { headers: { Authorization: 'Bearer dev-agent-token' } });
@@ -166,6 +179,8 @@ async function main() {
       'buffered msg replay after agent reconnect',
     );
     check(replayed.chat === 'c1', 'buffered msg lost chat field');
+    // ...and coming back is exactly one online edge, after the flush.
+    await waitUntil(() => presence.length === 2 && presence[1] === true, 'online presence frame after reconnect');
 
     // 6. generation gating: older hellos are refused, newer ones take the slot
     const stale = await connect(AGENT_URL, { headers: { Authorization: 'Bearer dev-agent-token' } });
@@ -174,6 +189,9 @@ async function main() {
     check((await staleClosed) === 4000, 'stale agent hello should be closed with code 4000');
     check((await waitHealth((h) => h.agentOnline === true, 'agent online after stale hello')).agentOnline === true,
       'health should still report agentOnline=true after a stale hello');
+    // M39: a parked socket was never the holder, so its close is not an edge.
+    await sleep(150);
+    check(presence.length === 2, `a superseded hello must not broadcast presence, got ${JSON.stringify(presence)}`);
 
     agent.send(JSON.stringify({ t: 'evt', chat: 'c1', seq: 99, data: 'y' }));
     const undisturbed = await waitFor(
@@ -197,6 +215,35 @@ async function main() {
       'newer agent to receive client msg',
     );
     check(routed.text === 'after-newer', 'newer agent got wrong msg payload');
+    // M39: the slot never appeared empty during the handover -> still two edges.
+    await sleep(150);
+    check(presence.length === 2, `a generation handover must not broadcast presence, got ${JSON.stringify(presence)}`);
+
+    // 7. M39 presence edges -------------------------------------------------
+    // A parked socket (connected, never hello) is not the holder: its close is silent.
+    const parked = await connect(AGENT_URL, { headers: { Authorization: 'Bearer dev-agent-token' } });
+    parked.close();
+    await sleep(200);
+    check(presence.length === 2, `a parked socket must not broadcast presence, got ${JSON.stringify(presence)}`);
+
+    // The holder leaves -> exactly one offline edge, and no repeat on a second
+    // close event for the same socket.
+    agent.close();
+    await waitUntil(() => presence.length === 3 && presence[2] === false, 'offline presence for the holder');
+    await sleep(200);
+    check(presence.length === 3, `the holder's close must broadcast exactly once, got ${JSON.stringify(presence)}`);
+
+    // Returning -> one online edge; a re-hello on the same socket -> none.
+    agent = await connect(AGENT_URL, { headers: { Authorization: 'Bearer dev-agent-token' } });
+    hello(agent, 4000, 'smoke-a3');
+    await waitUntil(() => presence.length === 4 && presence[3] === true, 'online presence after the holder returns');
+    hello(agent, 4000, 'smoke-a3');
+    await sleep(250);
+    check(presence.length === 4, `a re-hello must not broadcast presence, got ${JSON.stringify(presence)}`);
+    check(
+      (await waitHealth((h) => h.agentOnline === true, 'agent online at the end')).agentOnline === true,
+      'health should report agentOnline=true after the presence run',
+    );
 
     if (stale.readyState === WebSocket.OPEN) stale.close();
 

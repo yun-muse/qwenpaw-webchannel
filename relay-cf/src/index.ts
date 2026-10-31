@@ -212,6 +212,13 @@ export class RelayDO extends DurableObject {
   private agentLastSeenAt = 0;
   /** Every connected browser socket. */
   private clients = new Set<WebSocket>();
+  /**
+   * M39 presence: the last value broadcast to clients (`null` = never
+   * published). Mirrors "the slot is occupied"; rebuilt from the winning
+   * attachment after hibernation *without* broadcasting, because the object
+   * has no memory of what each surviving client was last told.
+   */
+  private presence: boolean | null = null;
 
   /** Offline buffer: client→agent frames, cached copy of storage["outbox"]. */
   private outbox: string[] = [];
@@ -254,6 +261,9 @@ export class RelayDO extends DurableObject {
         this.agent = winner.socket;
         this.agentMeta = { started: winner.started, session: winner.session };
       }
+      // No broadcast here: a rebuilt object cannot know what the surviving
+      // clients were last told, and nothing has *changed* during this wake.
+      this.presence = this.agent !== null;
     });
   }
 
@@ -370,6 +380,9 @@ export class RelayDO extends DurableObject {
       if (attachment?.role === 'agent' && attachment.won !== false) {
         this.agent = ws;
         this.agentMeta = { started: attachment.started ?? 0, session: attachment.session ?? '' };
+        // M39: a genuine empty -> occupied transition (the rebuilt object
+        // found no winner, then a still-marked winner spoke).
+        this.publishPresence();
       }
     }
 
@@ -441,6 +454,8 @@ export class RelayDO extends DurableObject {
 
     this.sendJson(ws, { t: 'peer', clients: this.clients.size });
     await this.flushOutbox();
+    // M39: after the buffer is out, before the winner hears `ready`.
+    this.publishPresence();
     this.sendJson(ws, { t: 'ready', agentOnline: true });
   }
 
@@ -504,12 +519,32 @@ export class RelayDO extends DurableObject {
     for (const client of Array.from(this.clients)) this.sendText(client, text);
   }
 
+  /**
+   * M39 presence: tell every client whether the agent slot is occupied.
+   *
+   * Called only from the two real transition points — a winning hello (after
+   * the offline buffer is flushed, so a client that reacts to "online" can
+   * never overtake the frames already waiting) and the holder's own
+   * close/error. A parked or superseded socket never reaches this method,
+   * and a slot that did not change (re-hello, generation handover) emits
+   * nothing: clients must see edges, not a heartbeat.
+   */
+  private publishPresence(): void {
+    const online = this.agent !== null;
+    if (this.presence === online) return;
+    this.presence = online;
+    this.broadcast(JSON.stringify({ t: 'status', agentOnline: online }));
+  }
+
   /** Remove a dead/closed socket. Clients notify the agent; the agent does not. */
   private forget(ws: WebSocket): void {
     if (ws === this.agent) {
       this.agent = null;
       this.agentMeta = null;
       this.agentLastSeenAt = 0;
+      // M39: the holder is gone; a socket that lost the slot earlier does not
+      // land here (the winner was adopted before its close was delivered).
+      this.publishPresence();
       return;
     }
     if (this.clients.delete(ws)) this.notifyPeer();

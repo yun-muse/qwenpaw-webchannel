@@ -22,7 +22,7 @@
 - **心跳自愈**：`hb` / `hb_ack` 端到端探测（15 s 一次、10 s 未回、连续 2 次失败重连），配合连接阶段监管和退避重连；只有 close 4000、`E_AUTH`、HTTP 401/403 或显式 `stop()` 才终止。
 - **附件（10 MB 分块 + 历史回看）**：`file_begin` / `file_chunk` / `file_end`，96 KB 一片、sha256 校验、10 分钟暂存；成功后用 `{"ref": id}` 引用。图片以 `FileContent` + `ImageContent` 双 part 交给多模态模型，`hist.messages[].files` 带名称/类型/大小（按 URL 去重、纯附件轮次保留），历史里的缩略图与下载走 `att_get` → `att_begin` / `att_chunk` / `att_end`（opaque ref、10 MB 上限、media_dir 路径守卫）。单条消息最多 10 个附件、合计 10 MB（M31、M35）。
 - **数学公式**：行内 `$…$` 与行级 `$$…$$` 由标记扩展解析成惰性占位符，KaTeX 只懒加载一次；代码块/行内代码内不解析、未闭合的公式退回纯文本、`$5 and $10` 这类货币写法有专门守卫（M36）。
-- **离线队列与草稿**：浏览器能观测到的离线（socket 不在 `live`，或 `ready` 明确说 agent 离线）里点发送会进入每会话 FIFO 队列（`webchannel.outbox`，每会话 20 条 / 全局 100 条），重连且 agent 在线后按序走同一条 `msg` 路径发出；已经写进 socket 的条目**永不自动重发**，靠历史尾部核对确认送达，其余标“未确认”交给用户重试。带附件的消息离线时明确拒绝排队（暂存 10 分钟会过期），草稿（`webchannel.drafts`）则是“还没发”，两者互不混用（M22、M37）。
+- **离线队列与草稿**：浏览器能观测到的离线（socket 不在 `live`、`ready` 明确说 agent 离线，或中继广播的 `status{agentOnline:false}`）里点发送会进入每会话 FIFO 队列（`webchannel.outbox`，每会话 20 条 / 全局 100 条），重连且 agent 在线后按序走同一条 `msg` 路径发出；已经写进 socket 的条目**永不自动重发**，靠历史尾部核对确认送达，其余标“未确认”交给用户重试。带附件的消息离线时明确拒绝排队（暂存 10 分钟会过期），草稿（`webchannel.drafts`）则是“还没发”，两者互不混用（M22、M37、M39）。
 
 ## 架构
 
@@ -47,7 +47,7 @@ flowchart LR
 | [`relay-cf/`](relay-cf/README.md) | 生产 relay：Cloudflare Worker + Durable Object（TypeScript） |
 | [`relay-node/`](relay-node/README.md) | 本地开发 relay（Node.js，仅依赖 `ws`），协议行为与 `relay-cf` 对齐；不做客户端鉴权和限流 |
 | [`spa/`](spa/README.md) | 浏览器前端：React 18 + TypeScript + Vite 5，含 PWA 与移动端布局 |
-| [`protocol/`](protocol/frames.md) | 帧协议：信封 v1，累加修订到 v10 |
+| [`protocol/`](protocol/frames.md) | 帧协议：信封 v1，累加修订到 v11 |
 | [`docs/`](docs/README.md) | 设计文档、部署记录与各里程碑报告 |
 | [`mock/`](mock/README.md) | 假 agent，用于在没有 QwenPaw 的情况下跑通本地链路 |
 | `tools/` | `package_plugin.sh`（可复现 ZIP）、`verify_release.py`（线上发布一致性）、`relay_lockstep.py`（两个 relay 的规则对齐）、`live_spa_probe.mjs`（线上首访行为）、`turso_history.py`（归档回读）、`soak_probe.mjs`（生产探活）、`oc_prompt.py` |
@@ -99,7 +99,7 @@ flowchart LR
 
 ## 协议
 
-[`protocol/frames.md`](protocol/frames.md)：一条 WebSocket 文本消息一个 JSON 对象，必填字符串 `t`，未知字段和未知 `t` 必须忽略。当前是**信封 v1 + 累加修订到 v10**：
+[`protocol/frames.md`](protocol/frames.md)：一条 WebSocket 文本消息一个 JSON 对象，必填字符串 `t`，未知字段和未知 `t` 必须忽略。当前是**信封 v1 + 累加修订到 v11**：
 
 | 版本 | 内容 |
 |---|---|
@@ -112,6 +112,7 @@ flowchart LR
 | v7 | Turso 归档全文搜索 |
 | v9 | 全会话用量看板（含缓存与按模型明细） |
 | v10 | 附件的 `hist.files` 投影、`att_*` 回取与 `models.vision` |
+| v11 | `status{agentOnline}` presence：中继在 agent 槽位变化时向浏览器广播上下线 |
 
 `models` / `model_changed` / `status` / `effort` / `usage` / `stats` / `export_*` / `search_results` / `att_*` 是**控制帧**：没有 `seq`、不进环形缓冲、不在 `resume` 时重放。
 

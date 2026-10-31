@@ -61,7 +61,7 @@ M8 – M15 没有单独的 `*-report.md`。这些能力直接记录在协议文�
 | M25 | 批量导出（进度/取消/失败计数/100 上限）；fork 探测后跳过；e2e 固定 UTF-8 locale | `spa/src/lib/bulkExport.ts`、`tests/e2e_m19.mjs` |
 | M26 | 侧栏重构：单行会话、⋯ 菜单、移动端底部弹层、密度目标 | `spa/src/App.tsx`、`spa/src/App.css` |
 
-## M27 – M38
+## M27 – M39
 
 | 里程碑 | 文档 | 主题 |
 |---|---|---|
@@ -77,5 +77,6 @@ M8 – M15 没有单独的 `*-report.md`。这些能力直接记录在协议文�
 | M36 | [`m36-report.md`](m36-report.md) | 数学公式：KaTeX 懒加载、占位符水合、代码豁免与货币守卫、woff2 单格式 |
 | M37 | [`m37-report.md`](m37-report.md) | 离线 outbox：只在浏览器可观测的离线入队，永不自动重发已写 socket 的条目 |
 | M38 | [`m38-report.md`](m38-report.md) | 生产验收扫荡（版本/中继/功能/卫生）+ 文档收尾 |
+| M39 | [`m39-report.md`](m39-report.md) | agent presence：中继在槽位变化时广播 `status{agentOnline}`，SPA 页眉与 outbox 接入（协议 v11） |
 
 进度与验证记录还可以看仓库根目录的 `AGENTS.md`（只记非显然的约定和教训）以及 `tasks/` 下的任务书。

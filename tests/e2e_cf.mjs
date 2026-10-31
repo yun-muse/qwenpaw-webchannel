@@ -14,6 +14,9 @@
 //  8. GET /poll -> 501 (documented deferral), GET /health -> 200.
 //  9. GENERATION: a stale hello (older `started`) is closed with 4000 and does
 //     not disturb the current agent (still reachable, /health agentOnline:true).
+// 10. PRESENCE (M39): the holder leaving broadcasts exactly one
+//     {t:"status",agentOnline:false}; coming back broadcasts one `true`; a
+//     parked socket, a superseded hello and a generation handover are silent.
 import { createRequire } from 'node:module';
 import { readFileSync, writeFileSync } from 'node:fs';
 
@@ -290,10 +293,78 @@ async function main() {
     `staleClose=${staleClose.code} agentOnline=${healthAfterStale.agentOnline} probe=${probe ? JSON.stringify(probe.text) : 'missing'}`);
   must('GENERATION');
 
-  client.close();
-  agent2.close();
+  // -- 10. presence (M39) -------------------------------------------------------
+  // One offline edge, one online edge, and silence for everything that never
+  // changes the slot. Edges are counted from `client.frames` so a duplicate
+  // frame fails the check even when the value is right.
+  const presenceSince = (from) =>
+    client.frames.slice(from)
+      .filter((f) => f.t === 'status' && typeof f.agentOnline === 'boolean')
+      .map((f) => String(f.agentOnline));
 
-  const mandatory = ['LOGIN', 'AUTH-REJECT', 'PAIRING', 'STREAM-ORDER', 'E_TOOBIG', 'OFFLINE-BUFFER', 'RATE-LIMIT', 'GENERATION'];
+  await sleep(1200); // refill the bucket: agent2's hello burst is over
+  const offlineMark = client.frames.length;
+  agent2.close();
+  await client.waitFor((f) => f.t === 'status' && f.agentOnline === false, 5000);
+  const offlineHealth = await (await fetch(`${BASE}/health`)).json();
+  await sleep(300);
+  verdict('PRESENCE-OFFLINE',
+    offlineHealth.agentOnline === false && presenceSince(offlineMark).join(',') === 'false',
+    `health=${JSON.stringify(offlineHealth)} edges=${presenceSince(offlineMark).join(',')}`);
+  must('PRESENCE-OFFLINE');
+
+  // A socket that connects but never helloes is parked; leaving is not an edge.
+  const parked = await connect(agentUrl, agentHeaders);
+  const parkedMark = client.frames.length;
+  parked.close();
+  await sleep(400);
+  verdict('PRESENCE-PARKED-SILENT', presenceSince(parkedMark).length === 0,
+    `edges=${presenceSince(parkedMark).join(',')}`);
+  must('PRESENCE-PARKED-SILENT');
+
+  // Coming back: exactly one online edge, emitted at the winning hello.
+  const onlineMark = client.frames.length;
+  const agent3 = await connect(agentUrl, agentHeaders);
+  agent3.send({ t: 'hello', instance: 'e2e-cf', agent: 'default', started: 10, session: 'e2e-cf-3' });
+  await client.waitFor((f) => f.t === 'status' && f.agentOnline === true, 5000);
+  await sleep(300);
+  verdict('PRESENCE-ONLINE', presenceSince(onlineMark).join(',') === 'true',
+    `edges=${presenceSince(onlineMark).join(',')}`);
+  must('PRESENCE-ONLINE');
+
+  // A superseded hello while somebody holds the slot: 4000 to the newcomer,
+  // nothing to the clients (it never held the slot).
+  const supersededMark = client.frames.length;
+  const stale2 = await connect(agentUrl, agentHeaders);
+  stale2.send({ t: 'hello', instance: 'e2e-cf', agent: 'default', started: 1, session: 'stale-2' });
+  const supersededClose = await stale2.waitForClose().catch(() => ({ code: 0 }));
+  await sleep(400);
+  verdict('PRESENCE-SUPERSEDED-SILENT',
+    supersededClose.code === 4000 && presenceSince(supersededMark).length === 0,
+    `close=${supersededClose.code} edges=${presenceSince(supersededMark).join(',')}`);
+  must('PRESENCE-SUPERSEDED-SILENT');
+
+  // A newer generation takes the slot: the old holder is closed with 4000, but
+  // the slot never looked empty, so clients see no edge at all.
+  const handoverMark = client.frames.length;
+  const agent4 = await connect(agentUrl, agentHeaders);
+  agent4.send({ t: 'hello', instance: 'e2e-cf', agent: 'default', started: 20, session: 'e2e-cf-4' });
+  await agent4.waitFor((f) => f.t === 'ready');
+  const oldClosed = await agent3.waitForClose().catch(() => ({ code: 0 }));
+  await sleep(400);
+  verdict('PRESENCE-HANDOVER-SILENT',
+    oldClosed.code === 4000 && presenceSince(handoverMark).length === 0,
+    `oldClose=${oldClosed.code} edges=${presenceSince(handoverMark).join(',')}`);
+  must('PRESENCE-HANDOVER-SILENT');
+
+  const healthFinal = await (await fetch(`${BASE}/health`)).json();
+  verdict('PRESENCE-HEALTH', healthFinal.agentOnline === true, JSON.stringify(healthFinal));
+
+  client.close();
+  agent4.close();
+
+  const mandatory = ['LOGIN', 'AUTH-REJECT', 'PAIRING', 'STREAM-ORDER', 'E_TOOBIG', 'OFFLINE-BUFFER', 'RATE-LIMIT', 'GENERATION',
+    'PRESENCE-OFFLINE', 'PRESENCE-PARKED-SILENT', 'PRESENCE-ONLINE', 'PRESENCE-SUPERSEDED-SILENT', 'PRESENCE-HANDOVER-SILENT'];
   const failed = mandatory.filter((n) => !results[n]);
   console.log(failed.length === 0 ? 'E2E_CF PASS' : `E2E_CF FAIL (${failed.join(', ')})`);
   process.exit(failed.length === 0 ? 0 : 1);

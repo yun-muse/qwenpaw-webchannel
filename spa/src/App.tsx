@@ -2299,9 +2299,9 @@ export default function App() {
   const outboxRef = useRef<OutboxEntry[]>(outbox);
   const connRef = useRef<ConnState>('idle');
   /**
-   * The relay never tells a browser that the agent went away; the only
-   * trustworthy "agent is up" signals are the `ready` handshake and a `status`
-   * push from the agent itself (M37, docs/m37-report.md).
+   * Browser-visible proof that an agent can take work: the `ready` handshake,
+   * the plugin's own `status` push, and (M39) the relay's presence frame on a
+   * slot transition. A live socket alone is not proof — see docs/m39-report.md.
    */
   const agentOnlineRef = useRef(false);
   const outboxReconcile = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -3974,14 +3974,26 @@ export default function App() {
         }
 
         case 'status': {
-          // M37: the plugin pushes `status` when it attaches (channel.py's
-          // `ready`/`peer` handler). It is the only browser-visible proof
-          // that an offline agent is back, so it also opens the outbox.
-          if (!agentOnlineRef.current) {
-            agentOnlineRef.current = true;
-            setAgentOnline(true);
+          // M7: the plugin pushes `status` when it attaches (channel.py's
+          // `ready`/`peer` handler). M39: the relay broadcasts the same frame
+          // type on agent-slot transitions, marked by an `agentOnline`
+          // boolean, so the header no longer keeps a stale 在线 while a live
+          // socket has no agent behind it.
+          const presence = typeof frame.agentOnline === 'boolean' ? frame.agentOnline : true;
+          if (presence) {
+            if (!agentOnlineRef.current) {
+              agentOnlineRef.current = true;
+              setAgentOnline(true);
+            }
+            // Coming back online is the moment queued messages go out; the
+            // plugin's identity push (no `agentOnline`) is the other proof.
+            // A no-op when nothing is queued.
             flushOutbox();
+          } else if (agentOnlineRef.current) {
+            agentOnlineRef.current = false;
+            setAgentOnline(false);
           }
+          if (!presence) break;
           const name = asString(frame.agent_name);
           if (name) setAgentName(name);
           const provider = asString(frame.provider);

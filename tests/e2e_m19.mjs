@@ -695,20 +695,25 @@ function handleAgentFrame(frame) {
   }
 }
 
-function connectAgent() {
+function connectAgent({ statusDelayMs = 0 } = {}) {
   return new Promise((resolveP, rejectP) => {
     const ws = new WebSocket(`ws://127.0.0.1:${RELAY_PORT}/ws/agent`, {
       headers: { Authorization: 'Bearer dev-agent-token' },
     });
     const timer = setTimeout(() => rejectP(new Error('mock agent connect timeout')), 8000);
+    const sendStatus = () => {
+      if (ws.readyState !== 1) return;
+      // M39: the real plugin pushes `status` right after the relay's `ready`
+      // (plugin/channel.py:645-647). A caller can delay it to prove the SPA
+      // reacts to the relay's presence edge instead.
+      ws.send(JSON.stringify({ t: 'status', agent_name: 'mock-agent' }));
+    };
     ws.on('open', () => {
       clearTimeout(timer);
       ws.send(JSON.stringify({ t: 'hello', started: Date.now(), session: 'm19-mock' }));
       agent = ws;
-      // M37: the real plugin pushes `status` right after the relay's `ready`
-      // (plugin/channel.py:645-647). It is the only browser-visible proof
-      // that an offline agent is back, so the mock must do it too.
-      ws.send(JSON.stringify({ t: 'status', agent_name: 'mock-agent' }));
+      if (statusDelayMs > 0) setTimeout(sendStatus, statusDelayMs);
+      else sendStatus();
       resolveP();
     });
     ws.on('message', (raw) => {
@@ -4146,38 +4151,31 @@ async function runM37Checks(page, pass, mobile) {
     String(after.stored).slice(0, 200),
   );
 
-  // ---- 5. connected but agent offline (plugin restart window) -----------
-  // The two replies must be finished first: a dead agent can never send `end`,
-  // and the composer would be stuck on 停止.
+  // ---- 5. the agent leaves behind a live socket: presence ----------------
+  // M39 replaces the old M37 gap (the header kept 在线 until a reconnect):
+  // the relay broadcasts the slot edge, so the SPA knows before it writes
+  // anything. The two replies must be finished first: a dead agent can never
+  // send `end`, and the composer would be stuck on 停止.
   await waitUntil(() => !state.streaming.has('chat-alpha'), 20000);
   await disconnectMockAgent();
-  await sleep(600);
-  const stale = await snap();
-  // Documented gap (docs/m37-report.md): the relay tells only the *agent* when
-  // the other side goes away, so a browser with a live socket keeps its last
-  // `ready` value. Nothing may treat that as proof the agent is there.
+  const flipped = await waitUntil(async () => {
+    const labels = (await snap()).labels;
+    return labels[0] === '已连接' && labels[1] === 'Agent 离线';
+  }, 6000);
   check(
-    `${pass}: M37 a dead agent behind a live socket stays invisible (stale 在线)`,
-    stale.labels[0] === '已连接' && stale.labels[1] === 'Agent 在线',
-    JSON.stringify(stale.labels),
+    `${pass}: M39 the agent leaving behind a live socket flips the header to Agent 离线`,
+    flipped,
+    JSON.stringify((await snap()).labels),
   );
 
-  // The observable form of "agent offline" is the handshake: reconnect while
-  // it is down, and `ready{agentOnline:false}` is authoritative.
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await sleep(1200);
-  const offlineReady = await snap();
-  check(
-    `${pass}: M37 a reconnect while the agent is down reports Agent 离线`,
-    offlineReady.labels[0] === '已连接' && offlineReady.labels[1] === 'Agent 离线',
-    JSON.stringify(offlineReady.labels),
-  );
-
+  // Same flag, same decision: a send now queues instead of being written to a
+  // live socket whose peer is gone (that is the M37 "sent but unconfirmed"
+  // path, which must not be the first thing a user sees any more).
   const off = `M37 离线入队-${pass}`;
   await sendText(off);
   const queuedOffline = await snap();
   check(
-    `${pass}: M37 sending while the agent is offline queues instead of faking delivery`,
+    `${pass}: M39 a send after the offline presence queues as 待发送, not 未确认`,
     queuedOffline.pending.length === 1 &&
       queuedOffline.pending[0].text === off &&
       queuedOffline.pending[0].state === 'queued' &&
@@ -4185,7 +4183,7 @@ async function runM37Checks(page, pass, mobile) {
     JSON.stringify({ pending: queuedOffline.pending, users: queuedOffline.userRows }),
   );
   check(
-    `${pass}: M37 nothing is handed to the relay while the agent is offline`,
+    `${pass}: M39 nothing is handed to the relay while the agent is offline`,
     !state.received.some((item) => item.text === off),
   );
 
@@ -4214,13 +4212,42 @@ async function runM37Checks(page, pass, mobile) {
   await sendText(off);
   check(`${pass}: M37 the re-sent offline message queues again`, (await snap()).pending.length === 1);
 
-  await connectAgent();
+  // `ready{agentOnline:false}` is still authoritative for a fresh connection
+  // (presence is an edge and is never replayed), and the queue survives it.
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await sleep(1200);
+  const offlineReady = await snap();
+  check(
+    `${pass}: M37 a reconnect while the agent is down reports Agent 离线`,
+    offlineReady.labels[0] === '已连接' && offlineReady.labels[1] === 'Agent 离线',
+    JSON.stringify(offlineReady.labels),
+  );
+  check(
+    `${pass}: M37 the queued offline message survives the reload`,
+    offlineReady.pending.length === 1 && offlineReady.pending[0].text === off,
+    JSON.stringify(offlineReady.pending),
+  );
+
+  // The agent returns. Its own `status` push is delayed on purpose: the header
+  // flip and the queue flush below must come from the relay's presence edge —
+  // the new M39 path. The status push still follows, as a second trigger that
+  // must not send anything twice.
+  await connectAgent({ statusDelayMs: 1500 });
+  const onlineAgain = await waitUntil(async () => {
+    const labels = (await snap()).labels;
+    return labels[0] === '已连接' && labels[1] === 'Agent 在线';
+  }, 1000);
+  check(
+    `${pass}: M39 the online presence flips the header back to Agent 在线 (status push still pending)`,
+    onlineAgain,
+    JSON.stringify((await snap()).labels),
+  );
   const statusFlushed = await waitUntil(
     () => state.received.filter((item) => item.text === off).length === 1,
     12000,
   );
-  const drained = await waitUntil(async () => (await snap()).pending.length === 0, 8000);
-  check(`${pass}: M37 the agent's status push flushes the queue`, statusFlushed);
+  const drained = await waitUntil(async () => (await snap()).pending.length === 0, 1200);
+  check(`${pass}: M39 the online presence flushes the queue (status push is the second trigger)`, statusFlushed);
   check(`${pass}: M37 the queued row disappears once delivered`, drained);
   check(
     `${pass}: M37 the agent-offline message is shown exactly once`,

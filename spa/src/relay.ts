@@ -202,6 +202,17 @@ export class RelayClient {
       this.opts.onFrame?.(frame);
       return;
     }
+    // M39 presence: the relay reuses the `status` control frame for slot
+    // transitions, distinguished by an `agentOnline` boolean. Keep the flag
+    // honest for the NEXT state emit, but do not emit here: a presence edge
+    // is not a connection transition, and the connect side effects must stay
+    // tied to the `ready` handshake (a re-emit on `live` would be indistinguishable
+    // from a reconnect). The app updates the header from the frame itself.
+    if (frame.t === 'status' && typeof frame.agentOnline === 'boolean') {
+      this.agentOnline = frame.agentOnline;
+      this.opts.onFrame?.(frame);
+      return;
+    }
     // `peer` is relay -> container in v1, but honour it if a hosted relay
     // forwards agent presence to browsers as well.
     if (frame.t === 'peer') {

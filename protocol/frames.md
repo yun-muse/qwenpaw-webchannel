@@ -69,7 +69,7 @@ superseded generation) is not acked.
 | `hist` | `chat`, `messages:[{role, text, files?, turn?}]`, `more?`, `seq?` | reply to a `hist` request; `more:true` means another `hist` frame follows; `turn` is the **v8** optional per-turn usage receipt (§11.2); `files` is the **v10** optional attachment list (§15.3) |
 | `models` | `items:[{provider, model, active, vision?}]` | **v3** reply to a `models` request; exactly one item has `active:true` when the agent's current (effective) model is known; `vision` is the **v10** optional boolean picture capability (omitted when unprobed, §15.4) |
 | `model_changed` | `provider`, `model` | **v3** a `set_model` succeeded; this pair is now the agent's active model |
-| `status` | `agent_name`, `provider?`, `model?` | **v3** identity push, sent when the agent attaches and whenever a client joins/leaves; the header displays it |
+| `status` | `agent_name`, `provider?`, `model?` | **v3** identity push, sent when the agent attaches and whenever a client joins/leaves; the header displays it. The relay reuses the same `t` for **v11** presence by adding `agentOnline` (and no `agent_name`) — see §16 |
 | `effort` | `chat`, `level`, `effective`, `budget_tokens?`, `supported?`, `kind?`, `model_key?` | **v4** session thinking state: reply to `get_effort` / `set_effort`; control frame |
 | `usage` | `chat`, `id?`, `input_total?`, `output_total?`, `context_tokens?`, `context_limit?`, `last_turn?` | **v5**/**v8** session token usage: reply to `get_usage`; every numeric field is optional (absent = unknown); `last_turn` is the newest turn's receipt (§11.2); control frame |
 | `stats` | `id?`, `totals`, `days`, `chats`, `covered_chats?`, `uncovered_chats?`, `undated_turns?`, `day_basis`, `day_tz?` | **v9** all-chats usage dashboard: reply to `get_stats`; every count is optional except `totals.turns`; control frame (§14) |
@@ -135,6 +135,7 @@ archive keeps the file name even after the staged record expires (§15.6). See �
 | `t` | fields | notes |
 |---|---|---|
 | `ready` | `agentOnline` | sent once on client connect |
+| `status` | `agentOnline` | **v11** presence edge: `true` after a winning `hello`, `false` when the slot holder goes away; broadcast to every client, no `seq`, never replayed (§16) |
 | `error` | `code`, `id?` | protocol error |
 | `pong` | — | answer to `ping` |
 
@@ -961,3 +962,105 @@ entry that consumes it now also carries the metadata the browser already knows:
 The plugin prefers the entry's own `name`/`mime`/`size` and falls back to the staged record, so an
 archive entry keeps its file name even when the staged upload has expired. The archive uses the
 first attachment name as the chat title when a turn has no text.
+
+## 16. Protocol v11 — agent presence (M39)
+
+Before v11 a browser could learn "the agent is here" only from the `ready` handshake and from the
+plugin's identity `status` push. Neither ever says "the agent left": `ready` is a one-shot snapshot
+and the identity push can only be produced by a plugin that is attached. A browser with a live
+relay socket therefore kept displaying the last `ready.agentOnline` value while a restarting (or
+dead) plugin was unreachable, and a message sent in that window looked delivered while it was
+actually parked in the relay's offline buffer.
+
+The relay always knew the truth — it owns the single agent slot. v11 is the missing exit: the two
+relay implementations broadcast the slot state to every connected client (on the hosted relay a
+client must have passed the token check at the upgrade, so "connected" already means authenticated).
+
+### 16.1 Frame
+
+Presence reuses the existing `status` control frame rather than inventing a type:
+
+```json
+{"t":"status","agentOnline":false}
+```
+
+- `agentOnline` is a boolean and is always present in a relay presence frame.
+- The plugin's identity push keeps its shape — `agent_name`, optional `provider` / `model`, and
+  **no** `agentOnline` (plugin `status_frame`). The two producers share one `t` with disjoint
+  fields: an absent `agentOnline` means "identity only", which also implies online because only an
+  attached plugin can send it; a present `agentOnline` is the relay's slot state. A client that
+  understands only one of the two keeps working: it sees the other's frames as unknown fields.
+- Control frame: no `seq`, not ring-buffered, not replayed on `resume`, and never sent to the agent
+  (the broadcast iterates client sockets only).
+
+### 16.2 When it is sent
+
+Presence is an **edge**, never a beat. The relay broadcasts only when the value changes.
+
+| edge | relay-side trigger | frame |
+|---|---|---|
+| offline → online | a `hello` wins the slot: `peer` → flush the offline buffer → presence → `ready` | `{"t":"status","agentOnline":true}` |
+| online → offline | the **slot holder** closed or errored (its `close` / `error` event) | `{"t":"status","agentOnline":false}` |
+
+Presence is published **after** the offline buffer is flushed, so a client that reacts to "online"
+by sending can never overtake frames that were already waiting for that agent.
+
+These events MUST NOT produce a presence frame:
+
+- a **parked** socket (connected, no `hello` yet) or a **superseded** generation
+  (closed with 4000 for an older `started`) — it never held the slot, so its departure is not an
+  edge;
+- a **generation handover** (a newer `hello` closes the old holder and takes the slot): the winner
+  is installed before the old socket's close is delivered, so the slot never appears empty and the
+  clients see no edge at all;
+- a **re-hello** from the current holder (metadata refresh only);
+- a client joining or leaving (that is `peer`, agent-side only);
+- `ping` / `hb` (a beat is not a state change).
+
+### 16.3 What "offline" means
+
+The relay's existing death points, and nothing more sensitive:
+
+- the TCP/WebSocket `close` or `error` event of the holder socket, and
+- the plugin's own decision to close: `hb` every 15 s, ack expected within 10 s, two consecutive
+  misses (~37 s worst case) → the plugin closes and reconnects.
+
+The relay does **not** add an `hb` timeout, a `/health` poll or any other liveness guess. A
+half-open socket that has not produced a close event is still "online" here exactly as it is in
+`/health` and in the offline buffer; the plugin's heartbeat is what eventually converts that into a
+close.
+
+**No debounce delay is added.** A plugin restart can therefore show 在线 → 离线 → 在线 within a
+second or two. That is deliberate:
+
+1. delaying "offline" only lengthens the window in which a browser believes it can deliver: it
+   keeps writing `msg` frames into the relay's offline buffer, whose memory copy dies with a
+   `relay-node` restart and whose 500-frame / 1 MB cap drops the oldest — the exact failure M37
+   exists to avoid;
+2. the client-side queue already makes the fast flip harmless: a send inside the gap is queued as
+   待发送 and flushes in order on the next online edge, and nothing that was written to a socket is
+   ever auto-resent;
+3. a debounce would be a second, softer liveness judgement layered on top of the relay's real one,
+   which is exactly the "don't invent a more sensitive detector" rule.
+
+### 16.4 Client behaviour
+
+- `ready{agentOnline}` remains the authoritative snapshot for a new connection; presence only
+  updates it afterwards.
+- On an offline presence the client MUST treat the agent as unreachable: new sends are queued
+  locally (not written to the socket), and the header shows the agent as offline.
+- On an online presence the client flushes that queue in order through the ordinary `{t:"msg"}`
+  path.
+- Presence is an **early warning, not a delivery receipt**. A frame written before the agent died
+  can still be lost; the M37 history-tail reconcile after a reconnect MUST keep running for those
+  entries.
+
+### 16.5 Compatibility
+
+The frame is additive. A v10 browser does not know the `agentOnline` field; it treats every
+`status` as the plugin's identity push (the M7 handler sets "online" on receipt), so a v11 relay's
+offline edge is ignored and the header keeps its pre-v11 value. That is exactly the old behaviour —
+no lost messages, no new error — which is what makes the relay deployable before the SPA. An older
+relay never sends presence at all, and a v11 browser degrades to the pre-v11 behaviour. Either
+deployment order is safe; deploying the relay first starts producing edges for clients that already
+understand them.
