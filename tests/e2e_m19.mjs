@@ -14,7 +14,10 @@
  * and the M34 pack (备份全部会话: one .zip, every .md byte-identical to the
  * single-chat export, index.md/backup.json, failure and cancel paths), and the
  * M36 pack (LaTeX: lazy KaTeX chunk, frozen-block math during a stream,
- * code/currency exemptions, and the 390px wide-formula scroller).
+ * code/currency exemptions, and the 390px wide-formula scroller), and the
+ * M40 pack (model picker: provider chips, the active row, a real
+ * set_model -> model_changed switch, the vision:false hint, and the model
+ * context the mock observes when the next message arrives).
  * Runs entirely local against a production build:
  *
  *   1. `npm run build` in spa/ (fails the run if the build fails)
@@ -25,7 +28,8 @@
  *
  * Two passes share the same server: desktop 1280x900 and iPhone 13
  * (390x664; the M26 evidence switches to a real 390x844 canvas).
- * Screenshots land in ./m19-shots/.
+ * Screenshots land in ./out/m19-shots/ (gitignored); EVIDENCE=1 writes the
+ * frozen evidence set in ./m19-shots/ instead.
  *
  * Re-run (from the repo root):
  *   cd tests && npm install && npx playwright install chromium
@@ -36,11 +40,13 @@
  *   M19_RELAY_PORT     relay port; default 8787 (must match the build)
  *   M19_SKIP_BUILD=1   reuse the existing spa/dist
  *   M19_HEADED=1       visible browser
- *   OUT_DIR            screenshot directory; default ./m19-shots
+ *   OUT_DIR            screenshot directory; default ./out/m19-shots
+ *   EVIDENCE=1         write the tracked ./m19-shots/ evidence set
  *   M26_ONLY=1         run only the M26 menu checks + evidence (fast loop)
  *   M27_ONLY=1         run only the M27 effort checks (fast before/after loop)
  *   M34_ONLY=1         run only the M34 backup checks (fast loop)
  *   M36_ONLY=1         run only the M36 math checks (fast loop)
+ *   M40_ONLY=1         run only the M40 model picker checks (fast loop)
  *
  * M26 evidence (BEFORE vs AFTER) is the same structure-agnostic block, so the
  * BEFORE shots come from the unmodified build:
@@ -65,11 +71,13 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { artifactDir } from './artifacts.mjs';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
 const SPA_DIR = join(ROOT, 'spa');
 const RELAY_DIR = join(ROOT, 'relay-node');
-const OUT_DIR = resolve(HERE, process.env.OUT_DIR || './m19-shots');
+const OUT_DIR = artifactDir('m19-shots', process.env.OUT_DIR);
 const PREVIEW_PORT = Number(process.env.M19_PREVIEW_PORT || 4173);
 const RELAY_PORT = Number(process.env.M19_RELAY_PORT || 8787);
 const BASE = `http://127.0.0.1:${PREVIEW_PORT}/`;
@@ -338,6 +346,21 @@ const STREAM_TEXT = [
 ].join('\n\n');
 
 /**
+ * M40: a small multi-provider model list, grouped by provider in server order.
+ * The picker has no group headers (each row carries its provider chip), so the
+ * e2e asserts the chips, the server order, and the single active row. `vision`
+ * mirrors the M31 projection: only a real boolean is a capability claim, and
+ * only `vision:false` makes the SPA raise its 图片可能不可见 hint.
+ */
+const MOCK_MODELS = [
+  { provider: 'mock', model: 'mock-1', vision: true },
+  { provider: 'mock', model: 'mock-2', vision: true },
+  { provider: 'acme', model: 'acme-pro', vision: false },
+  { provider: 'acme', model: 'acme-vision', vision: true },
+];
+const ACTIVE_DEFAULT = { provider: 'mock', model: 'mock-1' };
+
+/**
  * One mock container agent. `state` is mutable per scenario so a test can
  * change what the "server" reports between page loads.
  */
@@ -347,6 +370,11 @@ const state = {
   usage: {},
   stats: JSON.parse(JSON.stringify(DEFAULT_STATS)),
   streaming: new Map(),
+  /** M40: the served model list, every `set_model` received, and the pair the
+   *  mock considers active (the plugin's own state after a successful PUT). */
+  models: [],
+  modelLog: [],
+  activeModel: null,
   /** M25: chats whose mock export fails, and an artificial per-export delay. */
   exportFail: [],
   exportDelay: 0,
@@ -396,6 +424,12 @@ function resetState() {
   state.efforts = {};
   state.effortLog = [];
   state.effortGetLog = [];
+  state.models = MOCK_MODELS.map((item) => ({
+    ...item,
+    active: item.provider === ACTIVE_DEFAULT.provider && item.model === ACTIVE_DEFAULT.model,
+  }));
+  state.modelLog = [];
+  state.activeModel = { ...ACTIVE_DEFAULT };
   state.effortReject = {};
   state.createDelay = 2500;
   state.recordSends = false;
@@ -480,11 +514,30 @@ function handleAgentFrame(frame) {
       agentSend({ t: 'chats', items: state.chats });
       break;
     case 'models':
-      agentSend({
-        t: 'models',
-        items: [{ provider: 'mock', model: 'mock-1', active: true, vision: true }],
-      });
+      // M40: echo the mock's list so `active` follows a successful switch,
+      // exactly like the plugin projecting `ProviderInfo` after the PUT.
+      agentSend({ t: 'models', items: state.models });
       break;
+    case 'set_model': {
+      const provider = String(frame.provider || '');
+      const model = String(frame.model || '');
+      state.modelLog.push({ provider, model, at: Date.now() });
+      const item = state.models.find((m) => m.provider === provider && m.model === model);
+      if (!item) {
+        // The plugin's validation failure shape (channel.py::_handle_set_model).
+        agentSend({ t: 'error', code: 'E_MODEL', detail: 'mock model not in list' });
+        break;
+      }
+      state.models = state.models.map((m) => ({
+        ...m,
+        active: m.provider === provider && m.model === model,
+      }));
+      state.activeModel = { provider, model };
+      agentSend({ t: 'model_changed', provider, model });
+      // The real plugin follows with its identity push (channel.py:1361).
+      agentSend({ t: 'status', agent_name: 'mock-agent', provider, model });
+      break;
+    }
     case 'skills':
       agentSend({ t: 'skills', items: [] });
       break;
@@ -601,7 +654,15 @@ function handleAgentFrame(frame) {
       // deliberately slower than the old 1.2 s re-apply timer.
       const chat = String(frame.chat || '');
       // M37: record what actually arrived, in order (the outbox suite asks).
-      state.received.push({ chat, text: String(frame.text || ''), at: Date.now() });
+      // M40: `model` is the pair this mock considers active at receipt time --
+      // it only changes via `set_model`, so it proves which model context the
+      // message landed in (the wire `msg` frame itself carries no model).
+      state.received.push({
+        chat,
+        text: String(frame.text || ''),
+        at: Date.now(),
+        model: state.activeModel ? { ...state.activeModel } : null,
+      });
       if (state.notCreated.has(chat)) {
         setTimeout(() => state.notCreated.delete(chat), state.createDelay);
       }
@@ -4314,6 +4375,164 @@ async function runM37Checks(page, pass, mobile) {
   await page.screenshot({ path: shot(pass, 'm37-unconfirmed'), fullPage: false });
 }
 
+// ---------------------------------------------------------------------------
+// M40 — model picker: list, switch, vision hint, and the context the mock saw
+// ---------------------------------------------------------------------------
+/**
+ * The picker is a flat list with a provider chip per row (there are no group
+ * headers), so "grouping" is asserted as: every row names its provider and the
+ * server's provider-contiguous order is preserved. The wire `msg` frame has no
+ * model field -- the plugin keeps the model in the app, not in each turn -- so
+ * the context assertion uses what the mock can actually observe: the
+ * `set_model` pair it received and the pair that was active when the `msg`
+ * arrived (the mock only ever changes it on `set_model`).
+ */
+async function runM40ModelChecks(page, pass, mobile) {
+  const openPicker = async () => {
+    await page.locator('.model-button').click();
+    await page.waitForSelector('.model-picker', { timeout: 4000 });
+    return sleep(120);
+  };
+  const pickerState = () =>
+    page.evaluate(() => {
+      const text = (sel) => (document.querySelector(sel) || {}).textContent?.trim() || '';
+      return {
+        open: Boolean(document.querySelector('.model-picker')),
+        label: text('.model-label'),
+        header: text('.model-picker-header'),
+        hint: text('.vision-hint'),
+        busy: Boolean(document.querySelector('.model-busy')),
+        rows: [...document.querySelectorAll('.model-picker .model-row')].map((el) => ({
+          model: ((el.querySelector('.model-row-model') || {}).textContent || '').trim(),
+          provider: ((el.querySelector('.model-row-provider') || {}).textContent || '').trim(),
+          active: el.classList.contains('active'),
+          selected: el.getAttribute('aria-selected'),
+          check: Boolean(el.querySelector('.model-row-check')),
+        })),
+      };
+    });
+  const activeRow = (view) => view.rows.filter((row) => row.active);
+
+  await openPicker();
+  const list = await pickerState();
+  check(
+    `${pass}: M40 model picker opens with every served model`,
+    list.open && list.rows.length === MOCK_MODELS.length,
+    `${list.rows.length}/${MOCK_MODELS.length} open=${list.open}`,
+  );
+  check(
+    `${pass}: M40 every row names its provider and keeps the server order`,
+    list.rows.every((row) => row.provider) &&
+      JSON.stringify(list.rows.map((row) => row.provider)) ===
+        JSON.stringify(MOCK_MODELS.map((item) => item.provider)),
+    JSON.stringify(list.rows.map((row) => `${row.provider}/${row.model}`)),
+  );
+  check(
+    `${pass}: M40 exactly one row is current, with aria-selected and the ● mark`,
+    activeRow(list).length === 1 &&
+      activeRow(list)[0].model === 'mock-1' &&
+      activeRow(list)[0].selected === 'true' &&
+      activeRow(list)[0].check &&
+      list.rows.filter((row) => row.selected === 'false').length === MOCK_MODELS.length - 1,
+    JSON.stringify(activeRow(list)),
+  );
+  check(`${pass}: M40 the picker header counts the models`, list.header.includes(`切换对话模型 (${MOCK_MODELS.length})`), list.header);
+  check(`${pass}: M40 the label shows the current pair`, list.label === 'mock / mock-1', list.label);
+  check(`${pass}: M40 a vision-capable model raises no picture warning`, list.hint === '', list.hint);
+
+  const logBefore = state.modelLog.length;
+  await page.locator('.model-row', { hasText: 'acme-pro' }).click();
+  // `model_changed` closes the picker by design (App.tsx), so the settled
+  // state is: label updated, busy gone, picker closed.
+  const switched = await waitUntil(async () => {
+    const view = await pickerState();
+    return view.label === 'acme / acme-pro' && !view.busy && !view.open;
+  }, 6000);
+  const after = await pickerState();
+  check(
+    `${pass}: M40 model_changed settles the switch and closes the picker`,
+    switched && after.label === 'acme / acme-pro' && !after.busy && after.rows.length === 0,
+    `${after.label} open=${after.open} busy=${after.busy}`,
+  );
+  check(
+    `${pass}: M40 the mock received exactly the chosen set_model pair`,
+    state.modelLog.length === logBefore + 1 &&
+      state.modelLog.at(-1).provider === 'acme' &&
+      state.modelLog.at(-1).model === 'acme-pro',
+    JSON.stringify(state.modelLog.slice(logBefore)),
+  );
+  check(
+    `${pass}: M40 a vision:false model shows the picture hint`,
+    after.hint.includes('图片可能不可见'),
+    after.hint,
+  );
+
+  await openPicker();
+  const reopened = await pickerState();
+  check(
+    `${pass}: M40 reopening shows exactly one current row, the switched model`,
+    activeRow(reopened).length === 1 &&
+      activeRow(reopened)[0].model === 'acme-pro' &&
+      activeRow(reopened)[0].check &&
+      activeRow(reopened)[0].selected === 'true',
+    JSON.stringify(activeRow(reopened)),
+  );
+  await page.keyboard.press('Escape');
+  await sleep(150);
+
+  const chat = await page.evaluate(() => localStorage.getItem('webchannel.activeChat'));
+  const probe = `M40 模型上下文检查 ${pass}`;
+  const recvBefore = state.received.filter((item) => item.text === probe).length;
+  await page.locator('.composer textarea').fill(probe);
+  await page.keyboard.press('Enter');
+  const arrived = await waitUntil(
+    () => state.received.some((item) => item.text === probe),
+    8000,
+  );
+  const receipt = state.received.find((item) => item.text === probe);
+  check(
+    `${pass}: M40 the follow-up message reaches the mock exactly once`,
+    arrived && recvBefore === 0 && state.received.filter((item) => item.text === probe).length === 1,
+    JSON.stringify(state.received.filter((item) => item.text === probe)),
+  );
+  check(
+    `${pass}: M40 the mock sees the message in the switched model context`,
+    Boolean(
+      receipt &&
+        receipt.chat === chat &&
+        receipt.model &&
+        receipt.model.provider === 'acme' &&
+        receipt.model.model === 'acme-pro',
+    ),
+    JSON.stringify(receipt),
+  );
+  check(
+    `${pass}: M40 no later switch races the message`,
+    state.modelLog.at(-1).provider === 'acme' && state.modelLog.at(-1).model === 'acme-pro',
+    JSON.stringify(state.modelLog.at(-1)),
+  );
+
+  await waitUntil(() => !state.streaming.has(chat), 20000);
+  await openPicker();
+  await page.locator('.model-row', { hasText: 'mock-1' }).click();
+  const restored = await waitUntil(async () => {
+    const view = await pickerState();
+    return view.label === 'mock / mock-1' && view.hint === '' && !view.busy && !view.open;
+  }, 6000);
+  await openPicker();
+  const back = await pickerState();
+  check(
+    `${pass}: M40 switching back restores the default and clears the hint`,
+    restored &&
+      back.label === 'mock / mock-1' &&
+      back.hint === '' &&
+      activeRow(back).length === 1 &&
+      activeRow(back)[0].model === 'mock-1',
+    `${back.label} | ${back.hint} | ${JSON.stringify(activeRow(back))}`,
+  );
+  await page.keyboard.press('Escape');
+}
+
 async function runPass(browser, pass, viewport, mobile) {
   resetState();
   const contextOptions = mobile
@@ -4378,6 +4597,12 @@ async function runPass(browser, pass, viewport, mobile) {
 
     if (process.env.M37_ONLY === '1') {
       await runM37Checks(page, pass, mobile);
+      check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
+      return;
+    }
+
+    if (process.env.M40_ONLY === '1') {
+      await runM40ModelChecks(page, pass, mobile);
       check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
       return;
     }
@@ -4869,6 +5094,9 @@ async function runPass(browser, pass, viewport, mobile) {
 
     // ---- 15. M36: LaTeX math (lazy, frozen blocks, code/currency) --------
     await runM36Checks(page, pass, mobile);
+
+    // ---- 15b. M40: model picker (switch, vision hint, msg context) --------
+    await runM40ModelChecks(page, pass, mobile);
 
     // ---- 16. M37: offline send queue (last: it restarts the relay) -------
     await runM37Checks(page, pass, mobile);

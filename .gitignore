@@ -5,6 +5,11 @@ __pycache__/
 .wrangler/
 tools/soak.log
 
+# Default home for test-run artifacts (screenshots, frames logs, perf JSON).
+# Tracked tests/*-shots/ and tests/e2e_*.frames.log are frozen evidence and
+# are only written by an explicit evidence run (EVIDENCE=1 / OUT_DIR=...).
+tests/out/
+
 # Local build-time config (spa/.env.example documents copying to .env.local).
 # Examples are templates with placeholders only and stay tracked.
 .env

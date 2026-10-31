@@ -11,17 +11,20 @@
 //      the same sha256 as the source file (assertion route: snapshot the
 //      media dir before/after; the plugin stores chunked files through
 //      the same POST /api/console/upload path as v1 inline files).
-// All frames logged to tests/e2e_m5.frames.log. Final line: E2E_M5 PASS/FAIL.
+// All frames logged to tests/out/e2e_m5.frames.log (EVIDENCE=1 writes the
+// tracked tests/e2e_m5.frames.log). Final line: E2E_M5 PASS/FAIL.
 import { createRequire } from 'node:module';
 import { writeFileSync, appendFileSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
+import { artifactFile } from './artifacts.mjs';
+
 const require = createRequire(new URL('../mock/package.json', import.meta.url));
 const WebSocket = require('ws');
 
 const PORT = 8787;
-const LOG = new URL('./e2e_m5.frames.log', import.meta.url);
+const LOG = artifactFile('e2e_m5.frames.log', process.env.LOG_FILE);
 const MEDIA_DIR = '/home/hatch/workspace/qwenpaw-local/home/workspaces/default/media';
 const CHUNK = 96 * 1024;
 const CHAT = 'm5xfer';

@@ -1,6 +1,8 @@
-# WebChannel frame protocol — v1
+# WebChannel frame protocol — v11
 
-Status: draft, M0. Scope: the two WebSocket legs (`container ↔ relay`, `browser ↔ relay`).
+Status: current (envelope v1 plus additive revisions v2–v11; §17 documents the never-numbered M8
+frames that were previously implemented but unwritten). Scope: the two WebSocket legs
+(`container ↔ relay`, `browser ↔ relay`).
 Design source: `docs/design.md` §6. The relay pairs sockets and forwards frames verbatim; it does
 not interpret business payloads and does not persist message content.
 
@@ -33,7 +35,7 @@ One JSON object per WebSocket **text** message, UTF-8 encoded:
 | `hello` | `token?`, `instance`, `agent`, `session`, `started` | first frame after the upgrade; wins the agent slot by generation (see §3); relay acks with `ready`, frame is not forwarded |
 | `hb` | `id` | **v3** end-to-end heartbeat (M7.3); the relay process echoes `hb_ack` with the same `id`. Never forwarded, never stamps `agentLastSeen`, exempt from the rate limit |
 | `ping` | — | answered locally with `pong`, not forwarded |
-| `pong` | — | reserved; the relay answers `ping` locally in v1 |
+| `pong` | `id?` | answer to `ping`; echoes the request's `id` when present |
 
 ### 2.2 relay → container
 
@@ -43,7 +45,7 @@ One JSON object per WebSocket **text** message, UTF-8 encoded:
 | `peer` | `clients` | connected client count, sent when an agent's hello wins the slot and on every client join/leave |
 | `error` | `code`, `id?` | protocol error |
 | `hb_ack` | `id` | **v3** echoed answer to `hb`; produced by the relay process itself, never by the edge |
-| `pong` | — | answer to `ping` |
+| `pong` | `id?` | answer to `ping`; the request's `id` is echoed when present |
 
 **Why `hb` exists (v3).** `ping`/`pong` and WebSocket-level ping frames are answered *at the edge*:
 the hosted relay's `ping` is served by `setWebSocketAutoResponse` without waking the Durable
@@ -64,9 +66,16 @@ superseded generation) is not acked.
 | `evt` | `chat`, `seq`, `data` | `{"text": <delta>, "stream_type": <segment>}`; per-delta |
 | `end` | `chat`, `seq?`, `stream_type?` | streaming segment finished; render markdown, commit to history (optional) |
 | `msg` | `chat`, `seq?`, `parts[]` | complete message, tool result or attachment reference |
-| `approval` | `chat`, `req_id`, `tool`, `severity`, `summary` | approval request |
-| `resync` | `chat`, `reason?` | ring buffer miss; client must reload history |
+| `approval` | `chat`, `req_id`, `tool`, `severity`, `summary`, `seq?` | approval request; it is emitted through the sequencer, so a replayed/resumed frame keeps its number |
+| `resync` | `chat`, `reason?`, `seq?` | ring buffer miss; client must reload history |
+| `error` | `code`, `id?`, `chat?`, `req_id?`, `detail?`, `status?`, `reason?`, `seq?` | protocol/domain error (§6); `chat` (and `req_id` for approvals) marks it request-scoped — only `E_AUTH` **without** either is connection-fatal. Almost all errors are control frames; the approval refusal is emitted through the sequencer and carries `seq` |
 | `hist` | `chat`, `messages:[{role, text, files?, turn?}]`, `more?`, `seq?` | reply to a `hist` request; `more:true` means another `hist` frame follows; `turn` is the **v8** optional per-turn usage receipt (§11.2); `files` is the **v10** optional attachment list (§15.3) |
+| `chats` | `items:[{chat, title, updated_at}]` | **M8** chat list, reply to a `chats` request (§17.1); control frame |
+| `chat_deleted` | `chat` | **M8** acknowledgement of `del_chat` (§17.2); control frame |
+| `chat_renamed` | `chat`, `title` | **M8** acknowledgement of `rename_chat` (§17.3); the title is a client display label, not a server-side rename; control frame |
+| `prompts` | `files:{SOUL.md, AGENTS.md, PROFILE.md, MEMORY.md}` | **M8** the workspace prompt files, each a string (§17.4); control frame |
+| `prompt_saved` | `file` | **M8** one prompt file was written (§17.4); control frame |
+| `skills` | `items:[{id, name, description}]` | **M8** available skills, reply to `skills` (§17.5); control frame |
 | `models` | `items:[{provider, model, active, vision?}]` | **v3** reply to a `models` request; exactly one item has `active:true` when the agent's current (effective) model is known; `vision` is the **v10** optional boolean picture capability (omitted when unprobed, §15.4) |
 | `model_changed` | `provider`, `model` | **v3** a `set_model` succeeded; this pair is now the agent's active model |
 | `status` | `agent_name`, `provider?`, `model?` | **v3** identity push, sent when the agent attaches and whenever a client joins/leaves; the header displays it. The relay reuses the same `t` for **v11** presence by adding `agentOnline` (and no `agent_name`) — see §16 |
@@ -82,7 +91,6 @@ superseded generation) is not acked.
 | `att_end` | `chat`, `id` | **v10** all attachment chunks sent; the client verifies before rendering/saving; control frame |
 | `file_ready` | `chat`, `id`, `seq?` | **v2** chunked upload verified and staged; `files[]` may now use `{"ref": id}` |
 | `file_error` | `chat`, `id`, `code`, `msg?`, `seq?` | **v2** chunked upload failed; `code` ∈ `E_CHECKSUM` / `E_TOOBIG` / `E_STATE` |
-| `pong` | — | reserved; the relay answers `ping` locally in v1 |
 
 `parts[]` is a list of content parts. v1 defines `{"type":"text","text":...}` and
 `{"type":"file","name","mime","data"}` where `data` is base64. Other part types are forwarded as-is.
@@ -95,9 +103,11 @@ segment's `end` — an `end` for `reasoning` closes that segment only. Missing `
 `message` (older containers).
 
 `models`, `model_changed`, `status`, `effort`, `usage`, `stats`, the `export_*` frames,
-`search_results` and the `att_*` frames are **control frames**: they carry no `seq`, belong to no
-chat's stream, and are never ring-buffered or replayed on `resume` (§9.4, §10.3, §11.3, §12.4,
-§13.4, §14.4, §15.2).
+`search_results`, the `att_*` frames and the M8 chat/prompt/skill frames (`chats`, `chat_deleted`,
+`chat_renamed`, `prompts`, `prompt_saved`, `skills`) are **control frames**: they carry no `seq`,
+belong to no chat's stream, and are never ring-buffered or replayed on `resume` (§9.4, §10.3,
+§11.3, §12.4, §13.4, §14.4, §15.2, §17). `error` is a control frame too, except the sequenced
+approval refusal (`E_AUTH` with `chat` + `req_id` + `seq`, §6).
 
 ### 2.4 browser → container
 
@@ -107,7 +117,13 @@ chat's stream, and are never ring-buffered or replayed on `resume` (§9.4, §10.
 | `stop` | `chat` | cancel the current generation |
 | `approve` / `deny` | `chat`, `req_id` | resolve an approval |
 | `resume` | `chat`, `last_seq` | replay frames with `seq > last_seq` |
-| `hist` | `chat`, `before?`, `limit?` | request history (agent answers with `hist` frame(s)) |
+| `hist` | `chat`, `limit?` | request history (agent answers with `hist` frame(s)); `limit` is a positive integer, anything else falls back to 50 |
+| `chats` | — | **M8** request the server-side chat list (§17.1); answered with `chats` |
+| `del_chat` | `chat` | **M8** delete the chat's QwenPaw `ChatSpec`; answered with `chat_deleted` (§17.2) |
+| `rename_chat` | `chat`, `title` | **M8** change the browser's display name; answered with `chat_renamed` (§17.3) |
+| `get_prompts` | — | **M8** read the four workspace prompt files; answered with `prompts` (§17.4) |
+| `set_prompt` | `file`, `content` | **M8** write one prompt file (`SOUL.md` / `AGENTS.md` / `PROFILE.md` / `MEMORY.md`, ≤65536 UTF-8 bytes); answered with `prompt_saved` or `error{code:"E_PROMPT"}` (§17.4) |
+| `skills` | — | **M8** request the agent's skill list (§17.5); answered with `skills` |
 | `models` | — | **v3** request the agent's switchable model list |
 | `set_model` | `provider`, `model` | **v3** switch the agent's active model |
 | `get_effort` | `chat` | **v4** request that chat's session thinking setting |
@@ -120,7 +136,9 @@ chat's stream, and are never ring-buffered or replayed on `resume` (§9.4, §10.
 | `file_begin` | `chat`, `id`, `name`, `mime`, `size`, `chunks`, `sha256` | **v2** start a chunked upload; `chunks` is how many `file_chunk` frames follow |
 | `file_chunk` | `chat`, `id`, `i`, `data` | **v2** one chunk; `i` is 0-based, `data` is base64 of ≤96 KB raw bytes |
 | `file_end` | `chat`, `id` | **v2** client finished sending; agent answers `file_ready` or `file_error` |
-| `ping` | — | heartbeat, every 25 s |
+
+`ping` is **not** in this table: the relay answers it itself and never forwards it to the
+container (§2.6). `hb` from a browser is dropped the same way.
 
 `approve`/`deny` MUST carry `req_id`; the container validates that it belongs to the given
 `chat`/session before acting (design §8), so a replayed or cross-session `req_id` is rejected.
@@ -137,7 +155,17 @@ archive keeps the file name even after the staged record expires (§15.6). See �
 | `ready` | `agentOnline` | sent once on client connect |
 | `status` | `agentOnline` | **v11** presence edge: `true` after a winning `hello`, `false` when the slot holder goes away; broadcast to every client, no `seq`, never replayed (§16) |
 | `error` | `code`, `id?` | protocol error |
-| `pong` | — | answer to `ping` |
+| `pong` | `id?` | answer to `ping`; echoes the request's `id` when present |
+
+`status` has two producers with disjoint fields: the plugin's identity push (`agent_name`, optional
+`provider` / `model`) and the relay's presence edge (`agentOnline`). See §16.
+
+### 2.6 browser → relay (answered locally)
+
+| `t` | fields | notes |
+|---|---|---|
+| `ping` | `id?` | client heartbeat every 25 s; the relay answers `pong` with the same `id` and never forwards it |
+| `hb` | `id` | agent-side liveness only; a browser `hb` is dropped, never forwarded |
 
 ## 3. Handshake
 
@@ -207,20 +235,31 @@ re-validates `msg` size.
 
 ## 6. Error codes
 
-Error frame: `{"t":"error","code":"...","id":"<offending frame id, if any>"}`.
+Error frame:
+
+```json
+{"t":"error","code":"E_MODEL","id":"<offending frame id>","chat":"…","req_id":"…",
+ "detail":"…","status":422,"reason":"bad_query"}
+```
+
+Only `t` and `code` are always present. `id` echoes the request's envelope id; `chat` (and, for
+approvals, `req_id`) makes the error request-scoped; `detail` is a human-readable explanation;
+`status` is the local app's HTTP status when there was one; `reason` is the machine-readable
+variant used by search (§13.2).
 
 | code | scenario | handling |
 |---|---|---|
-| `E_AUTH` | bad/expired agent token or client credential | container stops reconnecting and logs; browser redirects to login |
-| `E_BUSY` | a run is already active for this chat | client shows a notice; do not resend |
-| `E_TOOBIG` | frame exceeds 256 KB, or an export exceeds 10 MB (§12) | send smaller message / reject file (v1); use a chunked v2 upload (§8) for larger files |
+| `E_AUTH` | bad/expired agent token or client credential; **also** the plugin refusing an `approve`/`deny` | connection-level (no `chat`/`req_id`): container stops reconnecting and logs, browser redirects to login. Request-scoped (`chat` + `req_id` present): the approval card shows the error and the socket stays up |
+| `E_BUSY` | the hosted relay's 30 frames/s tenant bucket is empty | the offending frame is dropped; at most one notice per second. Slow down and resend deliberately — it is **not** a delivery receipt (§5) |
+| `E_TOOBIG` | frame exceeds 256 KB, or an export/attachment exceeds 10 MB (§12) | send smaller message / reject file (v1); use a chunked v2 upload (§8) for larger files |
 | `E_BADFRAME` | not JSON, not an object, missing/non-string `t`, binary message | drop frame; sender may fix and retry |
-| `E_RESYNC` | resume buffer miss | client reloads history |
+| `E_RESYNC` | legacy alias for a resume buffer miss | the plugin sends a `resync` frame instead; a client that receives `error{code:"E_RESYNC",chat}` MUST treat it exactly like `resync` and reload history |
 | `E_MODEL` | model list unavailable, unknown provider/model, or the app rejected the switch | client shows the error; the connection is unaffected |
 | `E_EFFORT` | thinking setting unavailable, unknown level, unsupported by the current model, or the app rejected the write | client restores the last confirmed level and shows the error; a 404 is different: the chat has no server record yet, so the local choice is kept **without any error UI** and re-applied after the first completed turn (§10.2); the connection is unaffected |
 | `E_EXPORT` | export requested for a chat with no server record, or its history could not be read or rendered | client shows the error; the connection is unaffected |
 | `E_SEARCH` | search with an empty query, an archive that is not configured, or a Turso request that failed | client shows "search unavailable"; the connection is unaffected |
 | `E_ATT` | attachment ref unknown, expired or from another chat; the message is gone; the file is outside the media directory, missing or over 10 MB | client keeps the attachment chip and shows no toast; always carries `chat` and `id`, and the connection is unaffected |
+| `E_PROMPT` | `set_prompt` with an unknown `file`, a non-string or >65536-byte `content`, or an OS error while writing | client shows the save failed and keeps the editor content; the connection is unaffected (§17.4) |
 
 `E_AUTH` is enforced at the HTTP upgrade (401 before the socket opens), so it is normally not seen
 as a frame — a browser only observes a bare `close`. Because there is no close reason to read, a
@@ -234,6 +273,10 @@ never in a generic `error` frame.
 v1 is additive: new optional fields and new `t` values may appear without a version bump. A breaking
 change (for example a different envelope) will be negotiated via a `v` field in `hello` and announced
 here.
+
+The M8 frames in §17 were never assigned a version; they are additive in exactly this sense and were
+implemented and shipped before this document listed them, so adding them here is documentation
+catch-up, not a wire change.
 
 **v2 (chunked file transfer, §8) is additive — there is no negotiation.** It introduces only new
 `t` values (`file_begin`, `file_chunk`, `file_end`, `file_ready`, `file_error`) and the optional
@@ -1064,3 +1107,92 @@ no lost messages, no new error — which is what makes the relay deployable befo
 relay never sends presence at all, and a v11 browser degrades to the pre-v11 behaviour. Either
 deployment order is safe; deploying the relay first starts producing edges for clients that already
 understand them.
+
+## 17. Unversioned extras — chat list, workspace prompts, skills (M8)
+
+These six request/response pairs shipped with M8, between the numbered revisions, and were never
+assigned a protocol version of their own. They were implemented in `plugin/frames.py` long before
+this document listed them. They are ordinary frames the relays forward verbatim; every reply is a
+control frame (no `seq`, no ring buffer, no replay).
+
+### 17.1 `chats`
+
+```json
+browser → container : {"t":"chats"}
+container → browser : {"t":"chats","items":[{"chat":"chat-abc","title":"旧会话",
+                                             "updated_at":"2026-10-28T09:00:00Z"}]}
+```
+
+- One item per `GET /api/chats?channel=web` ChatSpec whose `session_id` is `web:web-user:<chat>`.
+  `title` is the spec's `name`, else `title`, else `""`; `updated_at` falls back to `created_at` and
+  is `""` when neither exists.
+- An unreadable chat list answers `items: []`. **An empty reply is not authoritative**: the plugin
+  also answers `[]` when its own API call fails, so a client MUST NOT prune its local chat list,
+  pins or tags on it (only a non-empty list may prune).
+- The SPA requests `chats` after every (re)connect and from the sidebar's refresh button.
+
+### 17.2 `del_chat` / `chat_deleted`
+
+```json
+browser → container : {"t":"del_chat","chat":"chat-abc"}
+container → browser : {"t":"chat_deleted","chat":"chat-abc"}
+```
+
+- The plugin resolves the web chat to its `ChatSpec.id` and issues `DELETE /api/chats/{id}`. It
+  acknowledges even when the chat is unknown or the delete failed; there is no `E_*` for this pair,
+  so a client that needs the truth re-requests `chats`.
+- The SPA removes the row locally at once and does not wait for the ack.
+
+### 17.3 `rename_chat` / `chat_renamed`
+
+```json
+browser → container : {"t":"rename_chat","chat":"chat-abc","title":"新名字"}
+container → browser : {"t":"chat_renamed","chat":"chat-abc","title":"新名字"}
+```
+
+- M8 rename is a **browser display name**: the plugin acknowledges the frame but does not write
+  `ChatSpec.name`. The SPA stores the name in `webchannel.chatNames` (localStorage), and its `chats`
+  merge keeps local names over server titles. A server-side rename would need a new frame; none
+  exists.
+- The ack echoes the received `title` after trimming. The SPA only sends a non-empty title; clearing
+  a local label is done by removing it from `webchannel.chatNames`, not by this frame.
+
+### 17.4 `get_prompts` / `prompts` and `set_prompt` / `prompt_saved`
+
+The four workspace prompt files are `SOUL.md`, `AGENTS.md`, `PROFILE.md` and `MEMORY.md`.
+
+```json
+browser → container : {"t":"get_prompts"}
+container → browser : {"t":"prompts","files":{"SOUL.md":"…","AGENTS.md":"…",
+                                              "PROFILE.md":"","MEMORY.md":""}}
+browser → container : {"t":"set_prompt","file":"SOUL.md","content":"…"}
+container → browser : {"t":"prompt_saved","file":"SOUL.md"}
+container → browser : {"t":"error","code":"E_PROMPT","detail":"invalid prompt file or content"}
+```
+
+- `get_prompts` always answers with all four keys; a missing or unreadable file is `""`, and a file
+  is truncated to 65536 characters when read.
+- `set_prompt` accepts only those four names and a string `content` of at most 65536 **UTF-8 bytes**;
+  anything else, or an OS error while writing, is `E_PROMPT` and no success ack is sent. Success
+  writes `<workspace>/<file>` and answers `prompt_saved`.
+- The SPA loads the editor with `get_prompts` and shows `prompt_saved` as the save confirmation.
+
+### 17.5 `skills`
+
+```json
+browser → container : {"t":"skills"}
+container → browser : {"t":"skills","items":[{"id":"web-search","name":"联网搜索",
+                                              "description":"…"}]}
+```
+
+- Items come from `GET /api/skills`, falling back to the local skill registry and then
+  `agent.json`; disabled entries are dropped, bare strings are accepted as ids, and duplicates are
+  removed. `items: []` is a valid answer.
+- Only `id`, `name` and `description` cross the wire; skill instructions stay in the container.
+- The SPA requests `skills` after connect and whenever the skill picker (the `@` pill) opens.
+
+### 17.6 Control-frame status
+
+All six replies are control frames: no `seq`, not ring-buffered, not replayed on `resume`. A
+reconnecting client re-requests them. `chats` is also how a client learns about chats created or
+deleted elsewhere.

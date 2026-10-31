@@ -21,13 +21,15 @@
  *   M32_LABEL=before node tests/perf_m32.mjs
  *   M32_LABEL=after  node tests/perf_m32.mjs
  *
- * Writes tests/perf-m32-<label>.json and prints a summary table. Env:
+ * Writes tests/out/perf-m32-<label>.json and prints a summary table. Env:
  *   M32_SKIP_BUILD=1   reuse spa/dist
  *   M32_PREVIEW_PORT   default 4191
  *   M32_HEADED=1       visible browser
  *   M32_RUNS           open-to-interactive repetitions (default 5)
  *   M32_STREAM_RUNS    repetitions per stream scenario (default 2)
- *   M32_SHOT=1         save a mid-stream screenshot (tests/m32-stream.png)
+ *   M32_SHOT=1         save a mid-stream screenshot (tests/out/m32-stream.png)
+ *   M32_OUT            explicit JSON path (default tests/out/; EVIDENCE=1 and
+ *                      M32_OUT=perf-m32-<label>.json write the tracked file)
  */
 
 import { chromium } from 'playwright';
@@ -36,6 +38,8 @@ import { createRequire } from 'node:module';
 import { existsSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { artifactFile } from './artifacts.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -599,7 +603,7 @@ async function measureStream(page, plain = false) {
       }
     });
     await sleep(120);
-    await page.screenshot({ path: join(HERE, 'm32-stream.png') });
+    await page.screenshot({ path: artifactFile('m32-stream.png') });
   }
   await page.waitForFunction(() => document.querySelectorAll('.bubble.streaming').length === 0, null, {
     timeout: 60000,
@@ -851,7 +855,7 @@ async function main() {
     await browser.close().catch(() => {});
   }
 
-  const file = join(HERE, `perf-m32-${LABEL}.json`);
+  const file = artifactFile(`perf-m32-${LABEL}.json`, process.env.M32_OUT);
   writeFileSync(file, `${JSON.stringify(report, null, 2)}\n`);
 
   for (const pass of report.passes) {

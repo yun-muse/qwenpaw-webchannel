@@ -5,8 +5,10 @@
  *   3. the frame leaves the browser but the connection dies before any receipt.
  *
  * Evidence only: this script does not assert product behaviour, it records it
- * (tests/m37-probe.json) and prints a table. It reuses the same pieces as
- * tests/e2e_m19.mjs: relay-node on :8787, a minimal mock agent, `vite preview`.
+ * and prints a table. It reuses the same pieces as tests/e2e_m19.mjs:
+ * relay-node on :8787, a minimal mock agent, `vite preview`. The record goes
+ * to tests/out/ by default; EVIDENCE=1 (or M37_OUT) writes the tracked
+ * tests/m37-probe.json + tests/m37-probe-final.png.
  *
  *   node tests/probe_m37.mjs            # uses the existing spa/dist build
  *   M37_SKIP_BUILD=0 node tests/probe_m37.mjs
@@ -17,6 +19,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { chromium, devices } from 'playwright';
+
+import { artifactFile } from './artifacts.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -323,11 +327,17 @@ async function main() {
   await sleep(700);
   evidence.p4.afterReload = { ...(await statusOf(page)), drafts: beforeReload };
 
-  await page.screenshot({ path: join(HERE, 'm37-probe-final.png'), fullPage: false });
+  await page.screenshot({
+    path: artifactFile('m37-probe-final.png', process.env.M37_OUT_PNG),
+    fullPage: false,
+  });
   await context.close();
   await browser.close();
 
-  writeFileSync(join(HERE, 'm37-probe.json'), JSON.stringify(evidence, null, 2));
+  writeFileSync(
+    artifactFile('m37-probe.json', process.env.M37_OUT),
+    JSON.stringify(evidence, null, 2),
+  );
   log(JSON.stringify(evidence, null, 2));
   cleanup();
 }

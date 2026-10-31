@@ -8,18 +8,21 @@
 //     BOTH the exact user text and the exact reply text,
 //  4. tools/turso_history.py --list shows the chat id.
 // First connect to Turso can take tens of seconds, so the archive poll is
-// deliberately generous (5 s x 180 s). Frames go to
-// tests/e2e_turso.frames.log. Final line: E2E_TURSO PASS/FAIL (+ reason).
+// deliberate generous (5 s x 180 s). Frames go to
+// tests/out/e2e_turso.frames.log (EVIDENCE=1 writes the tracked path).
+// Final line: E2E_TURSO PASS/FAIL (+ reason).
 import { createRequire } from 'node:module';
 import { writeFileSync, appendFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+import { artifactFile } from './artifacts.mjs';
+
 const require = createRequire(new URL('../mock/package.json', import.meta.url));
 const WebSocket = require('ws');
 
 const PORT = 8787;
-const LOG = new URL('./e2e_turso.frames.log', import.meta.url);
+const LOG = artifactFile('e2e_turso.frames.log', process.env.LOG_FILE);
 const TOOL = fileURLToPath(new URL('../tools/turso_history.py', import.meta.url));
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const REPLY_TIMEOUT_MS = 120000;

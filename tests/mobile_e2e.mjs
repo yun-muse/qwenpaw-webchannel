@@ -17,7 +17,8 @@
  * Environment variables (all optional):
  *   BASE_URL              target origin; default https://qwenpaw-webchannel-spa.pages.dev/
  *   LOGIN_PASSWORD_FILE   password file; default ../.secrets/login_password.txt
- *   OUT_DIR               screenshot output; default ./mobile-shots
+ *   OUT_DIR               screenshot output; default ./out/mobile-shots
+ *   EVIDENCE=1            write the tracked ./mobile-shots/ evidence set
  *   LABEL                 file-name prefix; default "before"
  *   CHAT_ID               chat to open; default chat-mvqvtho0 (the M9 entropy chat)
  *   CHAT_TITLE_HINT       fallback title match; default M9验证
@@ -52,13 +53,15 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { artifactDir } from './artifacts.mjs';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BASE_URL = process.env.BASE_URL || 'https://qwenpaw-webchannel-spa.pages.dev/';
 const PASSWORD_FILE = resolve(
   HERE,
   process.env.LOGIN_PASSWORD_FILE || '../.secrets/login_password.txt',
 );
-const OUT_DIR = resolve(HERE, process.env.OUT_DIR || './mobile-shots');
+const OUT_DIR = artifactDir('mobile-shots', process.env.OUT_DIR);
 const LABEL = process.env.LABEL || 'before';
 const CHAT_ID = process.env.CHAT_ID || 'chat-mvqvtho0';
 const CHAT_TITLE_HINT = process.env.CHAT_TITLE_HINT || 'M9验证';

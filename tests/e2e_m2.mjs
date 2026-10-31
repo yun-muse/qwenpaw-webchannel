@@ -11,17 +11,20 @@
 //  4. Resume: disconnect mid-stream, reconnect + {t:"resume", last_seq},
 //     missed frames arrive and full text assembles == trailing msg text.
 //  5. Stretch: try to trigger a real approval via a shell-tool prompt.
-// All frames logged to tests/e2e_m2.frames.log. Each assertion prints a
+// All frames logged to tests/out/e2e_m2.frames.log (EVIDENCE=1 writes the
+// tracked tests/e2e_m2.frames.log). Each assertion prints a
 // line; final line is E2E_M2 PASS/FAIL for the mandatory assertions 0-3
 // (resume + approval report their own verdicts).
 import { createRequire } from 'node:module';
 import { writeFileSync, appendFileSync } from 'node:fs';
 
+import { artifactFile } from './artifacts.mjs';
+
 const require = createRequire(new URL('../mock/package.json', import.meta.url));
 const WebSocket = require('ws');
 
 const PORT = 8787;
-const LOG = new URL('./e2e_m2.frames.log', import.meta.url);
+const LOG = artifactFile('e2e_m2.frames.log', process.env.LOG_FILE);
 writeFileSync(LOG, '');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const results = {};

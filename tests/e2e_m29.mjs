@@ -30,7 +30,8 @@
  *   M29_SKIP_BUILD=1   reuse spa/dist
  *   M29_ONLY=...       1|2|3|4|5|6|legacy (comma separated)
  *   M29_HEADED=1
- *   OUT_DIR            screenshots; default ./m29-shots
+ *   OUT_DIR            screenshots; default ./out/m29-shots
+ *   EVIDENCE=1         write the tracked ./m29-shots/ evidence set
  */
 
 import { chromium, devices } from 'playwright';
@@ -50,10 +51,12 @@ import { tmpdir } from 'node:os';
 import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { artifactDir } from './artifacts.mjs';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
 const SPA_DIR = join(ROOT, 'spa');
-const OUT_DIR = resolve(HERE, process.env.OUT_DIR || './m29-shots');
+const OUT_DIR = artifactDir('m29-shots', process.env.OUT_DIR);
 const PORT = Number(process.env.M29_PORT || 4190);
 const BASE = `http://127.0.0.1:${PORT}/`;
 const HEADED = process.env.M29_HEADED === '1';

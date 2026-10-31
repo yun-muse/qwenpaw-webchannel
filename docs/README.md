@@ -35,7 +35,7 @@ M8 – M15 没有单独的 `*-report.md`。这些能力直接记录在协议文�
 
 | 里程碑 | 能力 | 从哪里读 |
 |---|---|---|
-| M8 | 会话列表与删除（服务端）、重命名（本地存储）；工作区提示词；技能列表 | `plugin/frames.py` 的 `chats`、`del_chat`→`chat_deleted`、`rename_chat`→`chat_renamed`、`get_prompts`→`prompts`、`set_prompt`→`prompt_saved`、`skills` 帧（`protocol/frames.md` 尚未收录这批附加帧）、`plugin/channel.py` |
+| M8 | 会话列表与删除（服务端）、重命名（本地存储）；工作区提示词；技能列表 | `plugin/frames.py` 的 `chats`、`del_chat`→`chat_deleted`、`rename_chat`→`chat_renamed`、`get_prompts`→`prompts`、`set_prompt`→`prompt_saved`、`skills` 帧（`protocol/frames.md` §17）、`plugin/channel.py` |
 | M9 | 会话推理强度 | `protocol/frames.md` §10、`plugin/util.py` 的 effort 映射 |
 | M11 | 30 天登录、会话用量 | `protocol/frames.md` §11、`spa/src/relay.ts`、`relay-cf/src/index.ts` |
 | M12 | Markdown 导出 | `protocol/frames.md` §12、`plugin/util.py::build_export_markdown` |
@@ -78,5 +78,6 @@ M8 – M15 没有单独的 `*-report.md`。这些能力直接记录在协议文�
 | M37 | [`m37-report.md`](m37-report.md) | 离线 outbox：只在浏览器可观测的离线入队，永不自动重发已写 socket 的条目 |
 | M38 | [`m38-report.md`](m38-report.md) | 生产验收扫荡（版本/中继/功能/卫生）+ 文档收尾 |
 | M39 | [`m39-report.md`](m39-report.md) | agent presence：中继在槽位变化时广播 `status{agentOnline}`，SPA 页眉与 outbox 接入（协议 v11） |
+| M40 | [`m40-report.md`](m40-report.md) | 收尾包：测试默认写 `tests/out/` 且全套件后工作区干净；模型选择器 mock e2e；协议文档补齐 M8 帧（§17） |
 
 进度与验证记录还可以看仓库根目录的 `AGENTS.md`（只记非显然的约定和教训）以及 `tasks/` 下的任务书。

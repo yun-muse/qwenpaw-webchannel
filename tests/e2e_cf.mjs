@@ -20,12 +20,15 @@
 import { createRequire } from 'node:module';
 import { readFileSync, writeFileSync } from 'node:fs';
 
+import { artifactFile } from './artifacts.mjs';
+
 const require = createRequire(new URL('../mock/package.json', import.meta.url));
 const WebSocket = require('ws');
 
 const BASE = process.env.CF_RELAY_BASE || 'http://127.0.0.1:8788';
 const WS_BASE = BASE.replace(/^http/, 'ws');
-const LOG = new URL('./e2e_cf.frames.log', import.meta.url);
+// Frames log: tests/out/ by default, the tracked file only under EVIDENCE=1.
+const LOG = artifactFile('e2e_cf.frames.log', process.env.LOG_FILE);
 writeFileSync(LOG, '');
 
 const devVars = {};

@@ -5,9 +5,12 @@
 // {t:"msg", chat:"m1"} and collects start/evt/end frames (Tier 2):
 // PASS requires a start frame, >1 evt frames with strictly increasing
 // seq, concatenated evt data.text forming a non-empty coherent reply,
-// and an end frame. All frames are logged to tests/e2e_m1.frames.log.
+// and an end frame. All frames are logged to tests/out/e2e_m1.frames.log
+// (EVIDENCE=1 writes the tracked tests/e2e_m1.frames.log).
 import { createRequire } from 'node:module';
 import { writeFileSync, appendFileSync } from 'node:fs';
+
+import { artifactFile } from './artifacts.mjs';
 
 const require = createRequire(new URL('../mock/package.json', import.meta.url));
 const WebSocket = require('ws');
@@ -15,7 +18,7 @@ const WebSocket = require('ws');
 const PORT = 8787;
 const CHAT = 'm1';
 const TIMEOUT_MS = Number(process.env.E2E_M1_TIMEOUT_MS || 120000);
-const LOG = new URL('./e2e_m1.frames.log', import.meta.url);
+const LOG = artifactFile('e2e_m1.frames.log', process.env.LOG_FILE);
 writeFileSync(LOG, '');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
