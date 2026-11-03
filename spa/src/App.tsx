@@ -132,6 +132,7 @@ import {
   paletteEntries,
 } from './lib/palette';
 import type { PaletteEntry } from './lib/palette';
+import { isImeKey, shouldSendOnEnter } from './lib/keys';
 import { formatExact, formatTokens, turnTitle, turnUsageOf, usageOf } from './lib/usage';
 import type { ChatUsage, TurnUsage } from './lib/usage';
 import { formatRate, statsBars, statsOf } from './lib/stats';
@@ -5334,6 +5335,12 @@ export default function App() {
   const paletteCursor = activeListLength > 0 ? Math.min(paletteIndex, activeListLength - 1) : 0;
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    // M41: while an IME owns the key (composition in progress, or Android's
+    // keyCode 229) Enter is the IME confirming/committing -- including the
+    // commit that follows a clipboard paste. It is not a send, and it must not
+    // pick a palette row either. Guarded before every branch so no path can
+    // turn a phone's paste-confirm into a sent message.
+    if (isImeKey(e.nativeEvent)) return;
     if (paletteOpen) {
       if (e.key === 'ArrowDown' && activeListLength > 0) {
         e.preventDefault();
@@ -5369,7 +5376,7 @@ export default function App() {
         return;
       }
     }
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (shouldSendOnEnter(e.nativeEvent)) {
       e.preventDefault();
       send();
     }
@@ -5452,6 +5459,13 @@ export default function App() {
     if (files.length) void addFiles(files);
   };
 
+  /**
+   * M41: paste never sends. Clipboard *files* become pending chips (M22/M35);
+   * plain text keeps the browser's default insertion, so every pasted line --
+   * including a trailing newline -- lands in the composer for editing. Nothing
+   * on this path may reach `send()`; the only exits are the 发送 button and a
+   * real Enter (see `lib/keys.ts`).
+   */
   const onPaste = (e: ReactClipboardEvent<HTMLTextAreaElement>) => {
     const items = e.clipboardData?.items;
     if (!items) return;
@@ -6622,12 +6636,15 @@ export default function App() {
 
               <div className="composer-tools-right">
                 {streaming && state === 'live' ? (
-                  <button className="stop" onClick={stop}>
+                  <button type="button" className="stop" onClick={stop}>
                     <Square size={12} />
                     <span>停止</span>
                   </button>
                 ) : (
-                  <button className="send" onClick={send} disabled={!canSend}>
+                  /* M41: explicit button, never a submit -- a synthesized
+                     click (or a stray Enter in a wrapping form) must not be
+                     able to send anything. */
+                  <button type="button" className="send" onClick={send} disabled={!canSend}>
                     <Send size={13} />
                     <span>发送</span>
                   </button>

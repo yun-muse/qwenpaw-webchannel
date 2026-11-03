@@ -61,7 +61,7 @@ M8 – M15 没有单独的 `*-report.md`。这些能力直接记录在协议文�
 | M25 | 批量导出（进度/取消/失败计数/100 上限）；fork 探测后跳过；e2e 固定 UTF-8 locale | `spa/src/lib/bulkExport.ts`、`tests/e2e_m19.mjs` |
 | M26 | 侧栏重构：单行会话、⋯ 菜单、移动端底部弹层、密度目标 | `spa/src/App.tsx`、`spa/src/App.css` |
 
-## M27 – M39
+## M27 – M41
 
 | 里程碑 | 文档 | 主题 |
 |---|---|---|
@@ -79,5 +79,6 @@ M8 – M15 没有单独的 `*-report.md`。这些能力直接记录在协议文�
 | M38 | [`m38-report.md`](m38-report.md) | 生产验收扫荡（版本/中继/功能/卫生）+ 文档收尾 |
 | M39 | [`m39-report.md`](m39-report.md) | agent presence：中继在槽位变化时广播 `status{agentOnline}`，SPA 页眉与 outbox 接入（协议 v11） |
 | M40 | [`m40-report.md`](m40-report.md) | 收尾包：测试默认写 `tests/out/` 且全套件后工作区干净；模型选择器 mock e2e；协议文档补齐 M8 帧（§17） |
+| M41 | [`m41-report.md`](m41-report.md) | 粘贴永不发送：真实粘贴矩阵全 0 帧（桌面/手机 × 单行/多行/尾换行），真凶是未防的 IME Enter（`isComposing` / `keyCode 229`），发送按钮显式 `type="button"` |
 
 进度与验证记录还可以看仓库根目录的 `AGENTS.md`（只记非显然的约定和教训）以及 `tasks/` 下的任务书。

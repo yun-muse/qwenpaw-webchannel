@@ -17,7 +17,10 @@
  * code/currency exemptions, and the 390px wide-formula scroller), and the
  * M40 pack (model picker: provider chips, the active row, a real
  * set_model -> model_changed switch, the vision:false hint, and the model
- * context the mock observes when the next message arrives).
+ * context the mock observes when the next message arrives), and the M41 pack
+ * (paste never sends on either platform for single-line / multi-line /
+ * trailing-newline text, a pasted image stays a chip, Shift+Enter still
+ * breaks the line, and an IME composition Enter sends nothing).
  * Runs entirely local against a production build:
  *
  *   1. `npm run build` in spa/ (fails the run if the build fails)
@@ -47,6 +50,7 @@
  *   M34_ONLY=1         run only the M34 backup checks (fast loop)
  *   M36_ONLY=1         run only the M36 math checks (fast loop)
  *   M40_ONLY=1         run only the M40 model picker checks (fast loop)
+ *   M41_ONLY=1         run only the M41 paste/IME-send checks (fast loop)
  *
  * M26 evidence (BEFORE vs AFTER) is the same structure-agnostic block, so the
  * BEFORE shots come from the unmodified build:
@@ -4533,6 +4537,266 @@ async function runM40ModelChecks(page, pass, mobile) {
   await page.keyboard.press('Escape');
 }
 
+/**
+ * M41 — "paste must never send".
+ *
+ * The reported symptom was a phone user pasting text and watching it leave
+ * the composer. The matrix below drives the *real* paste path (clipboard +
+ * the browser's own paste command, so `paste` -> `beforeinput insertFromPaste`
+ * -> `input` all fire and the default insertion runs) for single-line,
+ * multi-line and trailing-newline text, on the desktop and the 390 px coarse
+ * pointer pass. Every case must keep the text in the composer and emit zero
+ * `msg` frames to the agent.
+ *
+ * The one reproducible implicit send is the IME's own Enter: a phone keyboard
+ * confirms/commits with Enter, and `onKeyDown` used to send on any Enter with
+ * no composition guard. That is the red -> green case here, and it is checked
+ * on both platforms (`isComposing`) plus the Android `keyCode 229` arm.
+ */
+async function runM41Checks(page, pass, mobile, context) {
+  resetState();
+  await page.evaluate(() => {
+    localStorage.setItem('webchannel.chats', JSON.stringify(['chat-alpha', 'chat-beta']));
+    localStorage.setItem('webchannel.activeChat', 'chat-alpha');
+    localStorage.removeItem('webchannel.drafts');
+    localStorage.removeItem('webchannel.outbox');
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await waitForHistory(page);
+  await sleep(400);
+
+  const composer = page.locator('.composer textarea');
+  const cdp = await context.newCDPSession(page);
+
+  const readComposer = () =>
+    page.evaluate(() => ({
+      value: (document.querySelector('.composer textarea') || {}).value || '',
+      chips: document.querySelectorAll('.composer .chip').length,
+      note: (document.querySelector('.composer .chip-note') || {}).textContent || '',
+      sendDisabled: Boolean((document.querySelector('.composer .send') || {}).disabled),
+      inForm: Boolean(document.querySelector('.composer textarea')?.closest('form')),
+    }));
+  const focusComposer = async () => {
+    if (mobile) await composer.tap();
+    else await composer.click();
+    await sleep(80);
+  };
+  const clearComposer = async () => {
+    await composer.fill('');
+    await sleep(120);
+  };
+  /** The browser's own paste command: fires the real `paste` event. */
+  const pasteText = async (text) => {
+    await page.evaluate((value) => navigator.clipboard.writeText(value), text);
+    await focusComposer();
+    await cdp.send('Input.dispatchKeyEvent', {
+      type: 'keyDown',
+      key: 'v',
+      code: 'KeyV',
+      windowsVirtualKeyCode: 86,
+      nativeVirtualKeyCode: 86,
+      modifiers: 2,
+      commands: ['paste'],
+    });
+    await cdp.send('Input.dispatchKeyEvent', {
+      type: 'keyUp',
+      key: 'v',
+      code: 'KeyV',
+      windowsVirtualKeyCode: 86,
+      nativeVirtualKeyCode: 86,
+      modifiers: 2,
+    });
+    await sleep(300);
+  };
+
+  const shape = await readComposer();
+  check(
+    `${pass}: M41 composer is not inside a form and 发送 is an explicit button`,
+    shape.inForm === false,
+    JSON.stringify(shape),
+  );
+  const sendType = await page.evaluate(
+    () => (document.querySelector('.composer .send') || {}).type || null,
+  );
+  check(`${pass}: M41 发送 button is type=button`, sendType === 'button', String(sendType));
+
+  // ---- 1. the paste matrix (real browser paste, both platforms) ---------
+  const variants = [
+    { id: 'single-line', text: 'M41 单行粘贴文本' },
+    { id: 'multi-line', text: 'M41 第一行\n第二行\n第三行' },
+    { id: 'trailing-newline', text: 'M41 末尾带换行的粘贴文本\n' },
+  ];
+  for (const variant of variants) {
+    await clearComposer();
+    state.received = [];
+    await pasteText(variant.text);
+    const pasted = await readComposer();
+    check(
+      `${pass}: M41 paste ${variant.id} emits no msg frame`,
+      state.received.length === 0,
+      JSON.stringify(state.received.map((item) => item.text)),
+    );
+    check(
+      `${pass}: M41 paste ${variant.id} keeps the exact text (newlines included)`,
+      pasted.value === variant.text,
+      JSON.stringify(pasted.value),
+    );
+    check(`${pass}: M41 paste ${variant.id} adds no attachment chip`, pasted.chips === 0, String(pasted.chips));
+    // Proof the zero above is real: the send affordance is live (the socket is
+    // up, the composer has content) and the paste still sent nothing.
+    check(
+      `${pass}: M41 paste ${variant.id} leaves 发送 ready but unsent`,
+      pasted.sendDisabled === false && state.received.length === 0,
+      JSON.stringify({ sendDisabled: pasted.sendDisabled, received: state.received.length }),
+    );
+
+    // …and the composer is still a live editor: typing at the caret appends,
+    // no send. (Paste leaves the caret inside the pasted block, so put it at
+    // the end explicitly instead of assuming insertion order.)
+    await page.evaluate(() => {
+      const area = document.querySelector('.composer textarea');
+      area.focus();
+      area.setSelectionRange(area.value.length, area.value.length);
+    });
+    await page.keyboard.type(' +edit');
+    await sleep(200);
+    const edited = await readComposer();
+    check(
+      `${pass}: M41 paste ${variant.id} stays editable`,
+      edited.value === `${variant.text} +edit` && state.received.length === 0,
+      JSON.stringify(edited.value),
+    );
+  }
+
+  // ---- 2. a pasted image is still only a pending chip -------------------
+  await clearComposer();
+  state.received = [];
+  const imagePaste = await pastePayload(page, {
+    fileName: 'm41-paste.png',
+    mime: 'image/png',
+    size: 64,
+    head: Array.from(ATT_PNG.subarray(0, 32)),
+  });
+  await sleep(500);
+  const chip = await readComposer();
+  check(
+    `${pass}: M41 pasted image is prevented from inserting into the composer`,
+    imagePaste.notPrevented === false,
+    JSON.stringify(imagePaste),
+  );
+  check(
+    `${pass}: M41 pasted image becomes one ready chip and sends nothing`,
+    chip.chips === 1 && /已就绪/.test(chip.note) && state.received.length === 0 && chip.value === '',
+    JSON.stringify({ chip, received: state.received.length }),
+  );
+  await page.locator('.composer .chip-x').click();
+  await sleep(200);
+  const chipGone = await readComposer();
+  check(`${pass}: M41 the pasted chip can be removed without sending`, chipGone.chips === 0 && state.received.length === 0);
+
+  // ---- 3. Shift+Enter is still a newline --------------------------------
+  await clearComposer();
+  state.received = [];
+  await focusComposer();
+  await page.keyboard.type('M41 shift-enter line 1');
+  await page.keyboard.press('Shift+Enter');
+  await page.keyboard.type('line 2');
+  await sleep(200);
+  const shifted = await readComposer();
+  check(
+    `${pass}: M41 Shift+Enter inserts a newline and sends nothing`,
+    shifted.value === 'M41 shift-enter line 1\nline 2' && state.received.length === 0,
+    JSON.stringify(shifted.value),
+  );
+
+  // ---- 4. IME composition Enter must not send (red before the fix) ------
+  await clearComposer();
+  state.received = [];
+  await focusComposer();
+  await cdp.send('Input.imeSetComposition', { text: 'nihao', selectionStart: 5, selectionEnd: 5 });
+  await sleep(150);
+  const composed = await readComposer();
+  await cdp.send('Input.dispatchKeyEvent', {
+    type: 'keyDown',
+    key: 'Enter',
+    code: 'Enter',
+    windowsVirtualKeyCode: 13,
+    nativeVirtualKeyCode: 13,
+  });
+  await cdp.send('Input.dispatchKeyEvent', {
+    type: 'keyUp',
+    key: 'Enter',
+    code: 'Enter',
+    windowsVirtualKeyCode: 13,
+    nativeVirtualKeyCode: 13,
+  });
+  await sleep(400);
+  const imeAfter = await readComposer();
+  check(
+    `${pass}: M41 Enter during IME composition sends nothing`,
+    state.received.length === 0,
+    JSON.stringify(state.received.map((item) => item.text)),
+  );
+  check(
+    `${pass}: M41 the composing text stays in the composer`,
+    composed.value.length > 0 && imeAfter.value.length > 0,
+    JSON.stringify({ composed: composed.value, after: imeAfter.value }),
+  );
+  // End the composition the way a keyboard does, then a *real* Enter must
+  // still send -- the guard may only swallow IME keys.
+  await cdp.send('Input.imeSetComposition', { text: '', selectionStart: 0, selectionEnd: 0 });
+  await sleep(150);
+
+  // The Android arm: WebView reports the IME's key as Enter but keeps the
+  // legacy keyCode 229, and `isComposing` is already false by then.
+  await clearComposer();
+  await page.locator('.composer textarea').fill('M41 android 229');
+  await sleep(120);
+  state.received = [];
+  await focusComposer();
+  await cdp.send('Input.dispatchKeyEvent', {
+    type: 'keyDown',
+    key: 'Enter',
+    code: 'Enter',
+    windowsVirtualKeyCode: 229,
+    nativeVirtualKeyCode: 229,
+  });
+  await cdp.send('Input.dispatchKeyEvent', {
+    type: 'keyUp',
+    key: 'Enter',
+    code: 'Enter',
+    windowsVirtualKeyCode: 229,
+    nativeVirtualKeyCode: 229,
+  });
+  await sleep(400);
+  const android229 = await readComposer();
+  check(
+    `${pass}: M41 an Android keyCode-229 Enter sends nothing`,
+    state.received.length === 0 && android229.value === 'M41 android 229',
+    JSON.stringify({ received: state.received.map((item) => item.text), value: android229.value }),
+  );
+
+  // ---- 5. a real Enter still sends exactly once -------------------------
+  await clearComposer();
+  await page.locator('.composer textarea').fill('M41 真实回车发送');
+  await sleep(120);
+  state.received = [];
+  await focusComposer();
+  await page.keyboard.press('Enter');
+  await sleep(600);
+  const afterEnter = await readComposer();
+  check(
+    `${pass}: M41 a real Enter sends exactly one msg frame`,
+    state.received.length === 1 && state.received[0].text === 'M41 真实回车发送',
+    JSON.stringify(state.received.map((item) => item.text)),
+  );
+  check(`${pass}: M41 the composer is cleared after the send`, afterEnter.value === '', JSON.stringify(afterEnter.value));
+
+  // The mock streams a reply; let it finish so the next pack starts clean.
+  await waitUntil(() => !state.streaming.has('chat-alpha'), 20000);
+  await cdp.detach().catch(() => {});
+}
+
 async function runPass(browser, pass, viewport, mobile) {
   resetState();
   const contextOptions = mobile
@@ -4603,6 +4867,12 @@ async function runPass(browser, pass, viewport, mobile) {
 
     if (process.env.M40_ONLY === '1') {
       await runM40ModelChecks(page, pass, mobile);
+      check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
+      return;
+    }
+
+    if (process.env.M41_ONLY === '1') {
+      await runM41Checks(page, pass, mobile, context);
       check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
       return;
     }
@@ -5097,6 +5367,9 @@ async function runPass(browser, pass, viewport, mobile) {
 
     // ---- 15b. M40: model picker (switch, vision hint, msg context) --------
     await runM40ModelChecks(page, pass, mobile);
+
+    // ---- 15c. M41: paste never sends; IME Enter never sends ---------------
+    await runM41Checks(page, pass, mobile, context);
 
     // ---- 16. M37: offline send queue (last: it restarts the relay) -------
     await runM37Checks(page, pass, mobile);
