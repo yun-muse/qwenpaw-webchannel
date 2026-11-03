@@ -52,6 +52,8 @@
  *   M40_ONLY=1         run only the M40 model picker checks (fast loop)
  *   M41_ONLY=1         run only the M41 paste/IME-send checks (fast loop)
  *   M42_ONLY=1         run only the M42 stop checks (fast loop)
+ *   M43_ONLY=1         run only the M43 busy-queue checks (fast loop; the
+ *                      mobile pass also writes a 390x844 evidence shot)
  *   M42_LEGACY=1       M42 red run: the mock stops silently, like the
  *                      pre-fix plugin/runtime (no end/msg/turn frame)
  *
@@ -409,6 +411,14 @@ const state = {
   /** M42: the partial text each plain `streamText` has emitted so far. */
   streamedText: new Map(),
   /**
+   * M43: QwenPaw serializes per session, so a `msg` that arrives mid-turn is
+   * held here and started as the next turn (see `m43Stream`). Also serves as
+   * the "this chat still has work" flag for `serial` receipts.
+   */
+  turnQueue: new Map(),
+  /** M43: every `turn` boundary the mock emitted, in order. */
+  turnLog: [],
+  /**
    * M42 red-run switch: the pre-M42 plugin/runtime stops the producer but
    * sends no terminal frame (no `end` / `msg` / `turn`), which is exactly the
    * stuck-UI bug. Set by `M42_LEGACY=1`.
@@ -465,6 +475,8 @@ function resetState() {
   state.stopTurns.clear();
   state.stopLog = [];
   state.streamedText.clear();
+  state.turnQueue.clear();
+  state.turnLog = [];
   state.legacyStop = process.env.M42_LEGACY === '1';
 }
 
@@ -491,7 +503,13 @@ const agentSend = (frame) => {
   if (agent && agent.readyState === 1) agent.send(JSON.stringify(frame));
 };
 
-function streamText(chat, text, { chunkSize = 10, delay = 45 } = {}) {
+/** M43: every terminal turn boundary the mock emits goes through here. */
+function sendTurn(chat, turnState) {
+  state.turnLog.push({ chat, state: turnState, at: Date.now() });
+  agentSend({ t: 'turn', chat, seq: seq++, state: turnState });
+}
+
+function streamText(chat, text, { chunkSize = 10, delay = 45, onDone = null } = {}) {
   const previous = state.streaming.get(chat);
   if (previous) clearInterval(previous);
   // ~10 chars per frame: the SPA re-renders often enough to catch duplicates,
@@ -522,12 +540,13 @@ function streamText(chat, text, { chunkSize = 10, delay = 45 } = {}) {
     // M42: every turn closes with an explicit turn boundary. The real plugin
     // does this from `_on_process_completed`; without it a SPA that tracks
     // "busy" (not just an open stream) could never hide 停止 again.
-    agentSend({ t: 'turn', chat, seq: seq++, state: 'done' });
+    sendTurn(chat, 'done');
     state.streamedText.delete(chat);
     if (state.recordSends) {
       const list = state.history[chat] || (state.history[chat] = []);
       list.push({ role: 'assistant', text });
     }
+    if (onDone) onDone();
   }, delay);
   state.streaming.set(chat, timer);
 }
@@ -555,7 +574,37 @@ function stopPlainStream(chat) {
       stopped: true,
     });
   }
-  agentSend({ t: 'turn', chat, seq: seq++, state: 'stopped' });
+  sendTurn(chat, 'stopped');
+}
+
+/**
+ * M43: one turn with a short answer, plus QwenPaw's per-session serialization:
+ * a second `msg` for the same chat is not streamed on top of the open one, it
+ * waits in `turnQueue` and starts after this turn's `turn` frame -- exactly the
+ * probe's finding (§1.2). `serial` on the receipt proves it from the test side.
+ */
+function m43Stream(chat, text) {
+  const pending = state.turnQueue.get(chat) || [];
+  pending.push(text);
+  state.turnQueue.set(chat, pending);
+  drainM43(chat);
+}
+
+function drainM43(chat) {
+  if (state.streaming.has(chat) || state.stopTurns.has(chat)) return;
+  const pending = state.turnQueue.get(chat) || [];
+  const text = pending.shift();
+  if (!text) {
+    state.turnQueue.delete(chat);
+    return;
+  }
+  if (pending.length) state.turnQueue.set(chat, pending);
+  else state.turnQueue.delete(chat);
+  streamText(chat, `已收到「${text}」。`, {
+    chunkSize: 4,
+    delay: 55,
+    onDone: () => drainM43(chat),
+  });
 }
 
 /**
@@ -639,8 +688,11 @@ function streamStopTurn(chat, text) {
       parts: [{ type: 'text', text: turn.text }],
     });
     turn.phase = 'done';
-    agentSend({ t: 'turn', chat, seq: seq++, state: 'done' });
+    sendTurn(chat, 'done');
     state.stopTurns.delete(chat);
+    // M43: a 立即发送 message received during this turn was parked by
+    // `m43Stream`; the SPA cannot send it again, the mock runs it now.
+    drainM43(chat);
   });
 }
 
@@ -679,7 +731,7 @@ function stopToolTurn(chat) {
       });
     }
   }
-  agentSend({ t: 'turn', chat, seq: seq++, state: 'stopped' });
+  sendTurn(chat, 'stopped');
   return true;
 }
 
@@ -850,6 +902,10 @@ function handleAgentFrame(frame) {
         text: String(frame.text || ''),
         at: Date.now(),
         model: state.activeModel ? { ...state.activeModel } : null,
+        // M43: was this chat already mid-turn when the frame arrived? A queued
+        // message must arrive only between turns (serial), a 立即发送 one may
+        // arrive during one (the backend then runs it after the current turn).
+        serial: !(state.streaming.has(chat) || state.stopTurns.has(chat)),
       });
       if (state.notCreated.has(chat)) {
         setTimeout(() => state.notCreated.delete(chat), state.createDelay);
@@ -884,6 +940,8 @@ function handleAgentFrame(frame) {
         streamMathReply(chat);
       } else if (String(frame.text || '').includes('M42 停止')) {
         streamStopTurn(chat, String(frame.text || ''));
+      } else if (String(frame.text || '').includes('M43')) {
+        m43Stream(chat, String(frame.text || ''));
       } else {
         streamReply(chat);
       }
@@ -5165,6 +5223,409 @@ async function runM42Checks(page, pass, mobile) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// M43 — sending while a turn is running (排队 / 立即发送)
+// ---------------------------------------------------------------------------
+
+/**
+ * The composer swaps 发送 for 停止 while a turn runs, so pressing Enter is the
+ * only send action a busy chat offers; the 排队/立即发送 switch beside 停止
+ * decides what that Enter does. These checks use that real path (fill + Enter)
+ * rather than reaching into the store.
+ */
+async function runM43Checks(page, pass, mobile) {
+  resetState();
+  await page.evaluate(() => {
+    localStorage.setItem('webchannel.chats', JSON.stringify(['chat-alpha', 'chat-beta']));
+    localStorage.setItem('webchannel.activeChat', 'chat-alpha');
+    localStorage.removeItem('webchannel.drafts');
+    localStorage.removeItem('webchannel.outbox');
+    localStorage.removeItem('webchannel.busyQueue');
+    localStorage.removeItem('webchannel.busyMode');
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await waitForHistory(page);
+  await sleep(400);
+
+  const ui = () =>
+    page.evaluate(() => {
+      const textOf = (row) =>
+        (row.querySelector('.plain') || row.querySelector('.bubble-text') || row).textContent.trim();
+      const tools = document.querySelector('.composer-tools-right');
+      const modeEl = tools ? tools.querySelector('.busy-mode') : null;
+      const stopEl = tools ? tools.querySelector('.stop') : null;
+      return {
+        modeCount: document.querySelectorAll('.busy-mode').length,
+        modeOptions: modeEl
+          ? [...modeEl.querySelectorAll('.busy-mode-opt')].map((el) => ({
+              text: (el.textContent || '').trim(),
+              title: el.getAttribute('title') || '',
+              active: el.classList.contains('active'),
+              pressed: el.getAttribute('aria-pressed'),
+            }))
+          : [],
+        modeBeforeStop: Boolean(
+          modeEl &&
+            stopEl &&
+            modeEl.compareDocumentPosition(stopEl) & Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+        queue: [...document.querySelectorAll('.busy-queue-row')].map((row) => ({
+          index: ((row.querySelector('.busy-queue-index') || {}).textContent || '').trim(),
+          text: ((row.querySelector('.busy-queue-text') || {}).textContent || '').trim(),
+          hasUndo: Boolean(row.querySelector('.busy-queue-undo')),
+        })),
+        queueTitle: ((document.querySelector('.busy-queue-title') || {}).textContent || '').trim(),
+        queueRegions: document.querySelectorAll('.busy-queue').length,
+        stop: document.querySelectorAll('.composer .stop').length,
+        send: document.querySelectorAll('.composer .send').length,
+        input: (document.querySelector('.composer textarea') || {}).value || '',
+        userRows: [...document.querySelectorAll('.messages .row.user')].map((row) => textOf(row)),
+        assistant: [
+          ...document.querySelectorAll(
+            '.messages .row.assistant .md, .messages .row.assistant .plain',
+          ),
+        ]
+          .map((el) => el.textContent || '')
+          .join('\n'),
+        storedQueue: localStorage.getItem('webchannel.busyQueue'),
+        storedMode: localStorage.getItem('webchannel.busyMode'),
+        notice: ((document.querySelector('.composer-error') || {}).textContent || '').trim(),
+      };
+    });
+
+  const newChat = async () => {
+    await page.keyboard.press('Control+Shift+O');
+    await sleep(450);
+    return page.evaluate(() => localStorage.getItem('webchannel.activeChat'));
+  };
+  const pickMode = async (label) => {
+    await page.locator('.busy-mode-opt', { hasText: label }).first().click();
+    await sleep(150);
+  };
+  /** The busy-chat send path: there is no 发送 button, Enter is the send. */
+  const typeAndEnter = async (text) => {
+    const box = page.locator('.composer textarea');
+    await box.fill(text);
+    await box.press('Enter');
+    await sleep(200);
+  };
+  const receivedFor = (chat) => state.received.filter((item) => item.chat === chat);
+  const idleNow = (chat) => !state.streaming.has(chat) && !state.stopTurns.has(chat);
+  const storedEntries = (snap, chat) => {
+    try {
+      const stored = JSON.parse(snap.storedQueue || '[]');
+      return Array.isArray(stored) ? stored.filter((entry) => entry.chat === chat) : [];
+    } catch {
+      return [];
+    }
+  };
+
+  // ---- (f) idle: neither the switch nor a strip may exist ----------------
+  const idle = await ui();
+  check(
+    `${pass}: M43 an idle chat has no mode control and no queue strip`,
+    idle.modeCount === 0 && idle.queueRegions === 0 && idle.stop === 0,
+    JSON.stringify({ mode: idle.modeCount, queue: idle.queueRegions, stop: idle.stop }),
+  );
+
+  // ---- (a) two sends in 排队 wait, then go out FIFO, one turn each -------
+  const chatA = await newChat();
+  const first = `M42 停止-队列 ${pass} A`;
+  await typeAndEnter(first);
+  const modeSeen = await waitUntil(async () => (await ui()).modeCount === 1, 5000);
+  const busyA = await ui();
+  check(
+    `${pass}: M43 a running turn shows the mode control`,
+    modeSeen && busyA.modeCount === 1 && busyA.modeOptions.length === 2,
+    JSON.stringify(busyA.modeOptions),
+  );
+  check(
+    `${pass}: M43 the switch offers 排队 then 立即发送, defaulting to 排队`,
+    busyA.modeOptions.map((item) => item.text).join('|') === '排队|立即发送' &&
+      busyA.modeOptions[0].active &&
+      busyA.modeOptions[0].pressed === 'true' &&
+      busyA.modeOptions[1].pressed === 'false',
+    JSON.stringify(busyA.modeOptions),
+  );
+  check(
+    `${pass}: M43 the switch sits beside 停止, before it in the same row`,
+    busyA.modeBeforeStop && busyA.stop === 1 && busyA.send === 0,
+    JSON.stringify({ beside: busyA.modeBeforeStop, stop: busyA.stop, send: busyA.send }),
+  );
+
+  await pickMode('排队');
+  const q1 = `M43-排队一-${pass}`;
+  const q2 = `M43-排队二-${pass}`;
+  await typeAndEnter(q1);
+  await typeAndEnter(q2);
+  const queuedA = await ui();
+  check(
+    `${pass}: M43 two busy sends land in the queue strip, not on the wire`,
+    queuedA.queue.length === 2 &&
+      queuedA.queue[0].text === q1 &&
+      queuedA.queue[1].text === q2 &&
+      queuedA.queue.every((row) => row.hasUndo) &&
+      queuedA.queueTitle.includes('2') &&
+      !queuedA.userRows.includes(q1) &&
+      !queuedA.userRows.includes(q2) &&
+      !receivedFor(chatA).some((item) => item.text === q1 || item.text === q2),
+    JSON.stringify({ queue: queuedA.queue, received: receivedFor(chatA).map((item) => item.text) }),
+  );
+  check(
+    `${pass}: M43 queueing clears the composer and shows no error`,
+    queuedA.input === '' && queuedA.notice === '',
+    JSON.stringify({ input: queuedA.input, notice: queuedA.notice }),
+  );
+  check(
+    `${pass}: M43 the queue is persisted under webchannel.busyQueue`,
+    storedEntries(queuedA, chatA).length === 2 &&
+      storedEntries(queuedA, chatA)[0].text === q1 &&
+      storedEntries(queuedA, chatA)[1].text === q2,
+    String(queuedA.storedQueue).slice(0, 200),
+  );
+
+  // Evidence: a 390x844 phone canvas with the switch and two queued rows.
+  if (process.env.M43_ONLY === '1' && mobile) {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await sleep(250);
+    const file = shot(pass, 'm43-busy');
+    await page.screenshot({ path: file, fullPage: false });
+    log(`M43 screenshot: ${file}`);
+    await page.setViewportSize({ width: 390, height: 664 });
+    await sleep(200);
+  }
+
+  const deliveredA = await waitUntil(
+    () => receivedFor(chatA).some((item) => item.text === q1) &&
+      receivedFor(chatA).some((item) => item.text === q2),
+    25000,
+  );
+  const drainedA = await waitUntil(async () => {
+    const now = await ui();
+    return now.modeCount === 0 && now.queueRegions === 0 && idleNow(chatA);
+  }, 15000);
+  const finalA = await ui();
+  const orderA = receivedFor(chatA).map((item) => item.text);
+  check(
+    `${pass}: M43 both queued messages are delivered after the turn ends`,
+    deliveredA,
+    JSON.stringify(orderA),
+  );
+  check(
+    `${pass}: M43 delivery keeps FIFO order, one message per turn`,
+    JSON.stringify(orderA) === JSON.stringify([first, q1, q2]),
+    JSON.stringify(orderA),
+  );
+  const recQ1 = state.received.find((item) => item.chat === chatA && item.text === q1);
+  const recQ2 = state.received.find((item) => item.chat === chatA && item.text === q2);
+  check(
+    `${pass}: M43 neither queued message is written while the chat is answering`,
+    Boolean(recQ1 && recQ2 && recQ1.serial === true && recQ2.serial === true),
+    JSON.stringify({ q1: recQ1 && recQ1.serial, q2: recQ2 && recQ2.serial }),
+  );
+  check(
+    `${pass}: M43 the second queued message waits for the first reply's turn frame`,
+    Boolean(
+      recQ1 &&
+        recQ2 &&
+        state.turnLog.some(
+          (turn) => turn.chat === chatA && turn.at >= recQ1.at && turn.at <= recQ2.at,
+        ),
+    ),
+    JSON.stringify(state.turnLog.filter((turn) => turn.chat === chatA)),
+  );
+  const reply1 = finalA.assistant.indexOf(`已收到「${q1}」`);
+  const reply2 = finalA.assistant.indexOf(`已收到「${q2}」`);
+  check(
+    `${pass}: M43 each queued message gets its own reply, in order (no interleaving)`,
+    reply1 >= 0 && reply2 > reply1,
+    JSON.stringify({ reply1, reply2 }),
+  );
+  check(
+    `${pass}: M43 the strip becomes ordinary bubbles in send order`,
+    finalA.userRows.slice(-2).join('|') === `${q1}|${q2}`,
+    JSON.stringify(finalA.userRows.slice(-3)),
+  );
+  check(
+    `${pass}: M43 the switch and strip disappear when the chat goes idle`,
+    drainedA && finalA.modeCount === 0 && finalA.queueRegions === 0 && finalA.send === 1,
+    JSON.stringify({ mode: finalA.modeCount, queue: finalA.queueRegions, send: finalA.send }),
+  );
+
+  // ---- (b) 立即发送 writes the frame before the turn ends ----------------
+  const chatB = await newChat();
+  const firstB = `M42 停止-立即 ${pass} B`;
+  await typeAndEnter(firstB);
+  await waitUntil(async () => (await ui()).modeCount === 1, 5000);
+  await pickMode('立即发送');
+  const nowA = await ui();
+  const nowOpt = nowA.modeOptions.find((item) => item.text === '立即发送') || {};
+  const nowText = `M43-立即-${pass}`;
+  await typeAndEnter(nowText);
+  const wroteNow = await waitUntil(
+    () => state.received.some((item) => item.text === nowText),
+    5000,
+  );
+  const turnStillOpen = !idleNow(chatB);
+  const recNow = state.received.find((item) => item.text === nowText) || {};
+  check(
+    `${pass}: M43 立即发送 is remembered in the mode store`,
+    nowA.storedMode === 'now' && Boolean(nowOpt.active),
+    JSON.stringify({ stored: nowA.storedMode, active: nowOpt.active }),
+  );
+  check(
+    `${pass}: M43 立即发送 writes the msg frame before the turn ends`,
+    wroteNow && turnStillOpen,
+    JSON.stringify({ wrote: wroteNow, streaming: state.streaming.has(chatB), stopTurn: state.stopTurns.has(chatB) }),
+  );
+  const nowUi = await ui();
+  check(
+    `${pass}: M43 the immediate message is not held in the queue`,
+    recNow.serial === false &&
+      nowUi.queue.length === 0 &&
+      nowUi.userRows.includes(nowText),
+    JSON.stringify({ serial: recNow.serial, queue: nowUi.queue, users: nowUi.userRows.slice(-2) }),
+  );
+  check(
+    `${pass}: M43 立即发送 says it runs after the current turn, never that it interrupts`,
+    nowOpt.title.includes('本轮结束后') &&
+      nowOpt.title.includes('不打断') &&
+      !/立即打断|中断当前/.test(nowOpt.title),
+    nowOpt.title,
+  );
+  await waitUntil(() => idleNow(chatB), 20000);
+  await waitUntil(async () => (await ui()).modeCount === 0, 10000);
+
+  // ---- (c) 撤销: never sent, raw text back in the composer ----------------
+  const chatC = await newChat();
+  const firstC = `M42 停止-撤销 ${pass} C`;
+  await typeAndEnter(firstC);
+  await waitUntil(async () => (await ui()).modeCount === 1, 5000);
+  await pickMode('排队');
+  const c1 = `M43-撤销一-${pass}`;
+  const c2 = `M43-撤销二-${pass}`;
+  await typeAndEnter(c1);
+  await typeAndEnter(c2);
+  const twoC = await ui();
+  await page.locator('.busy-queue-undo').first().click();
+  await sleep(250);
+  const cancelled = await ui();
+  check(
+    `${pass}: M43 撤销 drops exactly one queued row and keeps the other`,
+    twoC.queue.length === 2 &&
+      cancelled.queue.length === 1 &&
+      cancelled.queue[0].text === c2,
+    JSON.stringify({ before: twoC.queue, after: cancelled.queue }),
+  );
+  check(
+    `${pass}: M43 撤销 puts the raw text back in the composer`,
+    cancelled.input === c1,
+    JSON.stringify(cancelled.input),
+  );
+  check(
+    `${pass}: M43 a cancelled entry is gone from storage`,
+    storedEntries(cancelled, chatC).length === 1 &&
+      storedEntries(cancelled, chatC)[0].text === c2,
+    String(cancelled.storedQueue).slice(0, 200),
+  );
+  const c2sent = await waitUntil(
+    () => state.received.some((item) => item.text === c2),
+    25000,
+  );
+  await waitUntil(() => idleNow(chatC), 15000);
+  const afterC = await ui();
+  check(
+    `${pass}: M43 only the surviving queued message is sent`,
+    c2sent && !state.received.some((item) => item.text === c1),
+    JSON.stringify(state.received.filter((item) => item.chat === chatC).map((item) => item.text)),
+  );
+  check(
+    `${pass}: M43 the cancelled text stays in the composer, unsent`,
+    afterC.input === c1 && afterC.userRows.filter((text) => text === c1).length === 0,
+    JSON.stringify({ input: afterC.input }),
+  );
+  await page.locator('.composer textarea').fill('');
+  await sleep(120);
+
+  // ---- (d) cross-chat isolation -----------------------------------------
+  const chatD = await newChat();
+  const firstD = `M42 停止-隔离 ${pass} D`;
+  await typeAndEnter(firstD);
+  await waitUntil(async () => (await ui()).modeCount === 1, 5000);
+  await pickMode('排队');
+  const dText = `M43-隔离-${pass}`;
+  await typeAndEnter(dText);
+  const inD = await ui();
+  const other = await newChat();
+  const inOther = await ui();
+  check(
+    `${pass}: M43 the queue strip belongs to the busy chat only`,
+    inD.queue.length === 1 && inOther.queueRegions === 0,
+    JSON.stringify({ d: inD.queue, other: inOther.queueRegions }),
+  );
+  check(
+    `${pass}: M43 an idle chat shows no mode control`,
+    inOther.modeCount === 0 && inOther.stop === 0 && inOther.send === 1,
+    JSON.stringify({ mode: inOther.modeCount, stop: inOther.stop, send: inOther.send }),
+  );
+  check(
+    `${pass}: M43 switching chats sends nothing to the idle chat`,
+    !receivedFor(other).some((item) => item.text === dText),
+    JSON.stringify(receivedFor(other).map((item) => item.text)),
+  );
+  const dSent = await waitUntil(
+    () => receivedFor(chatD).some((item) => item.text === dText),
+    25000,
+  );
+  check(
+    `${pass}: M43 the backlog flushes into its own chat, not the visible one`,
+    dSent && !receivedFor(other).some((item) => item.text === dText),
+    JSON.stringify(state.received.map((item) => `${item.chat}:${item.text}`)),
+  );
+  await waitUntil(() => idleNow(chatD), 20000);
+
+  // ---- (e) stopping the turn flushes the head (M42 stop path) ------------
+  const chatE = await newChat();
+  const firstE = `M42 停止-停止 ${pass} E`;
+  await typeAndEnter(firstE);
+  await waitUntil(async () => (await ui()).modeCount === 1, 5000);
+  await pickMode('排队');
+  const eText = `M43-停止后发送-${pass}`;
+  await typeAndEnter(eText);
+  const eBusy = await waitUntil(
+    () => (state.stopTurns.get(chatE) || {}).phase === 'text',
+    8000,
+  );
+  await sleep(250);
+  await page.locator('.composer .stop').click();
+  const eSent = await waitUntil(
+    () => receivedFor(chatE).some((item) => item.text === eText),
+    10000,
+  );
+  const stopRec = state.received.find((item) => item.chat === chatE && item.text === eText) || {};
+  const stopTurn = state.turnLog.find((item) => item.chat === chatE && item.state === 'stopped') || {};
+  const stopFrame = state.stopLog.find((item) => item.chat === chatE) || {};
+  check(
+    `${pass}: M43 stopping the running turn flushes the queued head`,
+    eBusy && eSent && stopRec.serial === true,
+    JSON.stringify({ busy: eBusy, sent: eSent, serial: stopRec.serial }),
+  );
+  check(
+    `${pass}: M43 the head is written after the stopped turn frame`,
+    stopFrame.at > 0 && stopTurn.at >= stopFrame.at && stopRec.at >= stopTurn.at,
+    JSON.stringify({ stop: stopFrame.at, turn: stopTurn.at, msg: stopRec.at }),
+  );
+  const idleE = await waitUntil(async () => {
+    const now = await ui();
+    return idleNow(chatE) && now.modeCount === 0 && now.queueRegions === 0;
+  }, 15000);
+  check(
+    `${pass}: M43 the switch and strip are gone once the last turn ends`,
+    idleE,
+    JSON.stringify(await ui()),
+  );
+}
+
 async function runPass(browser, pass, viewport, mobile) {
   resetState();
   const contextOptions = mobile
@@ -5247,6 +5708,12 @@ async function runPass(browser, pass, viewport, mobile) {
 
     if (process.env.M42_ONLY === '1') {
       await runM42Checks(page, pass, mobile);
+      check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
+      return;
+    }
+
+    if (process.env.M43_ONLY === '1') {
+      await runM43Checks(page, pass, mobile);
       check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
       return;
     }
@@ -5747,6 +6214,9 @@ async function runPass(browser, pass, viewport, mobile) {
 
     // ---- 15d. M42: stop across pre-token / text / tool phases -------------
     await runM42Checks(page, pass, mobile);
+
+    // ---- 15e. M43: 排队 / 立即发送 while a turn runs ----------------------
+    await runM43Checks(page, pass, mobile);
 
     // ---- 16. M37: offline send queue (last: it restarts the relay) -------
     await runM37Checks(page, pass, mobile);

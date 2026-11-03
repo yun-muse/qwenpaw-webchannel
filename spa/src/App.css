@@ -4798,3 +4798,146 @@ button:disabled {
   color: var(--muted);
   overflow-wrap: anywhere;
 }
+
+/* ---------------------------------------------------------------------------
+   M43 — a busy chat's backlog (排队) and the 排队 / 立即发送 switch.
+   The strip sits outside the composer card on purpose: it is a state of the
+   chat, not part of the draft, and it must survive a chat switch.
+   --------------------------------------------------------------------------- */
+
+.busy-queue {
+  max-width: 780px;
+  margin: 0 auto 6px;
+  padding: 7px 10px 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.busy-queue-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 11.5px;
+  line-height: 1.3;
+  color: var(--muted);
+}
+
+.busy-queue-title {
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.busy-queue-hint {
+  opacity: 0.85;
+}
+
+.busy-queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 132px;
+  overflow-y: auto;
+}
+
+.busy-queue-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12.5px;
+}
+
+.busy-queue-index {
+  flex: 0 0 auto;
+  width: 16px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.busy-queue-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.busy-queue-undo {
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--card);
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.busy-queue-undo:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+/* Segmented control, same language as the effort group. */
+.busy-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.busy-mode-opt {
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 5px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.busy-mode-opt:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+
+.busy-mode-opt.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+/* M22 tap-target rule: 44 px even on a coarse-pointer tablet wider than 720. */
+@media (max-width: 720px), (pointer: coarse) {
+  .busy-queue-undo {
+    min-height: 44px;
+    padding: 0 12px;
+    font-size: 13px;
+  }
+
+  .busy-queue-list {
+    max-height: 176px;
+  }
+
+  .busy-mode {
+    height: 48px;
+  }
+
+  .busy-mode-opt {
+    height: 44px;
+    padding: 0 12px;
+    font-size: 13px;
+  }
+}

@@ -162,6 +162,21 @@ import {
 } from './lib/outbox';
 import type { OutboxEntry } from './lib/outbox';
 import {
+  MAX_BUSY_PER_CHAT,
+  MAX_BUSY_TOTAL,
+  busyChatsWithWork,
+  busyFor,
+  enqueueBusy,
+  loadBusyMode,
+  loadBusyQueue,
+  removeBusyChat,
+  removeBusyEntry,
+  saveBusyMode,
+  saveBusyQueue,
+  takeBusyHead,
+} from './lib/busyQueue';
+import type { BusyMode, BusyQueueEntry } from './lib/busyQueue';
+import {
   DEFAULT_SKILLS,
   FEYNMAN_AGENTS_MD,
   FEYNMAN_SOUL_MD,
@@ -2183,6 +2198,14 @@ export default function App() {
   const [busyChats, setBusyChats] = useState<Set<string>>(() => new Set());
   /** M42: a stop frame is in flight for that chat ("正在停止…"). */
   const [stoppingChats, setStoppingChats] = useState<Set<string>>(() => new Set());
+  /**
+   * M43: messages the user sent into a chat that was mid-turn. Separate from
+   * the M37 outbox: the socket here is fine, the *chat* is busy. Text only —
+   * a queued message must not outlive its attachments (lib/busyQueue.ts).
+   */
+  const [busyEntries, setBusyEntries] = useState<BusyQueueEntry[]>(loadBusyQueue);
+  /** 排队 | 立即发送, remembered across chats and reloads. */
+  const [busyMode, setBusyMode] = useState<BusyMode>(loadBusyMode);
 
   // Endpoint mode: if env vars are baked in, use them; otherwise allow switching between local (:8787) and cloud CF relay
   const [endpointMode, setEndpointMode] = useState<'local' | 'cloud'>(() => {
@@ -2319,6 +2342,10 @@ export default function App() {
   // M37: the outbox is read by socket callbacks that were created long before
   // the next render, so state and ref are written together.
   const outboxRef = useRef<OutboxEntry[]>(outbox);
+  // M43: same write-through pattern; `busyChatsRef` is what a socket callback
+  // reads, because the state setter has not rendered yet when a `turn` arrives.
+  const busyEntriesRef = useRef<BusyQueueEntry[]>(busyEntries);
+  const busyChatsRef = useRef<Set<string>>(new Set());
   const connRef = useRef<ConnState>('idle');
   /**
    * Browser-visible proof that an agent can take work: the `ready` handshake,
@@ -2447,14 +2474,15 @@ export default function App() {
   };
 
   // ---- M42: turn busy / stopping ---------------------------------------
+  /** State + write-through ref: the M43 flush reads it inside socket callbacks. */
   const markBusy = (chat: string, on: boolean) => {
-    setBusyChats((prev) => {
-      if (prev.has(chat) === on) return prev;
-      const next = new Set(prev);
-      if (on) next.add(chat);
-      else next.delete(chat);
-      return next;
-    });
+    const current = busyChatsRef.current;
+    if (current.has(chat) === on) return;
+    const next = new Set(current);
+    if (on) next.add(chat);
+    else next.delete(chat);
+    busyChatsRef.current = next;
+    setBusyChats(next);
   };
   const markStopping = (chat: string, on: boolean) => {
     setStoppingChats((prev) => {
@@ -2690,6 +2718,102 @@ export default function App() {
   const retryOutbox = (id: string) => {
     setOutboxState(retryOutboxEntry(outboxRef.current, id));
     flushOutbox();
+  };
+
+  // ---- M43: busy-chat queue (messages sent mid-turn) ----
+  /** State + write-through ref, exactly like the outbox. */
+  const setBusyEntriesState = (next: BusyQueueEntry[]) => {
+    busyEntriesRef.current = next;
+    setBusyEntries(next);
+  };
+
+  const chooseBusyMode = (mode: BusyMode) => {
+    setBusyMode(mode);
+    saveBusyMode(mode);
+  };
+
+  /**
+   * The head of one chat's queue, *moved* into the M37 outbox: removed here
+   * in the same update that adds it there, so it can never be sent twice.
+   * When the outbox is full nothing is removed (the entry is still in place)
+   * and `queueMessage` has already shown why — refused, never dropped.
+   */
+  const moveBusyHeadToOutbox = (chat: string) => {
+    const moved = takeBusyHead(busyEntriesRef.current, chat);
+    if (!moved.entry) return;
+    if (!queueMessage(chat, moved.entry.text, moved.entry.display, moved.entry.raw)) return;
+    setBusyEntriesState(moved.entries);
+  };
+
+  /**
+   * Hand the next queued message of one chat to the socket. One entry per
+   * call on purpose: its turn ends with a `turn` frame, and that handler
+   * calls back here for the next one, so the replies stay in order.
+   */
+  const flushBusy = (chat: string) => {
+    if (busyChatsRef.current.has(chat)) return;
+    if (!busyEntriesRef.current.some((entry) => entry.chat === chat)) return;
+    const client = canReachAgent() ? clientRef.current : null;
+    if (!client) {
+      // Cannot write: hand it to the store that owns "could not deliver".
+      moveBusyHeadToOutbox(chat);
+      return;
+    }
+    const taken = takeBusyHead(busyEntriesRef.current, chat);
+    if (!taken.entry) return;
+    const entry = taken.entry;
+    const frame: Frame = { t: 'msg', chat, text: entry.text };
+    const size = byteSize(frame);
+    if (size > MAX_FRAME_BYTES) {
+      // Never expected (send() vetted the text). Nothing was removed, so the
+      // entry simply stays at the head of the queue, visibly unsendable.
+      setAttachNotice(oversizeError(size));
+      return;
+    }
+    if (!client.send(frame)) {
+      // The socket died between the reachability check and the write; the
+      // entry is still in the queue, so this is a move, not a copy.
+      moveBusyHeadToOutbox(chat);
+      return;
+    }
+    setBusyEntriesState(taken.entries);
+    ensureChat(chat);
+    touchedChatsRef.current.add(chat);
+    // Same marks a manual send sets: the frame is on the wire, so a turn is
+    // in flight even before the first token.
+    markBusy(chat, true);
+    markStopping(chat, false);
+    clearStopWatchdog(chat);
+    const active = chat === activeRef.current;
+    if (active) {
+      nearBottomRef.current = true;
+      setNearBottom(true);
+    }
+    // A chat this visit has never loaded gets no bubble: its first `hist`
+    // would append the server's copy and duplicate the row (the M37 rule).
+    if (!active && !runtimeOf(chat).loaded) return;
+    updateChat(chat, (prev) => [
+      ...prev,
+      { id: nextId++, role: 'user', kind: 'text', text: entry.display, ts: entry.ts },
+    ]);
+  };
+
+  /** Reconnect / agent-online edges: every chat with work gets its turn. */
+  const flushBusyAll = () => {
+    for (const chat of busyChatsWithWork(busyEntriesRef.current)) flushBusy(chat);
+  };
+
+  /** 撤销: drop one queued entry and give its raw text back to the composer. */
+  const cancelBusyEntry = (id: string) => {
+    const entry = busyEntriesRef.current.find((item) => item.id === id);
+    if (!entry) return;
+    setBusyEntriesState(removeBusyEntry(busyEntriesRef.current, id));
+    if (entry.chat === activeRef.current) {
+      // Never clobber text typed since: the restored sentence goes first.
+      setComposer(input.trim() ? `${entry.raw}\n${input}` : entry.raw);
+    } else if (!draftOf(draftsRef.current, entry.chat)) {
+      rememberDraft(entry.chat, entry.raw);
+    }
   };
 
   const mergeEffortMeta = (chat: string, patch: Partial<EffortMeta>) => {
@@ -3418,10 +3542,17 @@ export default function App() {
   }, [outbox]);
 
   useEffect(() => {
+    // M43: same best-effort persistence for the mid-turn queue.
+    saveBusyQueue(busyEntries);
+  }, [busyEntries]);
+
+  useEffect(() => {
     // M37: a restored queue may name chats this visit has not seen yet; give
     // them a row so the pending message is reachable (mirror of M19's rule:
-    // never prune, only add).
-    for (const chat of new Set(outboxRef.current.map((entry) => entry.chat))) ensureChat(chat);
+    // never prune, only add). M43's busy queue needs the same row.
+    const chats = new Set(outboxRef.current.map((entry) => entry.chat));
+    for (const chat of busyChatsWithWork(busyEntriesRef.current)) chats.add(chat);
+    for (const chat of chats) ensureChat(chat);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount only
   }, []);
 
@@ -3793,7 +3924,11 @@ export default function App() {
           }
           // M42: a pre-v12 plugin has no `turn` frame; keep its old rule so
           // deploying the SPA first cannot leave 停止 visible forever.
-          if (agentProtocolRef.current < 12) markBusy(chat, false);
+          if (agentProtocolRef.current < 12) {
+            markBusy(chat, false);
+            // M43: that clear is this plugin's only idle edge.
+            flushBusy(chat);
+          }
           // M27: the turn is over, so QwenPaw has persisted this chat's
           // ChatSpec -- the one deterministic moment a deferred level can be
           // applied (see `applyPendingEffort`).
@@ -3884,7 +4019,10 @@ export default function App() {
           // Non-streamed replies close the turn here; refresh like `end` does.
           // M42: pre-v12 plugins have no turn boundary, so this is the only
           // place their busy flag can be cleared.
-          if (agentProtocolRef.current < 12) markBusy(chat, false);
+          if (agentProtocolRef.current < 12) {
+            markBusy(chat, false);
+            flushBusy(chat);
+          }
           // M27: same trigger for a level that was waiting for the ChatSpec.
           applyPendingEffort(chat);
           if (chat === activeRef.current) scheduleUsageRefresh(chat);
@@ -3903,8 +4041,16 @@ export default function App() {
           const rt = runtimeOf(chat);
           rt.activeId = null;
           rt.endedId = null;
+          // Before the flush: `closeTurn` badges the last assistant bubble of
+          // *this* turn, and a queued message would put a newer user row after
+          // it (a stopped turn would lose its 已停止 mark).
           closeTurn(chat, frame.state === 'stopped');
+          // M27 first: the pending effort belongs to the chat, not the queue.
           applyPendingEffort(chat);
+          // M43: the chat is idle again (a stop counts too) -- hand over the
+          // next queued message. It starts its own turn, whose `turn` frame
+          // brings us back here for the one after it.
+          flushBusy(chat);
           if (chat === activeRef.current) scheduleUsageRefresh(chat);
           break;
         }
@@ -3998,6 +4144,9 @@ export default function App() {
                 rt.activeId = null;
                 rt.endedId = null;
                 closeTurn(chat, false);
+                // M43: history just proved this chat is idle -- its backlog
+                // may resume (a reload during a turn is the usual case).
+                flushBusy(chat);
               }
             }
           }
@@ -4148,6 +4297,9 @@ export default function App() {
             // plugin's identity push (no `agentOnline`) is the other proof.
             // A no-op when nothing is queued.
             flushOutbox();
+            // M43: the mid-turn queue follows the outbox (older messages
+            // first, and QwenPaw serializes per session anyway).
+            flushBusyAll();
           } else if (agentOnlineRef.current) {
             agentOnlineRef.current = false;
             setAgentOnline(false);
@@ -4493,6 +4645,9 @@ export default function App() {
           // first, so the flush can never send one twice.
           siftOutboxAfterReconnect();
           flushOutbox();
+          // M43: an idle chat with a backlog takes its next message too. A
+          // busy one is skipped by `flushBusy` and resumes on its `turn`.
+          flushBusyAll();
           // Control frames are not replayed, so re-align the visible chat's
           // thinking level on every (re)connect.
           clientRef.current?.send({
@@ -4558,6 +4713,8 @@ export default function App() {
   // `streaming` fallback keeps a client that somehow missed `turn` usable.
   const turnBusy = streaming || busyChats.has(activeChat);
   const turnStopping = stoppingChats.has(activeChat);
+  // M43: the visible chat's backlog, in send order (the strip above the card).
+  const activeBusyEntries = busyFor(busyEntries, activeChat);
   const activeEffort = effortLevels[activeChat] ?? 'default';
   const activeEffortSupported = effortMeta[activeChat]?.supported ?? null;
   const activeUsage = usageByChat[activeChat];
@@ -5120,6 +5277,8 @@ export default function App() {
     markBusy(id, false);
     markStopping(id, false);
     clearStopWatchdog(id);
+    // M43: nor can it ever reach the head of its queue again.
+    setBusyEntriesState(removeBusyChat(busyEntriesRef.current, id));
     if (renamingId === id) cancelRename();
     if (id !== activeChat) return;
     if (remaining.length > 0) selectChat(remaining[0]);
@@ -5364,6 +5523,44 @@ export default function App() {
     // the frame. Otherwise the message is queued locally instead of being
     // written into a relay buffer the user cannot see (or lost outright).
     const client = canReachAgent() ? clientRef.current : null;
+    // M43: the socket can take it, but this chat is still answering. In 排队
+    // mode the text is held here (not written) until the turn ends; 立即发送
+    // keeps the exact send path below. The offline branch stays first: "no
+    // agent" is the outbox's business, never the busy queue's.
+    if (client && busyMode === 'queue' && busyChatsRef.current.has(chat)) {
+      if (pending.length) {
+        setAttachNotice(
+          '排队不接收附件：排队的消息只保留文字，附件会在等待期间失效。请移除附件后排队，或切换为「立即发送」。',
+        );
+        return;
+      }
+      const queued = enqueueBusy(busyEntriesRef.current, {
+        chat,
+        text: wireText,
+        display: displayText,
+        raw: rawInput,
+      });
+      if (queued.refused) {
+        setAttachNotice(
+          queued.refused === 'full-chat'
+            ? `排队已满（每会话 ${MAX_BUSY_PER_CHAT} 条）——请等待这几条发出后再排队。`
+            : `排队已满（共 ${MAX_BUSY_TOTAL} 条）——请等待队列缩短后再排队。`,
+        );
+        return;
+      }
+      if (!queued.entry) return;
+      setBusyEntriesState(queued.entries);
+      ensureChat(chat);
+      touchedChatsRef.current.add(chat);
+      nearBottomRef.current = true;
+      setNearBottom(true);
+      setInput('');
+      rememberDraft(chat, '');
+      setActiveSkill(null);
+      setAttachNotice(null);
+      setComposerError(null);
+      return;
+    }
     if (!client || !client.send(frame)) {
       if (pending.length) {
         // Attachments cannot survive a queue: an inline file would blow the
@@ -6517,6 +6714,35 @@ export default function App() {
             <div className="composer-error">{attachNotice || composerError}</div>
           ) : null}
 
+          {activeBusyEntries.length ? (
+            <div className="busy-queue" role="region" aria-label="排队中的消息">
+              <div className="busy-queue-head">
+                <span className="busy-queue-title">排队中 {activeBusyEntries.length}</span>
+                <span className="busy-queue-hint">本轮结束后依次发送</span>
+              </div>
+              <ol className="busy-queue-list">
+                {activeBusyEntries.map((entry, index) => (
+                  <li className="busy-queue-row" key={entry.id}>
+                    <span className="busy-queue-index" aria-hidden="true">
+                      {index + 1}
+                    </span>
+                    <span className="busy-queue-text" title={entry.display}>
+                      {entry.display}
+                    </span>
+                    <button
+                      type="button"
+                      className="busy-queue-undo"
+                      onClick={() => cancelBusyEntry(entry.id)}
+                      aria-label={`撤销排队中的第 ${index + 1} 条消息`}
+                    >
+                      撤销
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ) : null}
+
           <ContextMeter
             usage={activeUsage}
             turns={turnCount}
@@ -6845,6 +7071,31 @@ export default function App() {
               </div>
 
               <div className="composer-tools-right">
+                {turnBusy ? (
+                  /* M43: how the next message meets a running turn. 立即发送
+                     is honest about QwenPaw's per-session queue: it is picked
+                     up after the current turn, never "interrupting" it. */
+                  <div className="busy-mode" role="group" aria-label="忙碌时的发送方式">
+                    <button
+                      type="button"
+                      className={`busy-mode-opt${busyMode === 'queue' ? ' active' : ''}`}
+                      aria-pressed={busyMode === 'queue'}
+                      onClick={() => chooseBusyMode('queue')}
+                      title="先排在这里，本轮结束后按顺序发送"
+                    >
+                      排队
+                    </button>
+                    <button
+                      type="button"
+                      className={`busy-mode-opt${busyMode === 'now' ? ' active' : ''}`}
+                      aria-pressed={busyMode === 'now'}
+                      onClick={() => chooseBusyMode('now')}
+                      title="本轮结束后接着处理，不打断当前回答"
+                    >
+                      立即发送
+                    </button>
+                  </div>
+                ) : null}
                 {turnBusy && state === 'live' && agentOnline ? (
                   <button
                     type="button"
