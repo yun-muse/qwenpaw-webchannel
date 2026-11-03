@@ -48,6 +48,17 @@ except ImportError:  # standalone test environment without host package
             self._workspace = None
             self._enqueue = None
 
+        async def _on_consume_error(self, request, to_handle, err_text):
+            # Mirrors qwenpaw.app.channels.base:2003 -- the real default sends
+            # the error text through send_content_parts. M42's override calls
+            # super() first, so the stand-in must do the same or the error
+            # reply silently disappears in host-less runs.
+            await self.send_content_parts(
+                to_handle,
+                [TextContent(type=ContentType.TEXT, text=err_text)],
+                getattr(request, "channel_meta", None) or {},
+            )
+
     class ContentType:  # type: ignore[no-redef]
         TEXT = "text"
         FILE = "file"
@@ -103,6 +114,8 @@ try:  # package-relative (tests, ``python -m plugin...``)
         start_frame,
         stats_frame,
         status_frame,
+        stop_error_frame,
+        turn_frame,
         usage_frame,
     )
     from .relay_client import RelayClient
@@ -139,6 +152,8 @@ try:  # package-relative (tests, ``python -m plugin...``)
         model_items,
         pack_history,
         plan_model_switch,
+        response_partial_text,
+        response_status,
         sha256_hex,
         trailing_msg_text,
     )
@@ -176,6 +191,8 @@ except ImportError:  # loaded as a top-level module by the plugin loader
         start_frame,
         stats_frame,
         status_frame,
+        stop_error_frame,
+        turn_frame,
         usage_frame,
     )
     from relay_client import RelayClient
@@ -212,6 +229,8 @@ except ImportError:  # loaded as a top-level module by the plugin loader
         model_items,
         pack_history,
         plan_model_switch,
+        response_partial_text,
+        response_status,
         sha256_hex,
         trailing_msg_text,
     )
@@ -236,6 +255,11 @@ _ATT_CHUNK_PACE_S = 0.04
 # A search page is at most 50 hits. Snippets are ~90 characters, so the reply
 # is a small control frame that needs no size check (M13).
 _SEARCH_LIMIT_MAX = 50
+# M42: a stop pressed within the first seconds of a brand-new chat can arrive
+# before QwenPaw has created the ChatSpec that keys its run. Poll for it for a
+# short, bounded window instead of dropping the stop on the floor.
+_STOP_SPEC_WAIT_S = 4.0
+_STOP_SPEC_POLL_S = 0.2
 
 # Short human-readable ``file_error.msg`` bodies, keyed by protocol code.
 _FILE_ERROR_MSG = {
@@ -340,6 +364,21 @@ class WebChannel(BaseChannel):
         self._flog: Optional[FileLog] = None
         # Per-session token usage read from the agent's session files (M11).
         self._usage = SessionUsageStore()
+        # M42: turn bookkeeping. A turn spans any number of stream segments
+        # and tool phases; `end` alone cannot tell the browser when it is over.
+        # `_turn_serial` increments on every accepted user message; the turn
+        # id `<chat>#<serial>` travels in the agent request meta, and
+        # `_turn_closed` remembers the last id that got a `turn` frame so the
+        # cancel hook and the stop handler cannot emit it twice.
+        self._turn_serial: Dict[str, int] = {}
+        self._turn_closed: Dict[str, int] = {}
+        # The authoritative partial text of the interrupted iteration, stashed
+        # by `on_event_response` so `_handle_stop` can finish the job if the
+        # cancelled task's own sends were interrupted.
+        self._cancel_text: Dict[str, str] = {}
+        # Stop handlers run off the relay reader: waiting for a ChatSpec or for
+        # QwenPaw to cancel a tool must not stall every other inbound frame.
+        self._stop_tasks: set = set()
 
     # -- construction / session mapping ---------------------------------
 
@@ -417,6 +456,9 @@ class WebChannel(BaseChannel):
         flog, self._flog = self._flog, None
         if flog is not None:
             flog.write("channel_stop", agent=self._agent_id())
+        for task in list(self._stop_tasks):
+            task.cancel()
+        self._stop_tasks.clear()
         await self._archiver.stop()
         relay, self._relay = self._relay, None
         if relay is not None:
@@ -611,7 +653,12 @@ class WebChannel(BaseChannel):
         elif kind in ("approve", "deny"):
             await self._handle_approval(kind, frame)
         elif kind == "stop":
-            await self._handle_stop(frame)
+            # M42: never block the reader. Resolving a ChatSpec can take a few
+            # seconds (first turn) and the stop POST waits for the run's own
+            # cancellation (a tool may take a moment to die).
+            task = asyncio.create_task(self._handle_stop(frame))
+            self._stop_tasks.add(task)
+            task.add_done_callback(self._stop_tasks.discard)
         elif kind == "file_begin":
             await self._handle_file_begin(frame)
         elif kind == "file_chunk":
@@ -719,6 +766,14 @@ class WebChannel(BaseChannel):
                 chat,
             )
             return
+        # M42: a new user message opens a new turn. Clearing `_turn_closed`
+        # is what lets its eventual `turn` frame through. The turn id must be
+        # in the payload *before* the queue sees it.
+        serial = self._turn_serial.get(chat, 0) + 1
+        self._turn_serial[chat] = serial
+        self._turn_closed.pop(chat, None)
+        self._cancel_text.pop(chat, None)
+        native["meta"]["turn_id"] = "%s#%d" % (chat, serial)
         enqueue(native)
         self._archiver.archive_user(
             chat, text, files_meta, int(time.time() * 1000),
@@ -1024,15 +1079,22 @@ class WebChannel(BaseChannel):
             )
 
         messages: List[Dict[str, Any]] = []
+        busy: Optional[bool] = None
         chat_id = await self._resolve_chat_id(chat)
         if chat_id:
             history = await self._get_history(chat_id)
             if history is not None:
+                status = history.get("status")
+                if isinstance(status, str):
+                    # M42: `ChatHistory.status` is task_tracker's running|idle.
+                    # A browser that reloads during a tool phase has no open
+                    # stream to infer this from.
+                    busy = status == "running"
                 messages = history_messages(history, limit, ref_factory=issue)
 
         if not messages:
             await self._emit(
-                chat, lambda seq: hist_frame(chat, [], seq=seq),
+                chat, lambda seq: hist_frame(chat, [], seq=seq, busy=busy),
             )
             return
 
@@ -1040,7 +1102,7 @@ class WebChannel(BaseChannel):
         # so every frame the client sees is inside the 256 KB wire limit.
         chunks = pack_history(
             messages,
-            lambda chunk: check_size(hist_frame(chat, chunk, more=True)),
+            lambda chunk: check_size(hist_frame(chat, chunk, more=True, busy=busy)),
         )
         if len(chunks) > 1:
             logger.info(
@@ -1052,43 +1114,219 @@ class WebChannel(BaseChannel):
             await self._emit(
                 chat,
                 lambda seq, chunk=chunk, more=more: hist_frame(
-                    chat, chunk, more=more, seq=seq,
+                    chat, chunk, more=more, seq=seq, busy=busy,
                 ),
             )
 
+    async def _stop_chat_id(self, chat: str, wait_s: Optional[float] = None) -> Optional[str]:
+        """``ChatSpec.id`` for a stop, tolerating a just-created chat (M42).
+
+        A chat created by its first message has no spec until the manager
+        reaches that message, so an early 停止 found nothing and was silently
+        dropped. Poll for a bounded window instead; a broken ``/api/chats``
+        is still a hard "cannot stop" (no point waiting for it).
+
+        Tests pass a shorter *wait_s*; production uses ``_STOP_SPEC_WAIT_S``.
+        """
+        deadline = time.monotonic() + (
+            _STOP_SPEC_WAIT_S if wait_s is None else wait_s
+        )
+        while True:
+            chat_id, status, readable = await self._resolve_chat_id_state(chat)
+            if chat_id:
+                return chat_id
+            if not readable or status != 404:
+                return None
+            if time.monotonic() >= deadline:
+                return None
+            await asyncio.sleep(_STOP_SPEC_POLL_S)
+
+    async def _post_stop(self, chat_id: str):
+        """``(stopped|None, status)`` for one stop request (M42).
+
+        ``None`` means the call itself failed (transport / HTTP >= 400), which
+        is different from a well-formed ``{"stopped": false}``: only the latter
+        says "no run is attached to this id any more".
+        """
+        status, payload = await self._api_json(
+            "POST",
+            "/api/console/chat/stop",
+            params={"chat_id": chat_id},
+        )
+        if not 200 <= status < 300:
+            return None, status
+        stopped = bool(payload.get("stopped")) if isinstance(payload, dict) else False
+        return stopped, status
+
     async def _handle_stop(self, frame: Dict[str, Any]) -> None:
-        """Cancel the running turn via ``POST /api/console/chat/stop`` (A2)."""
+        """Cancel the running turn via ``POST /api/console/chat/stop`` (A2/M42).
+
+        Why this is more than one POST (all verified against v2.2.2.post1):
+
+        * ``chat_id`` must be the ``ChatSpec.id``; the endpoint's own
+          ``session_id`` fallback is hardcoded to ``channel="console"`` and
+          cannot find a web session. A brand-new chat may not have a spec for
+          a moment -> ``_stop_chat_id`` polls.
+        * the id is cached forever; a spec deleted/recreated behind the same
+          web chat id would make every stop a no-op -> a ``stopped:false``
+          answer re-resolves once and retries.
+        * QwenPaw cancels the producer task and force-cancels foreground tool
+          calls, but it emits no channel hook for the cancellation. The SPA
+          would keep its caret and 停止 button forever -> the terminal
+          ``end``/``msg(stopped)``/``turn`` frames are emitted here, or by
+          ``on_event_response`` when the runtime's cancelled envelope arrives
+          first (see docs/m42-report.md for the exact boundary).
+        """
         chat = str(frame.get("chat") or "default")
-        chat_id = await self._resolve_chat_id(chat)
+        chat_id = await self._stop_chat_id(chat)
         if not chat_id:
             logger.warning(
                 "webchannel: stop for chat=%s ignored: no QwenPaw chat exists "
                 "for this session yet, so there is nothing to cancel",
                 chat,
             )
+            await self._finalize_turn(chat, "done")
             return
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.post(
-                    f"{API_BASE}/api/console/chat/stop",
-                    params={"chat_id": chat_id},
-                    headers=self._headers(),
-                )
-            if response.status_code >= 400:
-                logger.warning(
-                    "webchannel: stop for chat=%s (chat_id=%s) failed: HTTP %s",
-                    chat, chat_id, response.status_code,
-                )
-                return
-            logger.info(
-                "webchannel: stop for chat=%s (chat_id=%s): %s",
-                chat, chat_id, response.text,
-            )
-        except Exception:  # noqa: BLE001 - a failed stop must not kill the socket
+
+        stopped, status = await self._post_stop(chat_id)
+        if stopped is None:
             logger.warning(
-                "webchannel: stop POST failed for chat=%s (chat_id=%s)",
-                chat, chat_id, exc_info=True,
+                "webchannel: stop for chat=%s (chat_id=%s) failed: HTTP %s",
+                chat, chat_id, status,
             )
+            await self._send_control(
+                stop_error_frame(chat, "E_STOP", "HTTP %s" % status),
+            )
+            return
+
+        if not stopped and chat in self._chat_ids:
+            # The cached spec may be stale. Re-resolve once, then retry only
+            # when the lookup produces a genuinely different id.
+            self._chat_ids.pop(chat, None)
+            fresh = await self._stop_chat_id(chat, wait_s=0.0)
+            if fresh and fresh != chat_id:
+                stopped, status = await self._post_stop(fresh)
+                if stopped is None:
+                    logger.warning(
+                        "webchannel: stop retry for chat=%s (chat_id=%s) "
+                        "failed: HTTP %s",
+                        chat, fresh, status,
+                    )
+                    await self._send_control(
+                        stop_error_frame(chat, "E_STOP", "HTTP %s" % status),
+                    )
+                    return
+
+        logger.info(
+            "webchannel: stop for chat=%s (chat_id=%s): stopped=%s",
+            chat, chat_id, stopped,
+        )
+        if stopped:
+            # `on_event_response` normally already closed the turn and stashed
+            # the authoritative partial text; both calls are idempotent.
+            await self._finalize_turn(
+                chat, "stopped", text=self._cancel_text.get(chat),
+            )
+        else:
+            # No run was attached: the turn already finished (or the stop
+            # never had a run to cancel). Close the browser's turn without a
+            # 已停止 badge.
+            await self._finalize_turn(chat, "done")
+
+    def _request_chat(self, request: Any) -> str:
+        """Web chat id carried by an agent request (``""`` when unknown)."""
+        meta = getattr(request, "channel_meta", None)
+        if isinstance(meta, dict) and meta.get("chat_id"):
+            return str(meta["chat_id"])
+        session_id = getattr(request, "session_id", "") or ""
+        prefix = "%s:%s:" % (self.channel, SENDER_ID)
+        if session_id.startswith(prefix):
+            return session_id[len(prefix):]
+        return ""
+
+    @staticmethod
+    def _request_turn_id(request: Any) -> str:
+        meta = getattr(request, "channel_meta", None)
+        if isinstance(meta, dict):
+            turn_id = meta.get("turn_id")
+            if isinstance(turn_id, str) and turn_id:
+                return turn_id
+        return ""
+
+    async def _finalize_turn(
+        self, chat: str, state: str, text: Optional[str] = None,
+        turn_id: str = "",
+    ) -> bool:
+        """Close one turn: open segments, then the ``turn`` boundary (M42).
+
+        Idempotent per turn id. A stop races with the runtime's own cancelled
+        envelope: whichever path runs first emits the frames, the other is a
+        no-op. A stale turn id (a newer user message arrived in the meantime)
+        is never allowed to close the newer turn.
+
+        *text*, when given, is the authoritative partial answer from the
+        cancelled envelope; otherwise the last delta flushed by ``on_streaming_*``
+        is used.
+        """
+        current = "%s#%d" % (chat, self._turn_serial.get(chat, 0))
+        target = turn_id or current
+        if target != current:
+            logger.debug(
+                "webchannel: skipping stale turn frame for chat=%s (%s != %s)",
+                chat, target, current,
+            )
+            return False
+        if self._turn_closed.get(chat) == target:
+            return False
+
+        stopped = state == "stopped"
+        for key in sorted(self._active_streams):
+            stream_chat, stream_type = key
+            if stream_chat != chat:
+                continue
+            self._active_streams.discard(key)
+            if stream_type == ANSWER_STREAM_TYPE:
+                full = text if isinstance(text, str) else ""
+                if not full:
+                    full = self._differ.last(key)
+                chunk = self._differ.diff(key, full)
+                if chunk:
+                    await self._emit(
+                        chat,
+                        lambda seq, chunk=chunk: evt_frame(
+                            chat, seq, chunk, ANSWER_STREAM_TYPE,
+                        ),
+                    )
+                await self._emit(
+                    chat,
+                    lambda seq: end_frame(chat, seq, stream_type=stream_type),
+                )
+                trailing = trailing_msg_text(
+                    stream_type, full, chat in self._text_msg_sent,
+                )
+                if trailing:
+                    await self._emit(
+                        chat,
+                        lambda seq, trailing=trailing: msg_frame(
+                            chat, seq, [{"type": "text", "text": trailing}],
+                            stopped=stopped,
+                        ),
+                    )
+                    self._archiver.archive_assistant(
+                        chat, trailing, int(time.time() * 1000),
+                    )
+            else:
+                await self._emit(
+                    chat,
+                    lambda seq: end_frame(chat, seq, stream_type=stream_type),
+                )
+            self._differ.reset(key)
+            self._text_msg_sent.discard(chat)
+
+        await self._emit(chat, lambda seq: turn_frame(chat, state, seq=seq))
+        self._turn_closed[chat] = target
+        self._cancel_text.pop(chat, None)
+        return True
 
     async def _find_pending_approval(self, req_id: str) -> Optional[Dict[str, Any]]:
         """The ``/api/approval/list`` entry for *req_id*, or None (A5)."""
@@ -2263,6 +2501,54 @@ class WebChannel(BaseChannel):
         await self._send_control(skills_frame(items))
 
     # -- outbound hooks --------------------------------------------------
+
+    async def on_event_response(self, request, event) -> None:
+        """Close a cancelled turn from the runtime's own cancel envelope (M42).
+
+        On cancellation QwenPaw's runtime yields the partial ``Message`` and
+        an ``AgentResponse`` with ``status=cancelled`` before re-raising
+        (``runtime/envelope.py::_finalize_response``), and the base channel
+        forwards the response event to this hook. That is the authoritative
+        partial text -- more complete than the last flushed delta -- and it
+        arrives whether the cancellation came from our stop POST, a client
+        disconnect, or shutdown.
+
+        The base channel never calls ``on_streaming_end`` on cancellation, so
+        without this hook no ``end``/``msg``/``turn`` frame would ever reach
+        the browser (the exact "停止后一直转圈" bug).
+        """
+        if response_status(event) != "cancelled":
+            return
+        chat = self._request_chat(request)
+        if not chat:
+            return
+        text = response_partial_text(event)
+        self._cancel_text[chat] = text
+        await self._finalize_turn(
+            chat,
+            "stopped",
+            text=text,
+            turn_id=self._request_turn_id(request),
+        )
+
+    async def _on_process_completed(
+        self, request, to_handle, send_meta: Dict[str, Any],
+    ) -> None:
+        """Emit the normal end-of-turn boundary (M42)."""
+        chat = self._chat_for(to_handle, send_meta, request)
+        turn_id = ""
+        if isinstance(send_meta, dict) and isinstance(send_meta.get("turn_id"), str):
+            turn_id = send_meta["turn_id"]
+        await self._finalize_turn(chat, "done", turn_id=turn_id)
+
+    async def _on_consume_error(self, request, to_handle, err_text: str) -> None:
+        """Send the error text, then close the turn (M42)."""
+        await super()._on_consume_error(request, to_handle, err_text)
+        chat = self._request_chat(request)
+        if chat:
+            await self._finalize_turn(
+                chat, "done", turn_id=self._request_turn_id(request),
+            )
 
     async def on_streaming_start(
         self, request, to_handle: str, event, send_meta: Dict[str, Any],

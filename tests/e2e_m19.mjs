@@ -51,6 +51,9 @@
  *   M36_ONLY=1         run only the M36 math checks (fast loop)
  *   M40_ONLY=1         run only the M40 model picker checks (fast loop)
  *   M41_ONLY=1         run only the M41 paste/IME-send checks (fast loop)
+ *   M42_ONLY=1         run only the M42 stop checks (fast loop)
+ *   M42_LEGACY=1       M42 red run: the mock stops silently, like the
+ *                      pre-fix plugin/runtime (no end/msg/turn frame)
  *
  * M26 evidence (BEFORE vs AFTER) is the same structure-agnostic block, so the
  * BEFORE shots come from the unmodified build:
@@ -399,6 +402,18 @@ const state = {
   attSeq: 0,
   /** M37: every `msg` the mock actually received, in arrival order. */
   received: [],
+  /** M42: long turns with a tool phase (chat -> {timers, phase, text}). */
+  stopTurns: new Map(),
+  /** M42: every stop frame the mock received, in arrival order. */
+  stopLog: [],
+  /** M42: the partial text each plain `streamText` has emitted so far. */
+  streamedText: new Map(),
+  /**
+   * M42 red-run switch: the pre-M42 plugin/runtime stops the producer but
+   * sends no terminal frame (no `end` / `msg` / `turn`), which is exactly the
+   * stuck-UI bug. Set by `M42_LEGACY=1`.
+   */
+  legacyStop: false,
 };
 
 function resetState() {
@@ -444,6 +459,13 @@ function resetState() {
   state.received = [];
   for (const timer of state.streaming.values()) clearInterval(timer);
   state.streaming.clear();
+  for (const turn of state.stopTurns.values()) {
+    for (const timer of turn.timers) clearTimeout(timer);
+  }
+  state.stopTurns.clear();
+  state.stopLog = [];
+  state.streamedText.clear();
+  state.legacyStop = process.env.M42_LEGACY === '1';
 }
 
 /**
@@ -479,6 +501,7 @@ function streamText(chat, text, { chunkSize = 10, delay = 45 } = {}) {
     chunks.push(text.slice(at, at + chunkSize));
   }
   agentSend({ t: 'start', chat, seq: seq++ });
+  state.streamedText.set(chat, '');
   let index = 0;
   const timer = setInterval(() => {
     if (index < chunks.length) {
@@ -488,6 +511,7 @@ function streamText(chat, text, { chunkSize = 10, delay = 45 } = {}) {
         seq: seq++,
         data: { text: chunks[index], stream_type: 'message' },
       });
+      state.streamedText.set(chat, (state.streamedText.get(chat) || '') + chunks[index]);
       index += 1;
       return;
     }
@@ -495,12 +519,168 @@ function streamText(chat, text, { chunkSize = 10, delay = 45 } = {}) {
     state.streaming.delete(chat);
     agentSend({ t: 'end', chat, seq: seq++ });
     agentSend({ t: 'msg', chat, seq: seq++, parts: [{ type: 'text', text }] });
+    // M42: every turn closes with an explicit turn boundary. The real plugin
+    // does this from `_on_process_completed`; without it a SPA that tracks
+    // "busy" (not just an open stream) could never hide 停止 again.
+    agentSend({ t: 'turn', chat, seq: seq++, state: 'done' });
+    state.streamedText.delete(chat);
     if (state.recordSends) {
       const list = state.history[chat] || (state.history[chat] = []);
       list.push({ role: 'assistant', text });
     }
   }, delay);
   state.streaming.set(chat, timer);
+}
+
+/** M42: stop a plain `streamText` mid-answer, like the plugin's stop path. */
+function stopPlainStream(chat) {
+  const timer = state.streaming.get(chat);
+  if (!timer) return;
+  clearInterval(timer);
+  state.streaming.delete(chat);
+  if (state.legacyStop) {
+    // Pre-M42: QwenPaw cancelled the run silently. No terminal frame exists,
+    // so the browser keeps the caret / 停止 button forever.
+    return;
+  }
+  const partial = state.streamedText.get(chat) || '';
+  state.streamedText.delete(chat);
+  agentSend({ t: 'end', chat, seq: seq++, stream_type: 'message' });
+  if (partial) {
+    agentSend({
+      t: 'msg',
+      chat,
+      seq: seq++,
+      parts: [{ type: 'text', text: partial }],
+      stopped: true,
+    });
+  }
+  agentSend({ t: 'turn', chat, seq: seq++, state: 'stopped' });
+}
+
+/**
+ * M42: one long turn with a real no-stream window in the middle — the tool
+ * phase. Frames mirror what the plugin emits around a `plugin_call`:
+ *
+ *   1. 1.2 s with no segment at all (the model has not spoken yet)
+ *   2. reasoning start/evt/end
+ *   3. answer start/evt/end/msg ("M42 ..." partial text)
+ *   4. a `msg` carrying a tool-call part, then 2.5 s with NO open stream
+ *   5. a second answer segment and `turn done`
+ *
+ * The stop button must exist in 1 and 4; those are exactly the phases the old
+ * "is any message.streaming?" rule missed.
+ */
+function streamStopTurn(chat, text) {
+  const turn = { timers: new Set(), phase: 'pre', text: '' };
+  state.stopTurns.set(chat, turn);
+  const at = (ms, fn) => {
+    const timer = setTimeout(() => {
+      turn.timers.delete(timer);
+      if (state.stopTurns.get(chat) === turn) fn();
+    }, ms);
+    turn.timers.add(timer);
+  };
+  const say = (chunk) => {
+    turn.text += chunk;
+    agentSend({
+      t: 'evt',
+      chat,
+      seq: seq++,
+      data: { text: chunk, stream_type: 'message' },
+    });
+  };
+
+  at(1200, () => {
+    turn.phase = 'thinking';
+    agentSend({ t: 'start', chat, seq: seq++, stream_type: 'reasoning' });
+    agentSend({
+      t: 'evt',
+      chat,
+      seq: seq++,
+      data: { text: '先想一下这个问题…', stream_type: 'reasoning' },
+    });
+    agentSend({ t: 'end', chat, seq: seq++, stream_type: 'reasoning' });
+  });
+  at(1700, () => {
+    turn.phase = 'text';
+    agentSend({ t: 'start', chat, seq: seq++, stream_type: 'message' });
+    say(`${text} 第一段。`);
+  });
+  at(2350, () => say('第二段，正在生成。'));
+  at(2600, () => {
+    agentSend({ t: 'end', chat, seq: seq++, stream_type: 'message' });
+    agentSend({
+      t: 'msg',
+      chat,
+      seq: seq++,
+      parts: [{ type: 'text', text: turn.text }],
+    });
+    // Tool call: no stream is open while it runs.
+    turn.phase = 'tool';
+    agentSend({
+      t: 'msg',
+      chat,
+      seq: seq++,
+      parts: [{ type: 'tool_call', name: 'shell', input: '{"cmd":"sleep 2.5"}' }],
+    });
+  });
+  at(5100, () => {
+    turn.phase = 'answer2';
+    agentSend({ t: 'start', chat, seq: seq++, stream_type: 'message' });
+    say('工具执行完毕后的最终答复。');
+  });
+  at(5400, () => {
+    agentSend({ t: 'end', chat, seq: seq++, stream_type: 'message' });
+    agentSend({
+      t: 'msg',
+      chat,
+      seq: seq++,
+      parts: [{ type: 'text', text: turn.text }],
+    });
+    turn.phase = 'done';
+    agentSend({ t: 'turn', chat, seq: seq++, state: 'done' });
+    state.stopTurns.delete(chat);
+  });
+}
+
+/** M42: stop a `streamStopTurn` in whatever phase it has reached. */
+function stopToolTurn(chat) {
+  const turn = state.stopTurns.get(chat);
+  if (!turn) return false;
+  for (const timer of turn.timers) clearTimeout(timer);
+  state.stopTurns.delete(chat);
+  if (state.legacyStop) return true;
+  if (turn.phase === 'text') {
+    agentSend({ t: 'end', chat, seq: seq++, stream_type: 'message' });
+    if (turn.text) {
+      agentSend({
+        t: 'msg',
+        chat,
+        seq: seq++,
+        parts: [{ type: 'text', text: turn.text }],
+        stopped: true,
+      });
+    }
+  } else if (turn.phase === 'thinking') {
+    agentSend({ t: 'end', chat, seq: seq++, stream_type: 'reasoning' });
+  }
+  // 'pre' and 'tool' have no open segment; the turn boundary is the whole
+  // signal. 'answer2' is closed by the same end/msg shape as 'text'.
+  if (turn.phase === 'answer2') {
+    agentSend({ t: 'end', chat, seq: seq++, stream_type: 'message' });
+    if (turn.text) {
+      agentSend({
+        t: 'msg',
+        chat,
+        seq: seq++,
+        parts: [{ type: 'text', text: turn.text }],
+        stopped: true,
+      });
+    }
+  }
+  agentSend({ t: 'turn', chat, seq: seq++, state: 'stopped' });
+  return true;
 }
 
 function streamReply(chat) {
@@ -539,7 +719,7 @@ function handleAgentFrame(frame) {
       state.activeModel = { provider, model };
       agentSend({ t: 'model_changed', provider, model });
       // The real plugin follows with its identity push (channel.py:1361).
-      agentSend({ t: 'status', agent_name: 'mock-agent', provider, model });
+      agentSend({ t: 'status', agent_name: 'mock-agent', protocol: 12, provider, model });
       break;
     }
     case 'skills':
@@ -547,7 +727,11 @@ function handleAgentFrame(frame) {
       break;
     case 'hist': {
       const chat = String(frame.chat || '');
-      agentSend({ t: 'hist', chat, messages: state.history[chat] || [] });
+      // M42: mirrors `GET /api/chats/{id}`'s `status: running|idle`, which
+      // the plugin now forwards so a reload in the middle of a tool phase
+      // still offers 停止.
+      const busy = state.streaming.has(chat) || state.stopTurns.has(chat);
+      agentSend({ t: 'hist', chat, messages: state.history[chat] || [], busy });
       break;
     }
     case 'search': {
@@ -698,6 +882,8 @@ function handleAgentFrame(frame) {
       }
       if (String(frame.text || '').includes('M36 流式公式')) {
         streamMathReply(chat);
+      } else if (String(frame.text || '').includes('M42 停止')) {
+        streamStopTurn(chat, String(frame.text || ''));
       } else {
         streamReply(chat);
       }
@@ -737,12 +923,9 @@ function handleAgentFrame(frame) {
     }
     case 'stop': {
       const chat = String(frame.chat || '');
-      const timer = state.streaming.get(chat);
-      if (timer) {
-        clearInterval(timer);
-        state.streaming.delete(chat);
-        agentSend({ t: 'end', chat, seq: seq++ });
-      }
+      state.stopLog.push({ chat, at: Date.now() });
+      if (stopToolTurn(chat)) break;
+      stopPlainStream(chat);
       break;
     }
     case 'del_chat':
@@ -771,7 +954,7 @@ function connectAgent({ statusDelayMs = 0 } = {}) {
       // M39: the real plugin pushes `status` right after the relay's `ready`
       // (plugin/channel.py:645-647). A caller can delay it to prove the SPA
       // reacts to the relay's presence edge instead.
-      ws.send(JSON.stringify({ t: 'status', agent_name: 'mock-agent' }));
+      ws.send(JSON.stringify({ t: 'status', agent_name: 'mock-agent', protocol: 12 }));
     };
     ws.on('open', () => {
       clearTimeout(timer);
@@ -788,7 +971,14 @@ function connectAgent({ statusDelayMs = 0 } = {}) {
       } catch {
         return;
       }
-      if (frame.t === 'ready' || frame.t === 'peer' || frame.t === 'pong' || frame.t === 'hb_ack') {
+      if (frame.t === 'ready' || frame.t === 'peer') {
+        // M42: the real plugin re-pushes status on `ready`/`peer`, which is
+        // how a browser that connects after the agent learns the protocol
+        // revision. Keep the M39 delayed arm dark until its timer fires.
+        if (statusDelayMs === 0) sendStatus();
+        return;
+      }
+      if (frame.t === 'pong' || frame.t === 'hb_ack') {
         return;
       }
       handleAgentFrame(frame);
@@ -4797,6 +4987,184 @@ async function runM41Checks(page, pass, mobile, context) {
   await cdp.detach().catch(() => {});
 }
 
+async function runM42Checks(page, pass, mobile) {
+  resetState();
+  await page.evaluate(() => {
+    localStorage.setItem('webchannel.chats', JSON.stringify(['chat-alpha', 'chat-beta']));
+    localStorage.setItem('webchannel.activeChat', 'chat-alpha');
+    localStorage.removeItem('webchannel.drafts');
+    localStorage.removeItem('webchannel.outbox');
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await waitForHistory(page);
+  await sleep(400);
+
+  const ui = () =>
+    page.evaluate(() => {
+      const stop = document.querySelector('.composer .stop');
+      const send = document.querySelector('.composer .send');
+      return {
+        stop: document.querySelectorAll('.composer .stop').length,
+        stopLabel: (stop || {}).textContent || '',
+        send: document.querySelectorAll('.composer .send').length,
+        sendDisabled: Boolean((send || {}).disabled),
+        carets: document.querySelectorAll('.bubble .caret').length,
+        stopped: [...document.querySelectorAll('.bubble-stopped')].map(
+          (el) => (el.textContent || '').trim(),
+        ),
+        text: [...document.querySelectorAll('.row.assistant .md, .row.assistant .plain')]
+          .map((el) => el.textContent || '')
+          .join('|'),
+        input: (document.querySelector('.composer textarea') || {}).value || '',
+      };
+    });
+
+  const newChat = async () => {
+    await page.keyboard.press('Control+Shift+O');
+    await sleep(400);
+    return page.evaluate(() => localStorage.getItem('webchannel.activeChat'));
+  };
+  const send = async (text) => {
+    await page.locator('.composer textarea').fill(text);
+    await page.locator('.composer .send').click();
+    await sleep(150);
+  };
+  /** The palette command is a user-visible path that sends the same frame. */
+  const paletteStop = async () => {
+    await page.locator('.composer textarea').fill('/stop');
+    await page.keyboard.press('Enter');
+    await sleep(250);
+  };
+  const phaseOf = (chat) => (state.stopTurns.get(chat) || {}).phase || 'done';
+
+  // ---- 1. the button exists in the phases with no open segment ----------
+  const chatA = await newChat();
+  state.stopLog = [];
+  await send('M42 停止-阶段 A');
+  await sleep(250);
+  const pre = await ui();
+  check(
+    `${pass}: M42 停止 is offered before the first token`,
+    pre.stop === 1 && pre.send === 0,
+    JSON.stringify(pre),
+  );
+  check(
+    `${pass}: M42 the stop button is labelled 停止`,
+    pre.stopLabel.includes('停止'),
+    pre.stopLabel,
+  );
+  const atTool = await waitUntil(() => phaseOf(chatA) === 'tool', 8000);
+  const tool = await ui();
+  check(
+    `${pass}: M42 停止 is offered during the tool-call phase`,
+    atTool && tool.stop === 1,
+    JSON.stringify({ phase: phaseOf(chatA), ...tool }),
+  );
+  const finished = await waitUntil(() => phaseOf(chatA) === 'done', 12000);
+  // The mock's phase flips when it *sends* the frame; the browser still has
+  // to receive and render it.
+  const settled = await waitUntil(async () => (await ui()).stop === 0, 3000);
+  const ended = await ui();
+  check(
+    `${pass}: M42 停止 disappears when the turn ends normally`,
+    finished && settled && ended.send === 1,
+    JSON.stringify({ phase: phaseOf(chatA), ...ended }),
+  );
+  check(
+    `${pass}: M42 a normally finished turn carries no 已停止 marker`,
+    ended.stopped.length === 0,
+    JSON.stringify(ended.stopped),
+  );
+
+  // ---- 2. stop mid-answer: partial kept, marked, composer back ----------
+  const chatB = await newChat();
+  state.stopLog = [];
+  await send('M42 停止-阶段 B');
+  const atText = await waitUntil(() => phaseOf(chatB) === 'text', 8000);
+  await sleep(450);
+  const mid = await ui();
+  check(
+    `${pass}: M42 the partial reply is on screen before stop`,
+    atText && mid.text.includes('第一段'),
+    JSON.stringify(mid),
+  );
+  if (mid.stop === 1) await page.locator('.composer .stop').click();
+  else await paletteStop();
+  const stopped = await waitUntil(async () => {
+    const now = await ui();
+    return now.stop === 0 && now.send === 1;
+  }, 5000);
+  const endUi = await ui();
+  check(
+    `${pass}: M42 the stop frame reaches the agent`,
+    state.stopLog.some((item) => item.chat === chatB),
+    JSON.stringify(state.stopLog),
+  );
+  check(
+    `${pass}: M42 the stream stops after the stop frame`,
+    stopped && endUi.carets === 0,
+    JSON.stringify(endUi),
+  );
+  check(
+    `${pass}: M42 the already generated text is kept`,
+    endUi.text.includes('第一段'),
+    JSON.stringify(endUi.text),
+  );
+  check(
+    `${pass}: M42 the kept reply is marked 已停止`,
+    endUi.stopped.includes('已停止'),
+    JSON.stringify(endUi.stopped),
+  );
+  check(
+    `${pass}: M42 发送 is back right after stop`,
+    endUi.send === 1,
+    JSON.stringify(endUi),
+  );
+  await page.locator('.composer textarea').fill('M42 停止后可编辑');
+  await sleep(150);
+  const editable = await ui();
+  check(
+    `${pass}: M42 the composer is usable immediately after stop`,
+    editable.input === 'M42 停止后可编辑' && editable.sendDisabled === false,
+    JSON.stringify(editable),
+  );
+  await page.locator('.composer textarea').fill('');
+
+  // ---- 3. stop during a tool call (no stream is open) -------------------
+  const chatC = await newChat();
+  state.stopLog = [];
+  await send('M42 停止-阶段 C');
+  const atToolC = await waitUntil(() => phaseOf(chatC) === 'tool', 10000);
+  const toolC = await ui();
+  check(
+    `${pass}: M42 停止 is offered in the tool phase (no open stream)`,
+    atToolC && toolC.stop === 1,
+    JSON.stringify({ phase: phaseOf(chatC), ...toolC }),
+  );
+  if (toolC.stop === 1) await page.locator('.composer .stop').click();
+  else await paletteStop();
+  const stoppedC = await waitUntil(async () => {
+    const now = await ui();
+    return now.stop === 0 && now.send === 1;
+  }, 5000);
+  const endC = await ui();
+  check(
+    `${pass}: M42 a tool-phase stop ends the turn`,
+    stoppedC && endC.carets === 0,
+    JSON.stringify(endC),
+  );
+  check(
+    `${pass}: M42 the completed bubble is marked 已停止 after a tool-phase stop`,
+    endC.stopped.includes('已停止'),
+    JSON.stringify(endC.stopped),
+  );
+  check(
+    `${pass}: M42 a tool-phase stop sends the frame exactly once`,
+    state.stopLog.filter((item) => item.chat === chatC).length === 1,
+    JSON.stringify(state.stopLog),
+  );
+}
+
 async function runPass(browser, pass, viewport, mobile) {
   resetState();
   const contextOptions = mobile
@@ -4873,6 +5241,12 @@ async function runPass(browser, pass, viewport, mobile) {
 
     if (process.env.M41_ONLY === '1') {
       await runM41Checks(page, pass, mobile, context);
+      check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
+      return;
+    }
+
+    if (process.env.M42_ONLY === '1') {
+      await runM42Checks(page, pass, mobile);
       check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
       return;
     }
@@ -5370,6 +5744,9 @@ async function runPass(browser, pass, viewport, mobile) {
 
     // ---- 15c. M41: paste never sends; IME Enter never sends ---------------
     await runM41Checks(page, pass, mobile, context);
+
+    // ---- 15d. M42: stop across pre-token / text / tool phases -------------
+    await runM42Checks(page, pass, mobile);
 
     // ---- 16. M37: offline send queue (last: it restarts the relay) -------
     await runM37Checks(page, pass, mobile);

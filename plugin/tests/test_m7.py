@@ -25,6 +25,7 @@ if _PLUGIN_DIR not in sys.path:
 
 from channel import WebChannel  # noqa: E402  (path setup must run first)
 from frames import (  # noqa: E402
+    PROTOCOL_VERSION,
     model_changed_frame,
     models_frame,
     status_frame,
@@ -419,17 +420,21 @@ def test_model_changed_frame_shape():
 def test_status_frame_shape():
     assert status_frame("Research") == {
         "t": "status", "agent_name": "Research",
+        "protocol": PROTOCOL_VERSION,
     }
     assert status_frame("Research", "openai", "gpt-4o") == {
         "t": "status", "agent_name": "Research",
+        "protocol": PROTOCOL_VERSION,
         "provider": "openai", "model": "gpt-4o",
     }
     # Empty / missing values are omitted, not sent as nulls.
     assert status_frame("Research", "", None) == {
         "t": "status", "agent_name": "Research",
+        "protocol": PROTOCOL_VERSION,
     }
     assert status_frame("Research", None, "gpt-4o") == {
-        "t": "status", "agent_name": "Research", "model": "gpt-4o",
+        "t": "status", "agent_name": "Research",
+        "protocol": PROTOCOL_VERSION, "model": "gpt-4o",
     }
 
 
@@ -663,6 +668,7 @@ def test_peer_pushes_status():
         assert relay.sent[0] == {
             "t": "status",
             "agent_name": "Research Agent",
+            "protocol": PROTOCOL_VERSION,
             "provider": "openai",
             "model": "gpt-4o",
         }
@@ -701,6 +707,7 @@ def test_status_falls_back_to_the_agent_id():
         statuses = _of_kind(relay.sent, "status")
         assert statuses == [{
             "t": "status", "agent_name": "agent-1",
+            "protocol": PROTOCOL_VERSION,
             "provider": "openai", "model": "gpt-4o",
         }]
         assert channel._agent_name is None  # failures are not cached

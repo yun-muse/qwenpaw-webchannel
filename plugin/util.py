@@ -180,6 +180,61 @@ def hist_limit(value, default=DEFAULT_HIST_LIMIT):
     return limit if limit > 0 else default
 
 
+def response_partial_text(response):
+    """Text of a cancelled ``AgentResponse``'s partial assistant message (M42).
+
+    QwenPaw's runtime finalizes a cancelled turn with a ``Message`` whose
+    ``status`` is ``cancelled`` and whose content holds the blocks collected
+    so far (``runtime/envelope.py::_finalize_response``). This function
+    concatenates only its text blocks, ignoring thinking/tool blocks.
+
+    Accepts both pydantic objects (``.output`` / ``.content`` / ``.text``)
+    and plain dicts, because channel hooks see either shape in tests.
+    """
+    if response is None:
+        return ""
+    output = (
+        response.get("output")
+        if isinstance(response, dict)
+        else getattr(response, "output", None)
+    )
+    if not isinstance(output, list):
+        return ""
+    texts = []
+    for message in output:
+        content = (
+            message.get("content")
+            if isinstance(message, dict)
+            else getattr(message, "content", None)
+        )
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if isinstance(block, dict):
+                if block.get("type") != "text":
+                    continue
+                text = block.get("text")
+            else:
+                if getattr(block, "type", None) != "text":
+                    continue
+                text = getattr(block, "text", None)
+            if isinstance(text, str) and text:
+                texts.append(text)
+    return "".join(texts)
+
+
+def response_status(response):
+    """``str`` status of an AgentResponse/event (``"cancelled"``, ...) (M42)."""
+    if response is None:
+        return ""
+    if isinstance(response, dict):
+        status = response.get("status")
+    else:
+        status = getattr(response, "status", None)
+    value = getattr(status, "value", status)
+    return str(value or "").lower()
+
+
 def _part_texts(content):
     """Yield the text of every text part in one message's ``content`` list."""
     if not isinstance(content, list):

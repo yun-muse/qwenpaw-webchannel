@@ -83,11 +83,19 @@ __all__ = [
     "start_frame",
     "stats_frame",
     "status_frame",
+    "stop_error_frame",
+    "turn_frame",
     "usage_frame",
 ]
 
 # 256 KB of serialized JSON, UTF-8. See protocol/frames.md section 5.
 MAX_FRAME_BYTES = 256 * 1024
+
+# M42: advertised in the identity `status` push. A browser older than v12
+# ignores the field; a v12 browser uses it to choose between the turn-boundary
+# rule (v12) and the old "hide 停止 at every segment end" fallback, so an SPA
+# deployed before its plugin (or vice versa) cannot leave 停止 stuck.
+PROTOCOL_VERSION = 12
 
 
 def _encoded_size(frame):
@@ -150,17 +158,53 @@ def end_frame(chat, seq=None, stream_type=None):
     return frame
 
 
-def msg_frame(chat, seq, parts):
+def msg_frame(chat, seq, parts, stopped=False):
     """Complete message / tool result / attachment reference.
 
     ``{t:"msg", chat, seq, parts[]}`` where *parts* are content parts;
     v1 defines ``{"type":"text","text":...}`` and
     ``{"type":"file","name","mime","data"}`` (base64 *data*); other part
     types are forwarded as-is.
+
+    M42: ``stopped=True`` marks the final text of a turn the user stopped.
+    The browser keeps the partial text and renders 已停止; history from
+    QwenPaw does not carry this flag (see docs/m42-report.md).
     """
     frame = {"t": "msg", "chat": chat, "parts": parts}
+    if stopped:
+        frame["stopped"] = True
     if seq is not None:
         frame["seq"] = seq
+    return frame
+
+
+def turn_frame(chat, state, seq=None):
+    """Turn boundary: ``{t:"turn", chat, state:"done"|"stopped"}`` (M42).
+
+    A turn can contain several stream segments and long tool phases, so
+    ``end`` alone cannot tell the browser when 停止 should disappear. The
+    plugin emits exactly one of these per turn: ``done`` after the normal
+    event loop (or an error), ``stopped`` when the run was cancelled.
+    Numbered like stream frames: it is part of the chat sequence and is
+    replayed on resume.
+    """
+    if state not in ("done", "stopped"):
+        raise ValueError("turn state must be 'done' or 'stopped'")
+    frame = {"t": "turn", "chat": chat, "state": state}
+    if seq is not None:
+        frame["seq"] = seq
+    return frame
+
+
+def stop_error_frame(chat, code, msg=""):
+    """A stop request that could not be delivered (control frame, M42).
+
+    No ``seq``: this is a transient answer to one client action, not part of
+    the chat stream. ``code`` is ``E_STOP`` for an HTTP/transport failure.
+    """
+    frame = {"t": "stop_error", "chat": chat, "code": code}
+    if msg:
+        frame["msg"] = msg
     return frame
 
 
@@ -187,17 +231,24 @@ def resync_frame(chat, reason=None):
     return frame
 
 
-def hist_frame(chat, messages, more=False, seq=None):
+def hist_frame(chat, messages, more=False, seq=None, busy=None):
     """History reply: ``{t:"hist", chat, messages:[{role, text}...], more?}``.
 
     One frame carries as many messages as fit in the 256 KB limit; the caller
     adds ``more=True`` to every frame but the last (see ``util.pack_history``).
     ``seq`` is optional because history is a reply to a client request rather
     than part of the streaming sequence, yet the plugin still numbers it.
+
+    M42: ``busy`` mirrors ``GET /api/chats/{id}``'s ``status == "running"``
+    so a browser that reloads in the middle of a tool phase (no open stream
+    and therefore no frames) still offers 停止. Omitted when the answer is
+    unknown, never defaulted to false.
     """
     frame = {"t": "hist", "chat": chat, "messages": messages}
     if more:
         frame["more"] = True
+    if busy is not None:
+        frame["busy"] = bool(busy)
     if seq is not None:
         frame["seq"] = seq
     return frame
@@ -365,14 +416,22 @@ def model_changed_frame(provider, model):
     return {"t": "model_changed", "provider": provider, "model": model}
 
 
-def status_frame(agent_name, provider=None, model=None):
-    """Identity push: ``{t:"status", agent_name, provider?, model?}``.
+def status_frame(agent_name, provider=None, model=None, protocol=PROTOCOL_VERSION):
+    """Identity push: ``{t:"status", agent_name, protocol, provider?, model?}``.
 
     Sent when the agent attaches and whenever a client joins/leaves; the header
     displays it. ``provider`` / ``model`` are omitted unless they are non-empty
     strings, so an unknown active model degrades to the name alone.
+
+    ``protocol`` is the additive protocol revision implemented by this plugin
+    (M42). It lets the SPA tell a v12 plugin (which emits ``turn``) from an
+    older one (which does not) and fall back to the old stop-button rule.
     """
-    frame = {"t": "status", "agent_name": agent_name}
+    frame = {
+        "t": "status",
+        "agent_name": agent_name,
+        "protocol": int(protocol),
+    }
     if isinstance(provider, str) and provider:
         frame["provider"] = provider
     if isinstance(model, str) and model:

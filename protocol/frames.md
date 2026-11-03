@@ -1,6 +1,6 @@
-# WebChannel frame protocol — v11
+# WebChannel frame protocol — v12
 
-Status: current (envelope v1 plus additive revisions v2–v11; §17 documents the never-numbered M8
+Status: current (envelope v1 plus additive revisions v2–v12; §17 documents the never-numbered M8
 frames that were previously implemented but unwritten). Scope: the two WebSocket legs
 (`container ↔ relay`, `browser ↔ relay`).
 Design source: `docs/design.md` §6. The relay pairs sockets and forwards frames verbatim; it does
@@ -62,14 +62,16 @@ superseded generation) is not acked.
 
 | `t` | fields | notes |
 |---|---|---|
-| `start` | `chat`, `seq?`, `stream_type?` | streaming segment starts; client creates a bubble (optional) |
+| `start` | `chat`, `seq?`, `stream_type?` | streaming segment starts; client creates a bubble (optional) and marks the chat's **turn** busy (§18.2) |
 | `evt` | `chat`, `seq`, `data` | `{"text": <delta>, "stream_type": <segment>}`; per-delta |
-| `end` | `chat`, `seq?`, `stream_type?` | streaming segment finished; render markdown, commit to history (optional) |
-| `msg` | `chat`, `seq?`, `parts[]` | complete message, tool result or attachment reference |
+| `end` | `chat`, `seq?`, `stream_type?` | streaming segment finished; render markdown, commit to history (optional). This is a **segment** boundary, not a turn boundary — a tool call may follow (§18.1) |
+| `msg` | `chat`, `seq?`, `parts[]`, `stopped?` | complete message, tool result or attachment reference; **v12** `stopped:true` marks the final partial text of a turn the user stopped (§18.3) |
 | `approval` | `chat`, `req_id`, `tool`, `severity`, `summary`, `seq?` | approval request; it is emitted through the sequencer, so a replayed/resumed frame keeps its number |
+| `turn` | `chat`, `seq`, `state:"done"\|"stopped"` | **v12** end of a whole turn (after the last segment / on a stop); sequenced and replayed (§18.2) |
+| `stop_error` | `chat`, `code`, `msg?` | **v12** a stop could not be delivered (HTTP/transport failure); control frame, no `seq`, the turn is still running (§18.4) |
 | `resync` | `chat`, `reason?`, `seq?` | ring buffer miss; client must reload history |
 | `error` | `code`, `id?`, `chat?`, `req_id?`, `detail?`, `status?`, `reason?`, `seq?` | protocol/domain error (§6); `chat` (and `req_id` for approvals) marks it request-scoped — only `E_AUTH` **without** either is connection-fatal. Almost all errors are control frames; the approval refusal is emitted through the sequencer and carries `seq` |
-| `hist` | `chat`, `messages:[{role, text, files?, turn?}]`, `more?`, `seq?` | reply to a `hist` request; `more:true` means another `hist` frame follows; `turn` is the **v8** optional per-turn usage receipt (§11.2); `files` is the **v10** optional attachment list (§15.3) |
+| `hist` | `chat`, `messages:[{role, text, files?, turn?}]`, `more?`, `seq?`, `busy?` | reply to a `hist` request; `more:true` means another `hist` frame follows; `turn` is the **v8** optional per-turn usage receipt (§11.2); `files` is the **v10** optional attachment list (§15.3); **v12** `busy` mirrors QwenPaw's run status (absent = unknown, §18.5) |
 | `chats` | `items:[{chat, title, updated_at}]` | **M8** chat list, reply to a `chats` request (§17.1); control frame |
 | `chat_deleted` | `chat` | **M8** acknowledgement of `del_chat` (§17.2); control frame |
 | `chat_renamed` | `chat`, `title` | **M8** acknowledgement of `rename_chat` (§17.3); the title is a client display label, not a server-side rename; control frame |
@@ -78,7 +80,7 @@ superseded generation) is not acked.
 | `skills` | `items:[{id, name, description}]` | **M8** available skills, reply to `skills` (§17.5); control frame |
 | `models` | `items:[{provider, model, active, vision?}]` | **v3** reply to a `models` request; exactly one item has `active:true` when the agent's current (effective) model is known; `vision` is the **v10** optional boolean picture capability (omitted when unprobed, §15.4) |
 | `model_changed` | `provider`, `model` | **v3** a `set_model` succeeded; this pair is now the agent's active model |
-| `status` | `agent_name`, `provider?`, `model?` | **v3** identity push, sent when the agent attaches and whenever a client joins/leaves; the header displays it. The relay reuses the same `t` for **v11** presence by adding `agentOnline` (and no `agent_name`) — see §16 |
+| `status` | `agent_name`, `protocol`, `provider?`, `model?` | **v3** identity push; **v12** `protocol` advertises the plugin's revision (§18.7), sent when the agent attaches and whenever a client joins/leaves; the header displays it. The relay reuses the same `t` for **v11** presence by adding `agentOnline` (and no `agent_name`) — see §16 |
 | `effort` | `chat`, `level`, `effective`, `budget_tokens?`, `supported?`, `kind?`, `model_key?` | **v4** session thinking state: reply to `get_effort` / `set_effort`; control frame |
 | `usage` | `chat`, `id?`, `input_total?`, `output_total?`, `context_tokens?`, `context_limit?`, `last_turn?` | **v5**/**v8** session token usage: reply to `get_usage`; every numeric field is optional (absent = unknown); `last_turn` is the newest turn's receipt (§11.2); control frame |
 | `stats` | `id?`, `totals`, `days`, `chats`, `covered_chats?`, `uncovered_chats?`, `undated_turns?`, `day_basis`, `day_tz?` | **v9** all-chats usage dashboard: reply to `get_stats`; every count is optional except `totals.turns`; control frame (§14) |
@@ -100,7 +102,9 @@ A streaming reply has up to two segments, labelled by `stream_type` ∈ `{"reaso
 `stream_type` at the top level. Only `message` deltas form the answer; `reasoning` deltas are the
 model's thinking and MUST NOT be concatenated into it. A reply is streaming until the `message`
 segment's `end` — an `end` for `reasoning` closes that segment only. Missing `stream_type` means
-`message` (older containers).
+`message` (older containers). **v12:** a *turn* can outlive its last `end` (a tool call follows it),
+and a turn can consist of several segments; `end` MUST NOT be used to hide a stop affordance. The
+turn boundary is the `turn` frame (§18.1).
 
 `models`, `model_changed`, `status`, `effort`, `usage`, `stats`, the `export_*` frames,
 `search_results`, the `att_*` frames and the M8 chat/prompt/skill frames (`chats`, `chat_deleted`,
@@ -114,7 +118,7 @@ approval refusal (`E_AUTH` with `chat` + `req_id` + `seq`, §6).
 | `t` | fields | notes |
 |---|---|---|
 | `msg` | `chat`, `text`, `files[]` | send a message; `files[]` items are `{name, mime, data}` with base64 `data` |
-| `stop` | `chat` | cancel the current generation |
+| `stop` | `chat` | cancel the current generation; the answer is the sequenced `turn{state:"stopped"}` (plus `end`/`msg` for an open segment) or the control frame `stop_error` (§18.4) |
 | `approve` / `deny` | `chat`, `req_id` | resolve an approval |
 | `resume` | `chat`, `last_seq` | replay frames with `seq > last_seq` |
 | `hist` | `chat`, `limit?` | request history (agent answers with `hist` frame(s)); `limit` is a positive integer, anything else falls back to 50 |
@@ -382,8 +386,9 @@ Agent → client:
 - `items[]` carries **only** `{provider, model, active}`. Exactly one item is `active:true` when the
   agent's current (effective) model is known; when that model is not in the list it is inserted as an
   extra active item, so the header always has something to display.
-- `status` is the identity push: `agent_name`, plus `provider` / `model` when the active model is
-  known. It is sent when the agent attaches and whenever a client joins or leaves.
+- `status` is the identity push: `agent_name`, the v12 `protocol` revision, plus `provider` /
+  `model` when the active model is known. It is sent when the agent attaches and whenever a client
+  joins or leaves.
 - `set_model` is answered with exactly one of `model_changed` (success, including switching to the
   model that is already active) or `error{code:"E_MODEL"}`.
 
@@ -1028,8 +1033,8 @@ Presence reuses the existing `status` control frame rather than inventing a type
 ```
 
 - `agentOnline` is a boolean and is always present in a relay presence frame.
-- The plugin's identity push keeps its shape — `agent_name`, optional `provider` / `model`, and
-  **no** `agentOnline` (plugin `status_frame`). The two producers share one `t` with disjoint
+- The plugin's identity push keeps its shape — `agent_name`, the v12 `protocol` revision,
+  optional `provider` / `model`, and **no** `agentOnline` (plugin `status_frame`). The two producers share one `t` with disjoint
   fields: an absent `agentOnline` means "identity only", which also implies online because only an
   attached plugin can send it; a present `agentOnline` is the relay's slot state. A client that
   understands only one of the two keeps working: it sees the other's frames as unknown fields.
@@ -1196,3 +1201,134 @@ container → browser : {"t":"skills","items":[{"id":"web-search","name":"联网
 All six replies are control frames: no `seq`, not ring-buffered, not replayed on `resume`. A
 reconnecting client re-requests them. `chats` is also how a client learns about chats created or
 deleted elsewhere.
+
+## 18. Protocol v12 — turn boundary and stop (M42)
+
+### 18.1 Why `end` is not a turn boundary
+
+A QwenPaw turn is not one stream. A single user message can produce: a reasoning segment, an
+answer segment, a `plugin_call` message (a tool call, delivered as a `msg` with non-text parts), a
+long tool execution with **no stream open at all**, then another reasoning/answer segment. Every
+segment ends with its own `end`, and the gap between two segments can last minutes.
+
+Before v12 the browser treated "any message has `streaming:true`" as "a turn is running" and hid
+停止 whenever that was false. Two consequences, both reported by users:
+
+1. after pressing 发送 and before the first token, no 停止 button existed;
+2. during a tool call the button vanished, although the run was very much alive.
+
+Worse, QwenPaw's cancellation path never calls the channel's `on_streaming_end` hook (the producer
+task is cancelled; `BaseChannel._stream_with_tracker` re-raises `CancelledError` without
+finalizing the segment). The plugin therefore had no `end`/`msg` to send after a successful stop,
+and the browser kept the caret and 停止 forever — "点了停止也停不下来".
+
+v12 adds one explicit boundary.
+
+### 18.2 `turn`
+
+```json
+{"t":"turn","chat":"chat-abc","seq":41,"state":"done"}
+{"t":"turn","chat":"chat-abc","seq":42,"state":"stopped"}
+```
+
+- Exactly one `turn` frame per turn, after the last segment and after any trailing `msg`.
+- `state:"done"` — the run finished normally, or failed (the error text precedes it as a `msg`),
+  or a stop request found no run attached (`{"stopped":false}` from the local API).
+- `state:"stopped"` — the user stopped an active run. Any open segment is closed first with
+  `evt` (unflushed tail), `end` and, for the answer segment, a full-text `msg` carrying
+  `stopped:true`.
+- It is **sequenced** (`seq`), ring-buffered and replayed on `resume` like stream frames: a client
+  that reconnects during the stop window still learns the turn ended.
+- Idempotent per turn: the plugin tags the turn id in the agent request (`meta.turn_id`), so the
+  runtime's cancelled-response hook and the stop handler cannot emit two boundaries. A newer user
+  message supersedes an older turn id; the older turn's boundary is suppressed rather than closing
+  the new turn.
+- A client MUST treat it as authoritative: clear its busy state, freeze any still-streaming bubble
+  and (for `stopped`) mark the last assistant bubble of that turn 已停止.
+
+### 18.3 `msg.stopped`
+
+The final text of a stopped answer carries `"stopped":true`. It has the same `parts` shape as any
+other `msg`; the field only tells the UI that the text is a prefix, not a complete reply.
+
+**History caveat.** QwenPaw persists the partial text on cancellation
+(`runtime/runtime.py::_try_save_on_cancel` injects the envelope's partial blocks and saves the
+session), so a reload keeps the text. It does not expose a "this turn was cancelled" marker for
+the `web` channel: `runtime/console_turn_state.py::stamp_console_turn` returns immediately unless
+`request.channel == "console"`. A `hist` reload therefore shows the partial reply as an ordinary
+message, without the 已停止 badge. The badge is a live-session signal by design; pretending
+otherwise would require a QwenPaw-side turn-state API for non-console channels.
+
+### 18.4 `stop` / `stop_error`
+
+`stop` is asynchronous: the plugin resolves the chat's `ChatSpec.id` and calls
+`POST /api/console/chat/stop?chat_id=<ChatSpec.id>`. Three details are protocol-relevant:
+
+- **ChatSpec, not chat id.** QwenPaw's own `session_id` fallback in that endpoint hardcodes
+  `channel="console"`, so a web session can only be found by its spec id. A chat created by its
+  first message has no spec for a moment; the plugin polls `GET /api/chats?channel=web` for up to
+  4 s before giving up. The id is cached; a `{"stopped":false}` answer re-resolves once and retries,
+  because a deleted/recreated spec would otherwise make every later stop a silent no-op.
+- **No run attached** (`{"stopped":false}`) is answered with `turn{state:"done"}`, not an error:
+  the turn is already over. The client clears busy without a 已停止 badge.
+- **The stop itself failed** (HTTP ≥ 400 or transport error) is answered with the control frame
+  `{"t":"stop_error","chat":"chat-abc","code":"E_STOP","msg":"HTTP 500"}`. No `seq`; it is not part
+  of the chat stream. The client MUST keep the turn running and tell the user; claiming a stop that
+  did not happen is worse than an error.
+
+A client SHOULD show a "正在停止…" state while the answer is outstanding, keep the stop button (but
+disable a second press), and after a bounded wait (12 s in the SPA) drop only the *label* — never
+fake a stop. A client MUST NOT queue a stop while the agent is offline: the relay would buffer it
+and deliver it to whatever run is live when the agent returns.
+
+### 18.5 `hist.busy`
+
+`hist` carries the backend's run status:
+
+```json
+{"t":"hist","chat":"chat-abc","messages":[],"seq":12,"busy":true}
+```
+
+- `busy` is `true` when `GET /api/chats/{id}` reports `status == "running"`, `false` when it reports
+  `idle`, and **omitted** when the history call failed or the field is unreadable.
+- Only the final `hist` chunk (`more` absent/false) is authoritative.
+- A client uses it to restore the 停止 affordance after a reload in the middle of a tool phase,
+  where no stream frames exist. Absent means "unknown": do not assume idle.
+
+### 18.6 What QwenPaw's stop API can and cannot interrupt (v2.2.2.post1)
+
+Verified in `~/workspace/qwenpaw-ref` (`app/routers/console.py::post_console_chat_stop`,
+`app/task_tracker.py::request_stop`, `tool_calls/_coordinator.py::cancel_running_for_session`,
+`runtime/runtime.py::_try_save_on_cancel`):
+
+| thing | stopped? | evidence |
+|---|---|---|
+| the agent's producer task (model stream, reasoning loop) | **yes** — `task.cancel()` then `await task` | `task_tracker.py:227-263` |
+| foreground tool calls of that session/agent | **yes** — `cancel_event` set + background task cancelled | `_coordinator.py:459-497,962-972` |
+| a subprocess-backed tool whose bridge honours `cancel_event` | **yes**, the bridge tears down the process tree | `_apply_force_cancel` comments |
+| explicitly **offloaded/background** work | **no** — excluded by design | `cancel_running_for_session` docstring |
+| a tool that ignores `cancel_event` and survives task cancellation | **no guarantee** | cooperative cancellation |
+| side effects already performed (a shell command that ran, a file written, a message sent) | **not rolled back** | stop is not a transaction |
+| the model provider's server-side generation | **not observable**; the local task/HTTP stream is aborted | — |
+| the partial text/thinking already generated | **kept** — injected into the context and saved | `runtime.py:244-355` |
+| dangling tool-call blocks in the saved context | **closed** with an interrupted result | `runtime.py::_close_dangling_tool_calls` |
+
+The SPA's stop button tooltip states the user-visible part of this boundary: stop interrupts
+generation and foreground tool calls; completed actions are not rolled back and background tasks
+are not cancelled.
+
+### 18.7 Compatibility
+
+- The `turn` and `stop_error` frames are additive; a pre-v12 client ignores unknown `t` values.
+- A pre-v12 plugin never sends `turn`. A v12 client detects this from the identity push
+  `{"t":"status","agent_name":…,"protocol":12}` and falls back to the old rule (clear busy when the
+  answer segment `end`s), so deploying the SPA first cannot leave 停止 visible forever. Absent
+  `protocol` means pre-v12.
+- The plugin still emits the trailing full-text `msg` on a normal answer, so a pre-v12 client's
+  rendering is unchanged.
+
+### 18.8 What v12 does not provide
+
+There is no recall/delete-turn frame. QwenPaw v2.2.2.post1 has no supported history-delete API for
+non-console channels; see `docs/m42-report.md` §B for the complete evidence chain and the re-probe
+conditions.

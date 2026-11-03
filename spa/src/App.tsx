@@ -404,6 +404,8 @@ interface ChatMessage {
   text: string;
   thinking?: string;
   streaming?: boolean;
+  /** M42: the user stopped this turn at this point; text is the partial reply. */
+  stopped?: boolean;
   parts?: ContentPart[];
   /** M31: attachment metadata; `ref` on entries that can be fetched. */
   attachments?: HistoryFile[];
@@ -1497,6 +1499,14 @@ const MessageView = memo(function MessageView({
       />
       {message.streaming ? null : (
         <div className="bubble-foot">
+          {message.stopped ? (
+            <span
+              className="bubble-stopped"
+              title="该回答已被停止：下面是停止前已生成的部分，不是完整回复。停止只中断生成与前台工具调用，已经执行完的操作不会回滚。"
+            >
+              已停止
+            </span>
+          ) : null}
           {isAssistant && message.turn ? (
             <span className="bubble-usage" title={turnTitle(message.turn)}>
               {message.turn.estimated ? '≈' : ''}本轮
@@ -2162,6 +2172,17 @@ export default function App() {
   const [toast, setToast] = useState<ToastNotice | null>(null);
   const [state, setState] = useState<ConnState>('idle');
   const [agentOnline, setAgentOnline] = useState(false);
+  /**
+   * M42: a turn is in flight. Deliberately per chat and independent of
+   * `message.streaming`: a turn spans reasoning, any number of answer
+   * segments and long tool phases, and between segments there is no
+   * streaming bubble at all. The old "is any message.streaming?" test hid
+   * 停止 exactly when the user needed it (before the first token, during a
+   * tool call).
+   */
+  const [busyChats, setBusyChats] = useState<Set<string>>(() => new Set());
+  /** M42: a stop frame is in flight for that chat ("正在停止…"). */
+  const [stoppingChats, setStoppingChats] = useState<Set<string>>(() => new Set());
 
   // Endpoint mode: if env vars are baked in, use them; otherwise allow switching between local (:8787) and cloud CF relay
   const [endpointMode, setEndpointMode] = useState<'local' | 'cloud'>(() => {
@@ -2305,9 +2326,18 @@ export default function App() {
    * slot transition. A live socket alone is not proof — see docs/m39-report.md.
    */
   const agentOnlineRef = useRef(false);
+  /**
+   * M42: the plugin's advertised protocol revision (identity `status.protocol`).
+   * 0 = unknown / pre-M42. Below 12 there is no `turn` frame, so the SPA keeps
+   * the old "hide 停止 when the answer segment ends" rule; at 12+ only the turn
+   * boundary (or history's `busy`) may clear it.
+   */
+  const agentProtocolRef = useRef(0);
   const outboxReconcile = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const outboxSentPrune = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const runtimes = useRef<Map<string, ChatRuntime>>(new Map());
+  // M42: per-chat watchdog for a stop the agent never acknowledges.
+  const stopTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const listRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -2414,6 +2444,71 @@ export default function App() {
   const ensureChat = (chat: string) => {
     setChatIds((prev) => (prev.includes(chat) ? prev : [...prev, chat]));
     setMessagesByChat((prev) => (chat in prev ? prev : { ...prev, [chat]: [] }));
+  };
+
+  // ---- M42: turn busy / stopping ---------------------------------------
+  const markBusy = (chat: string, on: boolean) => {
+    setBusyChats((prev) => {
+      if (prev.has(chat) === on) return prev;
+      const next = new Set(prev);
+      if (on) next.add(chat);
+      else next.delete(chat);
+      return next;
+    });
+  };
+  const markStopping = (chat: string, on: boolean) => {
+    setStoppingChats((prev) => {
+      if (prev.has(chat) === on) return prev;
+      const next = new Set(prev);
+      if (on) next.add(chat);
+      else next.delete(chat);
+      return next;
+    });
+  };
+  const clearStopWatchdog = (chat: string) => {
+    const timer = stopTimers.current.get(chat);
+    if (timer) {
+      clearTimeout(timer);
+      stopTimers.current.delete(chat);
+    }
+  };
+  /**
+   * Close a turn in the message list. `stopped` adds the 已停止 badge to the
+   * last assistant bubble *of this turn* (after the last user row), even when
+   * the turn ended during a tool phase and that bubble was already settled.
+   * A turn stopped before its first token has no assistant row, and none is
+   * invented: the button swap back to 发送 is the feedback.
+   */
+  const closeTurn = (chat: string, stopped: boolean) => {
+    updateChat(chat, (prev) => {
+      let userIndex = -1;
+      for (let i = prev.length - 1; i >= 0; i -= 1) {
+        if (prev[i].role === 'user') {
+          userIndex = i;
+          break;
+        }
+      }
+      let lastAssistant = -1;
+      for (let i = prev.length - 1; i > userIndex; i -= 1) {
+        if (prev[i].role === 'assistant' && prev[i].kind !== 'approval') {
+          lastAssistant = i;
+          break;
+        }
+      }
+      return prev.map((message, index) => {
+        if (index <= userIndex || message.role !== 'assistant') {
+          return message.streaming ? { ...message, streaming: false } : message;
+        }
+        if (index !== lastAssistant) {
+          return message.streaming ? { ...message, streaming: false } : message;
+        }
+        return {
+          ...message,
+          streaming: false,
+          stopped: stopped || message.stopped,
+        };
+      });
+    });
   };
 
   // ---- M22: per-chat composer drafts ----
@@ -3665,6 +3760,9 @@ export default function App() {
         case 'start': {
           ensureChat(chat);
           flushNow();
+          markBusy(chat, true);
+          markStopping(chat, false);
+          clearStopWatchdog(chat);
           const rt = runtimeOf(chat);
           rt.endedId = null;
           if (rt.activeId == null) newBubble(chat);
@@ -3693,6 +3791,9 @@ export default function App() {
               prev.map((m) => (m.id === id ? { ...m, streaming: false } : m)),
             );
           }
+          // M42: a pre-v12 plugin has no `turn` frame; keep its old rule so
+          // deploying the SPA first cannot leave 停止 visible forever.
+          if (agentProtocolRef.current < 12) markBusy(chat, false);
           // M27: the turn is over, so QwenPaw has persisted this chat's
           // ChatSpec -- the one deterministic moment a deferred level can be
           // applied (see `applyPendingEffort`).
@@ -3719,6 +3820,9 @@ export default function App() {
                       ...m,
                       text: text || m.text,
                       streaming: false,
+                      // M42: the plugin closes a stopped segment with a
+                      // full-text msg carrying `stopped:true`.
+                      stopped: frame.stopped === true || m.stopped,
                       kind: extra.length ? 'parts' : m.kind,
                       parts: extra.length ? [...(m.parts ?? []), ...extra] : m.parts,
                     }
@@ -3772,14 +3876,49 @@ export default function App() {
                 kind: extra.length ? 'parts' : 'text',
                 text,
                 parts: extra.length ? extra : undefined,
+                stopped: frame.stopped === true ? true : undefined,
                 ts: Date.now(),
               },
             ];
           });
           // Non-streamed replies close the turn here; refresh like `end` does.
+          // M42: pre-v12 plugins have no turn boundary, so this is the only
+          // place their busy flag can be cleared.
+          if (agentProtocolRef.current < 12) markBusy(chat, false);
           // M27: same trigger for a level that was waiting for the ChatSpec.
           applyPendingEffort(chat);
           if (chat === activeRef.current) scheduleUsageRefresh(chat);
+          break;
+        }
+
+        case 'turn': {
+          // M42: the only reliable end-of-turn signal. `end` closes one
+          // stream *segment*; a turn may have several, separated by tool
+          // calls, and a stop can arrive with no segment open at all.
+          flushNow();
+          agentProtocolRef.current = 12;
+          markBusy(chat, false);
+          markStopping(chat, false);
+          clearStopWatchdog(chat);
+          const rt = runtimeOf(chat);
+          rt.activeId = null;
+          rt.endedId = null;
+          closeTurn(chat, frame.state === 'stopped');
+          applyPendingEffort(chat);
+          if (chat === activeRef.current) scheduleUsageRefresh(chat);
+          break;
+        }
+
+        case 'stop_error': {
+          // The stop never reached a running turn (HTTP/transport failure).
+          // Keep the turn going: pretending it stopped would be a lie.
+          markStopping(chat, false);
+          clearStopWatchdog(chat);
+          const detail = asString(frame.msg);
+          setToast({
+            text: `停止失败${detail ? `：${detail}` : '，请重试'}`,
+            tone: 'danger',
+          });
           break;
         }
 
@@ -3848,6 +3987,19 @@ export default function App() {
           } else {
             rt.histOpen = false;
             rt.loaded = true;
+            // M42: QwenPaw's own run status is the only way to know a turn
+            // is in flight when no segment is open (e.g. reload during a
+            // tool call). Absent means unknown: never assume idle.
+            if (typeof frame.busy === 'boolean') {
+              // A v12 field: a plugin that sends it also sends `turn`.
+              agentProtocolRef.current = 12;
+              markBusy(chat, frame.busy);
+              if (!frame.busy) {
+                rt.activeId = null;
+                rt.endedId = null;
+                closeTurn(chat, false);
+              }
+            }
           }
           // M23: a search-hit jump may be waiting for exactly this history.
           setHistTick((tick) => tick + 1);
@@ -3968,6 +4120,12 @@ export default function App() {
           rt.histOpen = false;
           rt.histPending = false;
           rt.loaded = false;
+          // M42: the stream state is unknowable until the history answer
+          // arrives, and that answer carries `busy`. Do not keep a turn
+          // length across a container restart.
+          markBusy(chat, false);
+          markStopping(chat, false);
+          clearStopWatchdog(chat);
           ensureChat(chat);
           updateChat(chat, () => []);
           requestHist(chat);
@@ -3996,7 +4154,16 @@ export default function App() {
           }
           if (!presence) break;
           const name = asString(frame.agent_name);
-          if (name) setAgentName(name);
+          // M42: the identity push advertises the plugin's protocol revision.
+          // Assign even when absent: a rollback to a pre-v12 plugin must not
+          // keep the turn-boundary rule of a plugin that is no longer there.
+          // Only an identity frame (it has agent_name) may change this; a
+          // relay presence frame carries agentOnline alone.
+          if (name) {
+            agentProtocolRef.current =
+              typeof frame.protocol === 'number' ? frame.protocol : 0;
+            setAgentName(name);
+          }
           const provider = asString(frame.provider);
           const model = asString(frame.model);
           if (provider && model) setCurrentModel({ provider, model });
@@ -4374,6 +4541,8 @@ export default function App() {
       outboxReconcile.current.clear();
       for (const timer of outboxSentPrune.current.values()) clearTimeout(timer);
       outboxSentPrune.current.clear();
+      for (const timer of stopTimers.current.values()) clearTimeout(timer);
+      stopTimers.current.clear();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reconnect when endpoint or login changes
   }, [needsLogin, activeWsUrl, requiresAuth]);
@@ -4384,6 +4553,11 @@ export default function App() {
   // queued message must survive both without ever looking delivered.
   const pendingOutbox = visibleOutbox(outbox, activeChat);
   const streaming = messages.some((m) => m.streaming);
+  // M42: a turn is in flight from the moment a message is accepted until the
+  // plugin's `turn` boundary, including the no-output tool windows. The
+  // `streaming` fallback keeps a client that somehow missed `turn` usable.
+  const turnBusy = streaming || busyChats.has(activeChat);
+  const turnStopping = stoppingChats.has(activeChat);
   const activeEffort = effortLevels[activeChat] ?? 'default';
   const activeEffortSupported = effortMeta[activeChat]?.supported ?? null;
   const activeUsage = usageByChat[activeChat];
@@ -4942,6 +5116,10 @@ export default function App() {
       clearTimeout(usageTimer);
       usageTimers.current.delete(id);
     }
+    // M42: a deleted chat cannot be busy and has no stop to wait for.
+    markBusy(id, false);
+    markStopping(id, false);
+    clearStopWatchdog(id);
     if (renamingId === id) cancelRename();
     if (id !== activeChat) return;
     if (remaining.length > 0) selectChat(remaining[0]);
@@ -4949,7 +5127,29 @@ export default function App() {
   };
 
   const stop = () => {
-    clientRef.current?.send({ t: 'stop', chat: activeChat });
+    const chat = activeChat;
+    if (stoppingChats.has(chat)) return;
+    const client = canReachAgent() ? clientRef.current : null;
+    if (!client || !client.send({ t: 'stop', chat })) {
+      // Never queue a stop: a relay-buffered stop would cancel whichever run
+      // happens to be live when the agent comes back.
+      setToast({ text: '未连接 Agent — 停止指令未发送。', tone: 'danger' });
+      return;
+    }
+    markStopping(chat, true);
+    clearStopWatchdog(chat);
+    // The plugin answers within ~10 s (its local API timeout) or not at all.
+    // Do not fake a stop when it does not: drop the "正在停止…" label, keep
+    // the turn open and tell the user to retry.
+    const timer = setTimeout(() => {
+      stopTimers.current.delete(chat);
+      markStopping(chat, false);
+      setToast({
+        text: '停止未获确认：Agent 没有响应，生成可能仍在继续，请重试。',
+        tone: 'danger',
+      });
+    }, 12000);
+    stopTimers.current.set(chat, timer);
   };
 
   const runCommand = (id: string) => {
@@ -5103,6 +5303,11 @@ export default function App() {
     // M19: a chat the user has written in is never replaced by the stale-chat
     // fallback, even if the server list predates this turn.
     touchedChatsRef.current.add(chat);
+    // M42: the frame is on the wire, so a turn is now in flight even before
+    // QwenPaw produces its first token.
+    markBusy(chat, true);
+    markStopping(chat, false);
+    clearStopWatchdog(chat);
     // M27: do NOT push the effort here -- the chat may not exist for a while.
     // The completed-turn handler re-applies it once QwenPaw has the ChatSpec.
     nearBottomRef.current = true;
@@ -5181,6 +5386,11 @@ export default function App() {
     // M19: a chat the user has written in is never replaced by the stale-chat
     // fallback, even if the server list predates this turn.
     touchedChatsRef.current.add(chat);
+    // M42: the frame is on the wire, so a turn is now in flight even before
+    // QwenPaw produces its first token.
+    markBusy(chat, true);
+    markStopping(chat, false);
+    clearStopWatchdog(chat);
     // M27: do NOT push the effort here -- the chat may not exist for a while.
     // The completed-turn handler re-applies it once QwenPaw has the ChatSpec.
     nearBottomRef.current = true;
@@ -6635,10 +6845,20 @@ export default function App() {
               </div>
 
               <div className="composer-tools-right">
-                {streaming && state === 'live' ? (
-                  <button type="button" className="stop" onClick={stop}>
+                {turnBusy && state === 'live' && agentOnline ? (
+                  <button
+                    type="button"
+                    className={`stop${turnStopping ? ' stopping' : ''}`}
+                    onClick={stop}
+                    disabled={turnStopping}
+                    title={
+                      turnStopping
+                        ? '正在等待 Agent 停止…'
+                        : '停止生成并取消前台工具调用；已经执行完的操作不会回滚，后台任务不会被取消。'
+                    }
+                  >
                     <Square size={12} />
-                    <span>停止</span>
+                    <span>{turnStopping ? '正在停止…' : '停止'}</span>
                   </button>
                 ) : (
                   /* M41: explicit button, never a submit -- a synthesized

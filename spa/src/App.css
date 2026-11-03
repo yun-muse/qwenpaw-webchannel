@@ -1458,6 +1458,20 @@ button:disabled {
   margin-right: 4px;
 }
 
+/* M42: a stopped turn keeps its partial reply and says so in the footer. */
+.bubble-stopped {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  margin-right: 4px;
+  border-radius: 999px;
+  background: var(--stop-bg);
+  color: var(--stop-text);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 /* M15: one receipt per turn, inline with the time on desktop (mobile: own row) */
 .bubble-usage {
   font-size: 11px;
@@ -3050,6 +3064,13 @@ button:disabled {
   color: var(--stop-text);
   font-size: 12.5px;
   font-weight: 600;
+}
+
+/* M42: the button stays put while the stop is in flight, but cannot be
+   pressed twice; the label switches to 正在停止… */
+.stop:disabled {
+  opacity: 0.7;
+  cursor: default;
 }
 
 .hint {
