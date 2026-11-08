@@ -95,7 +95,10 @@ MAX_FRAME_BYTES = 256 * 1024
 # ignores the field; a v12 browser uses it to choose between the turn-boundary
 # rule (v12) and the old "hide 停止 at every segment end" fallback, so an SPA
 # deployed before its plugin (or vice versa) cannot leave 停止 stuck.
-PROTOCOL_VERSION = 12
+# M46 (v13): `hist` rows may carry `kind:"reasoning"`; additive, so a v12
+# client keeps working and a v13 client can only get the field from a v13
+# plugin.
+PROTOCOL_VERSION = 13
 
 
 def _encoded_size(frame):
@@ -243,6 +246,9 @@ def hist_frame(chat, messages, more=False, seq=None, busy=None):
     so a browser that reloads in the middle of a tool phase (no open stream
     and therefore no frames) still offers 停止. Omitted when the answer is
     unknown, never defaulted to false.
+
+    M46: a row may carry ``kind:"reasoning"``; the frame builder only passes
+    the messages through, so no shape change is needed here.
     """
     frame = {"t": "hist", "chat": chat, "messages": messages}
     if more:

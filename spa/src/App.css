@@ -1512,7 +1512,7 @@ button:disabled {
   color: var(--ok);
 }
 
-/* Thinking / Reasoning Collapsible Card */
+/* Thinking / Reasoning collapsible card (M46: collapsed by default) */
 
 .reply {
   display: flex;
@@ -1523,32 +1523,98 @@ button:disabled {
 }
 
 .thinking {
-  padding: 8px 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--panel);
   font-size: 12.5px;
   line-height: 1.6;
   color: var(--muted);
+  overflow: hidden;
 }
 
-.thinking summary {
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 500;
+.thinking-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 32px;
+  margin: 0;
+  padding: 4px 12px;
+  border: 0;
+  background: transparent;
   color: var(--muted);
-  user-select: none;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.thinking-toggle:hover {
+  color: var(--text);
+}
+
+.thinking-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thinking-count {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.thinking-chevron {
+  flex: 0 0 auto;
+  transition: transform 0.15s ease;
+}
+
+.thinking-chevron.open {
+  transform: rotate(180deg);
+}
+
+.thinking-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: thinking-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes thinking-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 .thinking-body {
-  margin-top: 8px;
-  padding-top: 8px;
+  margin: 0 12px;
+  padding: 8px 0 10px;
   border-top: 1px solid var(--line);
   max-height: 260px;
   overflow-y: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-size: 12.5px;
+}
+
+/* M22/M44 lesson: a rule inside the 720 px breakpoint alone misses a
+   coarse-pointer tablet, so the 44 px header is gated on both. */
+@media (max-width: 720px), (pointer: coarse) {
+  .thinking-toggle {
+    min-height: 44px;
+  }
 }
 
 .plain {
@@ -4683,12 +4749,6 @@ button:disabled {
     min-height: 44px;
     padding: 0;
     border-radius: 10px;
-  }
-
-  .thinking summary {
-    display: flex;
-    align-items: center;
-    min-height: 44px;
   }
 
   .scroll-bottom {

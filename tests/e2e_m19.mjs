@@ -60,6 +60,9 @@
  *                      unmodified build (writes tests/out/m44-before-idle.png)
  *   M45_ONLY=1         run only the M45 icon action-row checks (fast loop;
  *                      writes the 390x844/1280x900 after shots)
+ *   M46_ONLY=1         run only the M46 reasoning-identity checks (fast loop;
+ *                      writes tests/out/m46-frames-repro.log and the 390x844
+ *                      m46-after-collapsed.png / m46-after-expanded.png shots)
  *   M45_BEFORE=1       evidence-only run of the M45 inventory against the
  *                      unmodified build (writes tests/out/m45-before-*.png)
  *   M42_LEGACY=1       M42 red run: the mock stops silently, like the
@@ -84,7 +87,7 @@ import { chromium, devices } from 'playwright';
 import { spawn, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -245,6 +248,23 @@ const M45_TABLE_TEXT = [
   '| 可见文字 | 有 | 悬停提示 |',
   '| 点击区域 | 44 px | 44 px |',
 ].join('\n');
+
+/**
+ * M46: a long reasoning body and a short answer. The markers make "the
+ * reasoning is being rendered as ordinary body text" measurable instead of
+ * eyeballed. The reasoning is deliberately long: the user's report is that the
+ * dumped block makes the conversation unreadable.
+ */
+const M46_REASONING = [
+  'M46-REASONING-MARKER 我先梳理这个问题。',
+  ...Array.from(
+    { length: 12 },
+    (_, i) =>
+      `第 ${i + 1} 段思考：核对输入与约束，排除不成立的解释，再把可行的步骤按顺序排好。这一段故意写得足够长，让丢失标记时的正文像报告里那样难以阅读。`,
+  ),
+].join('\n\n');
+const M46_REASONING_2 = `${M46_REASONING}\n\nM46-REASONING-SECOND 工具返回之后又想到一步。`;
+const M46_ANSWER = 'M46-ANSWER-MARKER 这是最终答复。';
 
 /** M23: a hit whose chat is not in localStorage/chats (仅归档 behaviour). */
 const ARCHIVED_HIT_TEXT = `只存在于归档的旧项目记录，关键词：归档专属，原会话已经不在服务器列表中。`;
@@ -443,6 +463,11 @@ const state = {
    * stuck-UI bug. Set by `M42_LEGACY=1`.
    */
   legacyStop: false,
+  /** M46: turns whose stop goes through the reasoning-leak frame shape. */
+  m46Turns: new Map(),
+  /** M46: every frame the mock sent, kept only while an M46 check runs. */
+  recordFrames: false,
+  frameLog: [],
 };
 
 function resetState() {
@@ -497,6 +522,12 @@ function resetState() {
   state.turnQueue.clear();
   state.turnLog = [];
   state.legacyStop = process.env.M42_LEGACY === '1';
+  for (const turn of state.m46Turns.values()) {
+    for (const timer of turn.timers) clearTimeout(timer);
+  }
+  state.m46Turns.clear();
+  state.recordFrames = false;
+  state.frameLog = [];
 }
 
 /**
@@ -519,6 +550,7 @@ function exportDocFor(chat) {
 let agent = null;
 let seq = 0;
 const agentSend = (frame) => {
+  if (state.recordFrames) state.frameLog.push(frame);
   if (agent && agent.readyState === 1) agent.send(JSON.stringify(frame));
 };
 
@@ -754,6 +786,223 @@ function stopToolTurn(chat) {
   return true;
 }
 
+/** Split text into deterministic chunks (mirrors one model delta per chunk). */
+function m46Chunks(text, size = 80) {
+  const out = [];
+  for (let at = 0; at < text.length; at += size) {
+    out.push(text.slice(at, at + size));
+  }
+  return out;
+}
+
+/**
+ * M46 live shape (path 1): reasoning deltas, reasoning end, then one answer
+ * segment. The real plugin emits exactly these frames (`start`/`evt`/`end`
+ * with `stream_type`, then the trailing full-text `msg` for the answer only).
+ *
+ * Paced so the collapsed header's `思考中…` state is observable for ~0.7 s
+ * before the answer starts (a synchronous burst settles before any poll).
+ */
+function m46LiveTurn(chat) {
+  const turn = { timers: new Set(), phase: 'reasoning' };
+  state.m46Turns.set(chat, turn);
+  const at = (ms, fn) => {
+    const timer = setTimeout(() => {
+      turn.timers.delete(timer);
+      if (state.m46Turns.get(chat) === turn) fn();
+    }, ms);
+    turn.timers.add(timer);
+  };
+
+  at(150, () => {
+    agentSend({ t: 'start', chat, seq: seq++, stream_type: 'reasoning' });
+    const chunks = m46Chunks(M46_REASONING);
+    chunks.forEach((chunk, i) => {
+      at(200 + i * 55, () => {
+        agentSend({
+          t: 'evt',
+          chat,
+          seq: seq++,
+          data: { text: chunk, stream_type: 'reasoning' },
+        });
+      });
+    });
+    const answered = 200 + chunks.length * 55;
+    at(answered, () => {
+      agentSend({ t: 'end', chat, seq: seq++, stream_type: 'reasoning' });
+      turn.phase = 'text';
+      agentSend({ t: 'start', chat, seq: seq++, stream_type: 'message' });
+      agentSend({
+        t: 'evt',
+        chat,
+        seq: seq++,
+        data: { text: M46_ANSWER, stream_type: 'message' },
+      });
+    });
+    at(answered + 40, () => {
+      agentSend({ t: 'end', chat, seq: seq++, stream_type: 'message' });
+    });
+    at(answered + 60, () => {
+      agentSend({ t: 'msg', chat, seq: seq++, parts: [{ type: 'text', text: M46_ANSWER }] });
+      sendTurn(chat, 'done');
+      state.m46Turns.delete(chat);
+    });
+  });
+}
+
+/**
+ * M46 interleaved shape (path 6): reasoning -> answer -> tool call ->
+ * reasoning again -> second answer. Two reasoning blocks and two answer
+ * bubbles, with no overlap between them.
+ */
+function m46InterleavedTurn(chat) {
+  const reasoning = (text) => {
+    agentSend({ t: 'start', chat, seq: seq++, stream_type: 'reasoning' });
+    for (const chunk of m46Chunks(text)) {
+      agentSend({
+        t: 'evt',
+        chat,
+        seq: seq++,
+        data: { text: chunk, stream_type: 'reasoning' },
+      });
+    }
+    agentSend({ t: 'end', chat, seq: seq++, stream_type: 'reasoning' });
+  };
+  const answer = (text) => {
+    agentSend({ t: 'start', chat, seq: seq++, stream_type: 'message' });
+    agentSend({
+      t: 'evt',
+      chat,
+      seq: seq++,
+      data: { text, stream_type: 'message' },
+    });
+    agentSend({ t: 'end', chat, seq: seq++, stream_type: 'message' });
+    agentSend({ t: 'msg', chat, seq: seq++, parts: [{ type: 'text', text }] });
+  };
+
+  reasoning(M46_REASONING);
+  answer('M46-ANSWER-MARKER 第一段答复。');
+  agentSend({
+    t: 'msg',
+    chat,
+    seq: seq++,
+    parts: [{ type: 'tool_call', name: 'shell', input: '{"cmd":"echo ok"}' }],
+  });
+  reasoning(M46_REASONING_2);
+  answer('第二段答复，在工具执行之后。');
+  sendTurn(chat, 'done');
+}
+
+/**
+ * M46 stop shape (path 5). QwenPaw's cancelled envelope carries the completed
+ * REASONING message(s) plus the partial answer
+ * (`runtime/envelope.py::_finalize_response`). The v13 plugin keeps only the
+ * answer (`response_partial_text` skips non-MESSAGE types); `legacy:true`
+ * replays the pre-fix shape where the partial was `reasoning + answer`, which
+ * is exactly what the SPA's rollout guard must trim.
+ */
+function m46StopTurn(chat, { legacy = false } = {}) {
+  const turn = { timers: new Set(), phase: 'reasoning', legacy };
+  state.m46Turns.set(chat, turn);
+  const at = (ms, fn) => {
+    const timer = setTimeout(() => {
+      turn.timers.delete(timer);
+      if (state.m46Turns.get(chat) === turn) fn();
+    }, ms);
+    turn.timers.add(timer);
+  };
+
+  at(150, () => {
+    agentSend({ t: 'start', chat, seq: seq++, stream_type: 'reasoning' });
+    const chunks = m46Chunks(M46_REASONING);
+    chunks.forEach((chunk, i) => {
+      at(200 + i * 12, () => {
+        agentSend({
+          t: 'evt',
+          chat,
+          seq: seq++,
+          data: { text: chunk, stream_type: 'reasoning' },
+        });
+      });
+    });
+    at(200 + chunks.length * 12, () => {
+      agentSend({ t: 'end', chat, seq: seq++, stream_type: 'reasoning' });
+      turn.phase = 'text';
+      agentSend({ t: 'start', chat, seq: seq++, stream_type: 'message' });
+      agentSend({
+        t: 'evt',
+        chat,
+        seq: seq++,
+        data: { text: M46_ANSWER, stream_type: 'message' },
+      });
+    });
+  });
+
+  // Safety net: the test stops in the text phase; never leave a turn open.
+  at(15000, () => {
+    stopM46Turn(chat, { complete: true });
+  });
+}
+
+/** M46: stop a reasoning turn with the frame shape the plugin actually emits. */
+function stopM46Turn(chat, { complete = false } = {}) {
+  const turn = state.m46Turns.get(chat);
+  if (!turn) return false;
+  for (const timer of turn.timers) clearTimeout(timer);
+  state.m46Turns.delete(chat);
+
+  if (turn.phase !== 'text') {
+    agentSend({ t: 'end', chat, seq: seq++, stream_type: 'reasoning' });
+    sendTurn(chat, complete ? 'done' : 'stopped');
+    return true;
+  }
+
+  if (complete) {
+    // Safety net only: a normal completion of this turn.
+    agentSend({ t: 'end', chat, seq: seq++, stream_type: 'message' });
+    agentSend({ t: 'msg', chat, seq: seq++, parts: [{ type: 'text', text: M46_ANSWER }] });
+    sendTurn(chat, 'done');
+    return true;
+  }
+
+  if (turn.legacy) {
+    // Pre-fix plugin: `response_partial_text()` returned reasoning+answer, so
+    // the differ sees a non-extension and resends the whole string; the
+    // stopped msg carries it too.
+    const full = `${M46_REASONING}${M46_ANSWER}`;
+    agentSend({
+      t: 'evt',
+      chat,
+      seq: seq++,
+      data: { text: full, stream_type: 'message' },
+    });
+    agentSend({ t: 'end', chat, seq: seq++, stream_type: 'message' });
+    agentSend({
+      t: 'msg',
+      chat,
+      seq: seq++,
+      parts: [{ type: 'text', text: full }],
+      stopped: true,
+    });
+    sendTurn(chat, 'stopped');
+    return true;
+  }
+
+  // v13 plugin: `full` is the partial answer only. The answer segment already
+  // streamed that exact text, so the differ has nothing to add; `end` plus the
+  // stopped msg carrying the answer are the whole terminal sequence.
+  agentSend({ t: 'end', chat, seq: seq++, stream_type: 'message' });
+  agentSend({
+    t: 'msg',
+    chat,
+    seq: seq++,
+    parts: [{ type: 'text', text: M46_ANSWER }],
+    stopped: true,
+  });
+  sendTurn(chat, 'stopped');
+  return true;
+}
+
 function streamReply(chat) {
   streamText(chat, STREAM_TEXT);
 }
@@ -790,7 +1039,7 @@ function handleAgentFrame(frame) {
       state.activeModel = { provider, model };
       agentSend({ t: 'model_changed', provider, model });
       // The real plugin follows with its identity push (channel.py:1361).
-      agentSend({ t: 'status', agent_name: 'mock-agent', protocol: 12, provider, model });
+      agentSend({ t: 'status', agent_name: 'mock-agent', protocol: 13, provider, model });
       break;
     }
     case 'skills':
@@ -957,6 +1206,14 @@ function handleAgentFrame(frame) {
       }
       if (String(frame.text || '').includes('M36 流式公式')) {
         streamMathReply(chat);
+      } else if (String(frame.text || '').includes('M46 思考停止旧版')) {
+        m46StopTurn(chat, { legacy: true });
+      } else if (String(frame.text || '').includes('M46 思考停止')) {
+        m46StopTurn(chat);
+      } else if (String(frame.text || '').includes('M46 思考交错')) {
+        m46InterleavedTurn(chat);
+      } else if (String(frame.text || '').includes('M46 思考')) {
+        m46LiveTurn(chat);
       } else if (String(frame.text || '').includes('M42 停止')) {
         streamStopTurn(chat, String(frame.text || ''));
       } else if (String(frame.text || '').includes('M43')) {
@@ -1001,6 +1258,7 @@ function handleAgentFrame(frame) {
     case 'stop': {
       const chat = String(frame.chat || '');
       state.stopLog.push({ chat, at: Date.now() });
+      if (stopM46Turn(chat)) break;
       if (stopToolTurn(chat)) break;
       stopPlainStream(chat);
       break;
@@ -1031,7 +1289,7 @@ function connectAgent({ statusDelayMs = 0 } = {}) {
       // M39: the real plugin pushes `status` right after the relay's `ready`
       // (plugin/channel.py:645-647). A caller can delay it to prove the SPA
       // reacts to the relay's presence edge instead.
-      ws.send(JSON.stringify({ t: 'status', agent_name: 'mock-agent', protocol: 12 }));
+      ws.send(JSON.stringify({ t: 'status', agent_name: 'mock-agent', protocol: 13 }));
     };
     ws.on('open', () => {
       clearTimeout(timer);
@@ -6328,6 +6586,391 @@ async function runM45Checks(page, pass, mobile) {
   );
 }
 
+/**
+ * M46 — reasoning keeps its identity and thinking is collapsed by default.
+ *
+ * Four user-visible states, each asserted twice (the reasoning must live in a
+ * thinking block, never in body text, and every block starts collapsed):
+ *
+ *   hist        a chat loaded from `hist` (reload / switch / resync). v13
+ *               serves the reasoning row with `kind:"reasoning"`, so it
+ *               becomes a thinking-only message in the same list position.
+ *   live        reasoning deltas then one answer (path 1). While the reasoning
+ *               streams the collapsed header shows 思考中…; it never
+ *               auto-expands and settles collapsed.
+ *   interleaved reasoning -> answer -> tool -> reasoning -> answer (path 6).
+ *   stop        a stopped turn; the v13 plugin carries the partial answer
+ *               only. A legacy variant replays the pre-fix
+ *               `reasoning + answer` partial to prove the SPA rollout guard
+ *               trims it (mixed deploy).
+ *
+ * `M46_ONLY=1` is the fast loop; the evidence shots are 390x844.
+ */
+async function runM46Checks(page, pass, mobile) {
+  resetState();
+  state.recordFrames = true;
+  state.chats = [
+    { chat: 'chat-alpha', title: 'Alpha 会话', updated_at: '2026-10-28T09:00:00Z' },
+    { chat: 'chat-thinking', title: '思考会话', updated_at: '2026-10-30T09:00:00Z' },
+  ];
+  // v13 hist: the reasoning row keeps its list position and is tagged
+  // `kind:"reasoning"`; the answer row carries the turn receipt. The shape is
+  // proved against the real converter by tests/repro_m46_plugin.py (HIST).
+  state.history['chat-thinking'] = [
+    { role: 'user', text: 'M46 请先思考再回答' },
+    { role: 'assistant', text: M46_REASONING, kind: 'reasoning' },
+    {
+      role: 'assistant',
+      text: M46_ANSWER,
+      turn: { id: 'm46-turn-1', input: 1200, output: 88 },
+    },
+  ];
+
+  await page.evaluate(() => {
+    localStorage.setItem('webchannel.chats', JSON.stringify(['chat-alpha', 'chat-thinking']));
+    localStorage.setItem('webchannel.activeChat', 'chat-alpha');
+    localStorage.setItem('webchannel.chatNames', '{}');
+    localStorage.setItem('webchannel.pinnedChats', '[]');
+    localStorage.removeItem('webchannel.chatTags');
+    localStorage.removeItem('webchannel.search');
+    localStorage.removeItem('webchannel.drafts');
+    localStorage.removeItem('webchannel.outbox');
+    localStorage.removeItem('webchannel.busyQueue');
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await waitForHistory(page);
+  await sleep(400);
+
+  if (mobile && !(await page.locator('.app.sidebar-open').count())) {
+    await page.locator('.hamburger').click();
+    await sleep(350);
+  }
+  await page.locator('.chat-item', { hasText: '思考会话' }).click();
+  await sleep(400);
+  if (mobile && (await page.locator('.app.sidebar-open').count())) {
+    await page.locator('.sidebar-close').click();
+    await sleep(350);
+  }
+
+  // The thinking body is deliberately not mounted while closed, so `body`
+  // measures only the answer markdown; `thinkingText` is empty unless the
+  // block was explicitly expanded.
+  const ui = () =>
+    page.evaluate(() => {
+      const rows = [...document.querySelectorAll('.messages .row.assistant')];
+      const info = (row) => {
+        const block = row.querySelector('.thinking');
+        const toggle = block ? block.querySelector('.thinking-toggle') : null;
+        const label = toggle ? toggle.querySelector('.thinking-label') : null;
+        const count = toggle ? toggle.querySelector('.thinking-count') : null;
+        const body = block ? block.querySelector('.thinking-body') : null;
+        return {
+          body: [...row.querySelectorAll('.md, .plain')]
+            .map((el) => el.textContent || '')
+            .join('\n'),
+          thinking: Boolean(block),
+          open: toggle ? toggle.getAttribute('aria-expanded') === 'true' : false,
+          label: label ? (label.textContent || '').trim() : '',
+          count: count ? (count.textContent || '').trim() : '',
+          thinkingText: body ? body.textContent || '' : '',
+          height: toggle ? Math.round(toggle.getBoundingClientRect().height) : 0,
+          bubble: Boolean(row.querySelector('.bubble')),
+          foot: Boolean(row.querySelector('.bubble-foot')),
+        };
+      };
+      return { rows: rows.length, all: rows.map(info) };
+    });
+  const added = (before, now) => now.all.slice(before.rows);
+  const EMPTY_ROW = {
+    body: '',
+    thinking: false,
+    open: false,
+    label: '',
+    count: '',
+    thinkingText: '',
+    bubble: false,
+    foot: false,
+  };
+
+  // ---- 1. hist path: reload / chat switch -------------------------------
+  const histOk = await waitUntil(
+    async () => {
+      const now = await ui();
+      return now.rows >= 2 && now.all.some((row) => row.body.includes('M46-ANSWER-MARKER'));
+    },
+    8000,
+  );
+  const hist = await ui();
+  const histThinking = hist.all.filter((row) => row.thinking);
+  check(
+    `${pass}: M46 hist has the answer on screen (fixture loaded)`,
+    histOk,
+    JSON.stringify(hist.all.map((row) => row.body.slice(0, 40))),
+  );
+  check(
+    `${pass}: M46 hist renders the reasoning as a thinking block`,
+    histThinking.length === 1,
+    JSON.stringify(hist.all.map((row) => ({ t: row.thinking, s: row.body.slice(0, 30) }))),
+  );
+  check(
+    `${pass}: M46 hist thinking block is collapsed by default`,
+    histThinking.length === 1 && !histThinking[0].open && histThinking[0].thinkingText === '',
+    JSON.stringify(histThinking.map((row) => ({ open: row.open, body: row.thinkingText.slice(0, 30) }))),
+  );
+  check(
+    `${pass}: M46 hist header shows the honest character count`,
+    histThinking.length === 1 &&
+      histThinking[0].label.includes('思考过程') &&
+      histThinking[0].count === `· ${M46_REASONING.length} 字`,
+    JSON.stringify(histThinking.map((row) => ({ label: row.label, count: row.count }))),
+  );
+  check(
+    `${pass}: M46 hist reasoning-only row has no empty bubble or footer`,
+    histThinking.length === 1 && !histThinking[0].bubble && !histThinking[0].foot,
+    JSON.stringify({ bubble: histThinking[0] && histThinking[0].bubble, foot: histThinking[0] && histThinking[0].foot }),
+  );
+  check(
+    `${pass}: M46 thinking header meets the ${mobile ? 44 : 32}px tap target`,
+    histThinking.length === 1 && histThinking[0].height >= (mobile ? 44 : 32),
+    JSON.stringify(histThinking.map((row) => row.height)),
+  );
+  check(
+    `${pass}: M46 hist never renders the reasoning as body text`,
+    !hist.all.some((row) => row.body.includes('M46-REASONING-MARKER')),
+    JSON.stringify(hist.all.map((row) => row.body.slice(0, 60))),
+  );
+
+  // hist serves reasoning and answer as two rows; the block lives in the
+  // reasoning-only row, directly above its answer.
+  const histBlock = page.locator('.messages .row.assistant .thinking').first();
+  const histToggle = histBlock.locator('.thinking-toggle');
+
+  // Evidence: the long reasoning as ONE collapsed row above its answer.
+  if (mobile) {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await histBlock.scrollIntoViewIfNeeded();
+    await sleep(250);
+    await page.screenshot({ path: artifactFile('m46-after-collapsed.png') });
+    log(`[m46] wrote ${artifactFile('m46-after-collapsed.png')}`);
+  }
+
+  await histToggle.click();
+  await sleep(200);
+  const expanded = await ui();
+  const expandedRow = expanded.all.find((row) => row.thinking) || EMPTY_ROW;
+  check(
+    `${pass}: M46 hist toggle expands the block (body visible)`,
+    expandedRow.thinking && expandedRow.open && expandedRow.thinkingText.includes('M46-REASONING-MARKER'),
+    JSON.stringify({ open: expandedRow.open, body: expandedRow.thinkingText.slice(0, 40) }),
+  );
+
+  if (mobile) {
+    await histBlock.scrollIntoViewIfNeeded();
+    await sleep(250);
+    await page.screenshot({ path: artifactFile('m46-after-expanded.png') });
+    log(`[m46] wrote ${artifactFile('m46-after-expanded.png')}`);
+  }
+
+  await histToggle.click();
+  await sleep(200);
+  const recollapsed = await ui();
+  const recollapsedRow = recollapsed.all.find((row) => row.thinking) || EMPTY_ROW;
+  check(
+    `${pass}: M46 hist toggle collapses the block again`,
+    !recollapsedRow.open && recollapsedRow.thinkingText === '',
+    JSON.stringify({ open: recollapsedRow.open, body: recollapsedRow.thinkingText.slice(0, 30) }),
+  );
+
+  // ---- 2. live path: reasoning -> turn settle ---------------------------
+  let before = await ui();
+  await page.locator('.composer textarea').fill('M46 思考');
+  await page.keyboard.press('Enter');
+  const streaming = await waitUntil(
+    async () => {
+      const now = await ui();
+      return added(before, now).some(
+        (row) =>
+          row.thinking &&
+          row.label.includes('思考中') &&
+          !row.open &&
+          row.thinkingText === '',
+      );
+    },
+    8000,
+  );
+  const mid = await ui();
+  const midRow = added(before, mid).find((row) => row.thinking) || EMPTY_ROW;
+  check(
+    `${pass}: M46 live header shows 思考中 while reasoning streams`,
+    streaming,
+    JSON.stringify({ label: midRow.label, open: midRow.open }),
+  );
+  check(
+    `${pass}: M46 live reasoning never auto-expands`,
+    !midRow.open && midRow.thinkingText === '',
+    JSON.stringify({ open: midRow.open, body: midRow.thinkingText.slice(0, 30) }),
+  );
+
+  const liveOk = await waitUntil(
+    async () => {
+      const now = await ui();
+      return added(before, now).some(
+        (row) => row.thinking && row.body.includes('M46-ANSWER-MARKER'),
+      );
+    },
+    8000,
+  );
+  const live = await ui();
+  const liveRows = added(before, live);
+  const liveRow = liveRows.find((row) => row.body.includes('M46-ANSWER-MARKER')) || EMPTY_ROW;
+  check(
+    `${pass}: M46 live reasoning renders in a thinking block`,
+    liveOk && liveRow.thinking,
+    JSON.stringify(liveRows.map((row) => ({ t: row.thinking, s: row.body.slice(0, 40) }))),
+  );
+  check(
+    `${pass}: M46 live settled block is collapsed with the answer count`,
+    liveRow.thinking &&
+      !liveRow.open &&
+      liveRow.thinkingText === '' &&
+      liveRow.label.includes('思考过程') &&
+      liveRow.count === `· ${M46_REASONING.length} 字`,
+    JSON.stringify({ open: liveRow.open, label: liveRow.label, count: liveRow.count }),
+  );
+  check(
+    `${pass}: M46 live reasoning never leaks into body text`,
+    !liveRows.some((row) => row.body.includes('M46-REASONING-MARKER')),
+    JSON.stringify(liveRows.map((row) => row.body.slice(0, 60))),
+  );
+
+  // ---- 3. interleaved: reasoning -> answer -> tool -> reasoning -> answer
+  before = await ui();
+  await page.locator('.composer textarea').fill('M46 思考交错');
+  await page.keyboard.press('Enter');
+  const interOk = await waitUntil(
+    async () => {
+      const now = await ui();
+      return added(before, now).some((row) => row.body.includes('第二段答复'));
+    },
+    8000,
+  );
+  const inter = await ui();
+  const interRows = added(before, inter);
+  check(
+    `${pass}: M46 interleaved keeps two separate thinking blocks`,
+    interOk && interRows.filter((row) => row.thinking).length === 2,
+    JSON.stringify(interRows.map((row) => ({ t: row.thinking, s: row.body.slice(0, 30) }))),
+  );
+  check(
+    `${pass}: M46 interleaved blocks are both collapsed`,
+    interRows.filter((row) => row.thinking).length === 2 &&
+      interRows.filter((row) => row.thinking).every((row) => !row.open && row.thinkingText === ''),
+    JSON.stringify(interRows.filter((row) => row.thinking).map((row) => ({ open: row.open, body: row.thinkingText.slice(0, 20) }))),
+  );
+  check(
+    `${pass}: M46 interleaved never leaks reasoning into body text`,
+    !interRows.some((row) => row.body.includes('M46-REASONING-MARKER')),
+    JSON.stringify(interRows.map((row) => row.body.slice(0, 60))),
+  );
+
+  // ---- 4. stop mid-answer after a completed reasoning block (path 5) ----
+  const runStopTurn = async (text) => {
+    const before = await ui();
+    await page.locator('.composer textarea').fill(text);
+    await page.keyboard.press('Enter');
+    const answerOnScreen = await waitUntil(
+      async () =>
+        added(before, await ui()).some((row) => row.body.includes('M46-ANSWER-MARKER')),
+      8000,
+    );
+    if (await page.locator('.composer .stop').count()) {
+      await page.locator('.composer .stop').click();
+    }
+    const quiet = await waitUntil(
+      async () => (await page.locator('.composer .send').count()) === 1,
+      6000,
+    );
+    return { answerOnScreen, quiet, rows: added(before, await ui()) };
+  };
+
+  // v13: the partial text is the answer only.
+  const fixedStop = await runStopTurn('M46 思考停止');
+  const fixedRow = fixedStop.rows[fixedStop.rows.length - 1] || EMPTY_ROW;
+  check(
+    `${pass}: M46 fixed stop streamed its answer before stop`,
+    fixedStop.answerOnScreen,
+    JSON.stringify(fixedStop.rows.map((row) => row.body.slice(0, 40))),
+  );
+  check(
+    `${pass}: M46 fixed stop closes the turn and keeps the thinking block collapsed`,
+    fixedStop.quiet && fixedRow.thinking && !fixedRow.open && fixedRow.thinkingText === '',
+    JSON.stringify({ quiet: fixedStop.quiet, t: fixedRow.thinking, open: fixedRow.open }),
+  );
+  check(
+    `${pass}: M46 fixed stop never dumps the reasoning into body text`,
+    !fixedStop.rows.some((row) => row.body.includes('M46-REASONING-MARKER')) &&
+      fixedRow.body.includes('M46-ANSWER-MARKER'),
+    JSON.stringify(fixedStop.rows.map((row) => row.body.slice(0, 80))),
+  );
+
+  // Legacy shape (pre-v13 plugin): the stopped msg still carries
+  // `reasoning + answer`; the SPA guard must trim that exact prefix.
+  const legacyStop = await runStopTurn('M46 思考停止旧版');
+  const legacyRow = legacyStop.rows[legacyStop.rows.length - 1] || EMPTY_ROW;
+  check(
+    `${pass}: M46 legacy stop streamed its answer before stop`,
+    legacyStop.answerOnScreen,
+    JSON.stringify(legacyStop.rows.map((row) => row.body.slice(0, 40))),
+  );
+  check(
+    `${pass}: M46 legacy stop keeps the thinking block collapsed`,
+    legacyStop.quiet && legacyRow.thinking && !legacyRow.open && legacyRow.thinkingText === '',
+    JSON.stringify({ quiet: legacyStop.quiet, t: legacyRow.thinking, open: legacyRow.open }),
+  );
+  check(
+    `${pass}: M46 legacy stop guard trims the reasoning prefix from the body`,
+    !legacyStop.rows.some((row) => row.body.includes('M46-REASONING-MARKER')) &&
+      legacyRow.body.trim() === M46_ANSWER,
+    JSON.stringify(legacyStop.rows.map((row) => row.body.slice(0, 80))),
+  );
+
+  // ---- 5. resync path (container restart / seq gap) ---------------------
+  // `resync` clears the list and re-requests hist (App.tsx case 'resync'), so
+  // a restart always lands on the v13 hist projection asserted in step 1.
+  // Prove the routing from the wire side; asserting the rendering again would
+  // only duplicate those checks (and can race the post-resync repaint).
+  const histFrames = () =>
+    state.frameLog.filter(
+      (frame) => frame.t === 'hist' && frame.chat === 'chat-thinking',
+    ).length;
+  const histsBefore = histFrames();
+  agentSend({ t: 'resync', chat: 'chat-thinking' });
+  const resyncRouted = await waitUntil(() => histFrames() > histsBefore, 6000);
+  check(
+    `${pass}: M46 resync re-requests the v13 hist projection`,
+    resyncRouted,
+    JSON.stringify({ before: histsBefore, after: histFrames() }),
+  );
+
+  // ---- evidence: wire frames (desktop pass, one file) --------------------
+  if (!mobile) {
+    const frames = state.frameLog.filter((frame) => frame.chat === 'chat-thinking');
+    const lines = [
+      '# M46 wire frames for chat-thinking (mock mirrors plugin frames)',
+      '# hist:    {role:"assistant", text:<reasoning>, kind:"reasoning"} then the answer',
+      '# live:    reasoning start/evt/end, answer start/evt/end/msg, turn done',
+      '# stop:    v13 answer-only end + msg stopped + turn stopped',
+      '# legacy:  pre-fix evt(message, reasoning+answer) + end + msg stopped + turn',
+      '# See tests/repro_m46_plugin.py for the same sequence generated by the',
+      '# real WebChannel._finalize_turn().',
+      ...frames.map((frame) => JSON.stringify(frame)),
+    ];
+    const path = artifactFile('m46-frames-repro.log');
+    writeFileSync(path, `${lines.join('\n')}\n`);
+    log(`[m46] wrote ${path}`);
+  }
+}
+
 async function runPass(browser, pass, viewport, mobile) {
   resetState();
   const contextOptions = mobile
@@ -6428,6 +7071,12 @@ async function runPass(browser, pass, viewport, mobile) {
 
     if (process.env.M45_ONLY === '1') {
       await runM45Checks(page, pass, mobile);
+      check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
+      return;
+    }
+
+    if (process.env.M46_ONLY === '1') {
+      await runM46Checks(page, pass, mobile);
       check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
       return;
     }
@@ -6937,6 +7586,9 @@ async function runPass(browser, pass, viewport, mobile) {
 
     // ---- 15g. M45: icon-only message footer + table toolbar --------------
     await runM45Checks(page, pass, mobile);
+
+    // ---- 15h. M46: reasoning identity + collapsed thinking blocks --------
+    await runM46Checks(page, pass, mobile);
 
     // ---- 16. M37: offline send queue (last: it restarts the relay) -------
     await runM37Checks(page, pass, mobile);

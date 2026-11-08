@@ -1,6 +1,6 @@
-# WebChannel frame protocol — v12
+# WebChannel frame protocol — v13
 
-Status: current (envelope v1 plus additive revisions v2–v12; §17 documents the never-numbered M8
+Status: current (envelope v1 plus additive revisions v2–v13; §17 documents the never-numbered M8
 frames that were previously implemented but unwritten). Scope: the two WebSocket legs
 (`container ↔ relay`, `browser ↔ relay`).
 Design source: `docs/design.md` §6. The relay pairs sockets and forwards frames verbatim; it does
@@ -71,7 +71,7 @@ superseded generation) is not acked.
 | `stop_error` | `chat`, `code`, `msg?` | **v12** a stop could not be delivered (HTTP/transport failure); control frame, no `seq`, the turn is still running (§18.4) |
 | `resync` | `chat`, `reason?`, `seq?` | ring buffer miss; client must reload history |
 | `error` | `code`, `id?`, `chat?`, `req_id?`, `detail?`, `status?`, `reason?`, `seq?` | protocol/domain error (§6); `chat` (and `req_id` for approvals) marks it request-scoped — only `E_AUTH` **without** either is connection-fatal. Almost all errors are control frames; the approval refusal is emitted through the sequencer and carries `seq` |
-| `hist` | `chat`, `messages:[{role, text, files?, turn?}]`, `more?`, `seq?`, `busy?` | reply to a `hist` request; `more:true` means another `hist` frame follows; `turn` is the **v8** optional per-turn usage receipt (§11.2); `files` is the **v10** optional attachment list (§15.3); **v12** `busy` mirrors QwenPaw's run status (absent = unknown, §18.5) |
+| `hist` | `chat`, `messages:[{role, text, kind?, files?, turn?}]`, `more?`, `seq?`, `busy?` | reply to a `hist` request; `more:true` means another `hist` frame follows; `turn` is the **v8** optional per-turn usage receipt (§11.2); `files` is the **v10** optional attachment list (§15.3); **v12** `busy` mirrors QwenPaw's run status (absent = unknown, §18.5); **v13** `kind:"reasoning"` marks a persisted reasoning row (§19) |
 | `chats` | `items:[{chat, title, updated_at}]` | **M8** chat list, reply to a `chats` request (§17.1); control frame |
 | `chat_deleted` | `chat` | **M8** acknowledgement of `del_chat` (§17.2); control frame |
 | `chat_renamed` | `chat`, `title` | **M8** acknowledgement of `rename_chat` (§17.3); the title is a client display label, not a server-side rename; control frame |
@@ -1332,3 +1332,35 @@ are not cancelled.
 There is no recall/delete-turn frame. QwenPaw v2.2.2.post1 has no supported history-delete API for
 non-console channels; see `docs/m42-report.md` §B for the complete evidence chain and the re-probe
 conditions.
+
+## 19. Protocol v13 — reasoning rows in history (M46)
+
+QwenPaw's `GET /api/chats/{id}` returns reasoning as its own `Message` with `type:"reasoning"` and
+`TextContent` parts. Before v13 the plugin projected it as `{role, text}`, so every `hist` (reload,
+chat switch, `resync`) could not tell reasoning from an answer and rendered it as body text.
+
+v13 adds one optional field to `hist.messages[]`:
+
+```json
+{"t":"hist","chat":"chat-abc","messages":[
+  {"role":"assistant","text":"…","kind":"reasoning"},
+  {"role":"assistant","text":"…","turn":{…}}
+],"seq":12}
+```
+
+- `kind:"reasoning"` — this row is a persisted reasoning segment, not an answer. Its `text` is the
+  joined reasoning text (the same joining rule the Markdown export uses for its folded block).
+- `kind` is **absent** on every other row; absent means "ordinary message", not "unknown". Older
+  plugins never send it, and older clients ignore it (unknown fields MUST be ignored, §1).
+- Turn receipts are unchanged: a `turn` still anchors to the assistant text (`MESSAGE`) row of a
+  persisted `Msg`, never to a reasoning row, and `files` / `turn` are untouched.
+- `status.protocol` now advertises `13`. The field is additive, so a v13 plugin and a v12 client
+  interoperate unchanged.
+
+**Stop/cancel (same revision).** The plugin's partial-answer capture now reads only `MESSAGE`
+messages of a cancelled envelope: reasoning messages are dropped before the text-block filter, so
+a stopped turn's body text is the answer prefix instead of `reasoning + answer`. No wire shape
+changes; this is a producer-side fix.
+
+Compatibility: a pre-v13 plugin never sends `kind`; a v13 client must fall back to treating the row
+as ordinary text. Deploying either side first is safe.

@@ -28,6 +28,7 @@ import {
   BarChart3,
   BookmarkPlus,
   Check,
+  ChevronDown,
   ChevronUp,
   Clock,
   Cloud,
@@ -191,6 +192,16 @@ import './App.css';
 
 /** protocol/frames.md §5 — UTF-8 bytes of the serialized JSON. */
 const MAX_FRAME_BYTES = 256 * 1024;
+
+/**
+ * M42/M46: `turn` is the terminal frame since protocol 12; v13 (M46) adds the
+ * optional `hist.messages[].kind` and keeps the turn rules unchanged. The
+ * gates below therefore compare against the *minimum* revision that
+ * introduced `turn`, while `PROTOCOL_VERSION` is the newest revision this
+ * build knows (a future plugin is interpreted as v13).
+ */
+const PROTOCOL_TURN = 12;
+const PROTOCOL_VERSION = 13;
 
 /** protocol/frames.md §8 — largest file a chunked (v2) upload may carry. */
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -768,6 +779,8 @@ function mergeSkillItems(raw: unknown): SkillItem[] {
 interface HistoryMessage {
   role: Role;
   text: string;
+  /** M46: v13 marks a reasoning row; it renders as a thinking block. */
+  kind?: 'reasoning';
   /** M31: attachments of this turn; empty is omitted by the plugin. */
   files?: HistoryFile[];
   turn?: TurnUsage;
@@ -781,6 +794,7 @@ function historyMessages(raw: unknown): HistoryMessage[] {
     const record = item as {
       role?: unknown;
       text?: unknown;
+      kind?: unknown;
       turn?: unknown;
       files?: unknown;
     };
@@ -791,6 +805,8 @@ function historyMessages(raw: unknown): HistoryMessage[] {
       role,
       text: typeof record.text === 'string' ? record.text : '',
     };
+    // M46: the plugin tags reasoning rows; an unknown kind stays a plain row.
+    if (record.kind === 'reasoning') message.kind = 'reasoning';
     const files = historyFilesOf(record.files);
     if (files.length) message.files = files;
     const turn = turnUsageOf(record.turn);
@@ -1497,6 +1513,9 @@ const MessageView = memo(function MessageView({
   onEditResend?: (message: ChatMessage) => void;
 }) {
   const [copied, setCopied] = useState(false);
+  // M46: per-block, in-memory. Closed is the default in every state
+  // (streaming, settled, history); a reload intentionally forgets it.
+  const [thinkingOpen, setThinkingOpen] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rowClass = (role: Role) =>
     `row ${role}${flash ? ' jump-flash' : ''}`;
@@ -1531,6 +1550,14 @@ const MessageView = memo(function MessageView({
   };
 
   const isAssistant = message.role === 'assistant';
+  // M46: the reasoning segment is still running while the bubble has no text
+  // yet and its segment is open (`end(reasoning)` alone does not close it).
+  const thinkingLive =
+    Boolean(message.thinking) && Boolean(message.streaming) && !message.text;
+  // A v13 `hist` reasoning row becomes a thinking-only message: no empty
+  // bubble, no footer/copy row -- just the collapsed block.
+  const thinkingOnly =
+    Boolean(message.thinking) && !message.text && !message.streaming;
   const bubble = (
     <div className={`bubble${message.streaming ? ' streaming' : ''}`}>
       {isAssistant ? (
@@ -1622,11 +1649,35 @@ const MessageView = memo(function MessageView({
         <div className="assistant-col">
           {message.thinking ? (
             <div className="reply">
-              <details className="thinking" open={message.streaming && !message.text}>
-                <summary>💭 思考过程 (Reasoning)</summary>
-                <div className="thinking-body">{message.thinking}</div>
-              </details>
-              {bubble}
+              <div className="thinking">
+                <button
+                  type="button"
+                  className="thinking-toggle"
+                  aria-expanded={thinkingOpen}
+                  onClick={() => setThinkingOpen((open) => !open)}
+                >
+                  <span className="thinking-label">
+                    {thinkingLive ? (
+                      <>
+                        <span className="thinking-dot" aria-hidden="true" />
+                        思考中…
+                      </>
+                    ) : (
+                      '💭 思考过程'
+                    )}
+                  </span>
+                  <span className="thinking-count">· {message.thinking.length} 字</span>
+                  <ChevronDown
+                    size={14}
+                    className={`thinking-chevron${thinkingOpen ? ' open' : ''}`}
+                    aria-hidden="true"
+                  />
+                </button>
+                {thinkingOpen ? (
+                  <div className="thinking-body">{message.thinking}</div>
+                ) : null}
+              </div>
+              {thinkingOnly ? null : bubble}
             </div>
           ) : (
             bubble
@@ -2408,10 +2459,11 @@ export default function App() {
    */
   const agentOnlineRef = useRef(false);
   /**
-   * M42: the plugin's advertised protocol revision (identity `status.protocol`).
-   * 0 = unknown / pre-M42. Below 12 there is no `turn` frame, so the SPA keeps
-   * the old "hide 停止 when the answer segment ends" rule; at 12+ only the turn
-   * boundary (or history's `busy`) may clear it.
+   * M42: the plugin's advertised protocol revision (identity `status.protocol`),
+   * clamped to the newest this build knows (M46: v13). 0 = unknown / pre-M42.
+   * Below 12 there is no `turn` frame, so the SPA keeps the old "hide 停止
+   * when the answer segment ends" rule; at 12+ only the turn boundary (or
+   * history's `busy`) may clear it.
    */
   const agentProtocolRef = useRef(0);
   const outboxReconcile = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -3445,12 +3497,24 @@ export default function App() {
       }
       for (let i = start; i < incoming.length; i += 1) {
         const item = incoming[i];
-        const message: ChatMessage = {
-          id: nextId++,
-          role: item.role,
-          kind: 'text',
-          text: item.text,
-        };
+        // M46: a v13 reasoning row keeps its list position but becomes a
+        // thinking-only message -- never merged into the following answer,
+        // which would lose the order of interleaved histories.
+        const message: ChatMessage =
+          item.role === 'assistant' && item.kind === 'reasoning'
+            ? {
+                id: nextId++,
+                role: 'assistant',
+                kind: 'text',
+                text: '',
+                thinking: item.text,
+              }
+            : {
+                id: nextId++,
+                role: item.role,
+                kind: 'text',
+                text: item.text,
+              };
         if (item.turn) message.turn = item.turn;
         if (item.files?.length) message.attachments = item.files;
         out.push(message);
@@ -4004,7 +4068,7 @@ export default function App() {
           }
           // M42: a pre-v12 plugin has no `turn` frame; keep its old rule so
           // deploying the SPA first cannot leave 停止 visible forever.
-          if (agentProtocolRef.current < 12) {
+          if (agentProtocolRef.current < PROTOCOL_TURN) {
             markBusy(chat, false);
             // M43: that clear is this plugin's only idle edge.
             flushBusy(chat);
@@ -4029,20 +4093,34 @@ export default function App() {
             rt.endedId = null;
             rt.activeId = null;
             updateChat(chat, (prev) =>
-              prev.map((m) =>
-                m.id === endedId
-                  ? {
-                      ...m,
-                      text: text || m.text,
-                      streaming: false,
-                      // M42: the plugin closes a stopped segment with a
-                      // full-text msg carrying `stopped:true`.
-                      stopped: frame.stopped === true || m.stopped,
-                      kind: extra.length ? 'parts' : m.kind,
-                      parts: extra.length ? [...(m.parts ?? []), ...extra] : m.parts,
-                    }
-                  : m,
-              ),
+              prev.map((m) => {
+                if (m.id !== endedId) return m;
+                // M46 rollout guard (defence in depth, pre-v13 plugins): a
+                // cancelled envelope used to yield `reasoning + answer` as the
+                // stopped msg. The bubble already holds that reasoning, so a
+                // text starting with exactly the thinking string is trimmed
+                // before it is applied. The v13 plugin fix is authoritative;
+                // this only covers a mixed deploy.
+                let nextText = text || m.text;
+                if (
+                  frame.stopped === true &&
+                  m.thinking &&
+                  text.length > 0 &&
+                  text.startsWith(m.thinking)
+                ) {
+                  nextText = text.slice(m.thinking.length);
+                }
+                return {
+                  ...m,
+                  text: nextText,
+                  streaming: false,
+                  // M42: the plugin closes a stopped segment with a
+                  // full-text msg carrying `stopped:true`.
+                  stopped: frame.stopped === true || m.stopped,
+                  kind: extra.length ? 'parts' : m.kind,
+                  parts: extra.length ? [...(m.parts ?? []), ...extra] : m.parts,
+                };
+              }),
             );
             // The turn is complete; refresh this chat's usage after the app
             // has had a moment to persist the turn's usage metadata (M11).
@@ -4099,7 +4177,7 @@ export default function App() {
           // Non-streamed replies close the turn here; refresh like `end` does.
           // M42: pre-v12 plugins have no turn boundary, so this is the only
           // place their busy flag can be cleared.
-          if (agentProtocolRef.current < 12) {
+          if (agentProtocolRef.current < PROTOCOL_TURN) {
             markBusy(chat, false);
             flushBusy(chat);
           }
@@ -4114,7 +4192,10 @@ export default function App() {
           // stream *segment*; a turn may have several, separated by tool
           // calls, and a stop can arrive with no segment open at all.
           flushNow();
-          agentProtocolRef.current = 12;
+          agentProtocolRef.current = Math.max(
+            agentProtocolRef.current,
+            PROTOCOL_TURN,
+          );
           markBusy(chat, false);
           markStopping(chat, false);
           clearStopWatchdog(chat);
@@ -4218,7 +4299,10 @@ export default function App() {
             // tool call). Absent means unknown: never assume idle.
             if (typeof frame.busy === 'boolean') {
               // A v12 field: a plugin that sends it also sends `turn`.
-              agentProtocolRef.current = 12;
+              agentProtocolRef.current = Math.max(
+                agentProtocolRef.current,
+                PROTOCOL_TURN,
+              );
               markBusy(chat, frame.busy);
               if (!frame.busy) {
                 rt.activeId = null;
@@ -4392,8 +4476,12 @@ export default function App() {
           // Only an identity frame (it has agent_name) may change this; a
           // relay presence frame carries agentOnline alone.
           if (name) {
+            // Clamp: a future revision is interpreted with the newest rules
+            // this build knows (M46: v13).
             agentProtocolRef.current =
-              typeof frame.protocol === 'number' ? frame.protocol : 0;
+              typeof frame.protocol === 'number'
+                ? Math.min(frame.protocol, PROTOCOL_VERSION)
+                : 0;
             setAgentName(name);
           }
           const provider = asString(frame.provider);

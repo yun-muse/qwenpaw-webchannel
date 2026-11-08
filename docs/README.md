@@ -84,5 +84,6 @@ M8 – M15 没有单独的 `*-report.md`。这些能力直接记录在协议文�
 | M43 | [`m43-report.md`](m43-report.md) | 忙碌排队/立即发送（探针确认 QwenPaw 按 session 串行排队；SPA 本地 FIFO 队列 + 记住默认模式；离线移交 outbox 只移不抄；排队不收附件） |
 | M44 | [`m44-report.md`](m44-report.md) | 手机端紧凑输入区：同一 DOM 的 grid 重排，空闲卡片 216→110 px；工具收成一条 44 px 图标带，模型/思考等级改浮动面板；桌面 97 px 不变 |
 | M45 | [`m45-report.md`](m45-report.md) | 消息操作行与表格操作栏图标化：文字进 aria-label + 原生 title 悬停提示；桌面 30×28、手机 44×44，无审计豁免；结构化表格是标签非按钮，保留文字 |
+| M46 | [`m46-report.md`](m46-report.md) | 思考块身份修复（v13 `hist.kind`、停止只取答案）+ 默认折叠：`thinking-toggle` 按钮（思考中…/字数/44 px），历史与实时都不再自动展开 |
 
 进度与验证记录还可以看仓库根目录的 `AGENTS.md`（只记非显然的约定和教训）以及 `tasks/` 下的任务书。

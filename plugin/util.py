@@ -185,8 +185,10 @@ def response_partial_text(response):
 
     QwenPaw's runtime finalizes a cancelled turn with a ``Message`` whose
     ``status`` is ``cancelled`` and whose content holds the blocks collected
-    so far (``runtime/envelope.py::_finalize_response``). This function
-    concatenates only its text blocks, ignoring thinking/tool blocks.
+    so far (``runtime/envelope.py::_finalize_response``). Completed reasoning
+    and tool messages stay in ``output`` as well, so this function keeps only
+    the text blocks of ``MESSAGE`` messages: a reasoning message's content is
+    ``TextContent`` too and must never become answer text (M46 RC2).
 
     Accepts both pydantic objects (``.output`` / ``.content`` / ``.text``)
     and plain dicts, because channel hooks see either shape in tests.
@@ -202,6 +204,10 @@ def response_partial_text(response):
         return ""
     texts = []
     for message in output:
+        # Absent type means MESSAGE (legacy shapes); any other type is a
+        # reasoning/tool/progress card, never the partial answer.
+        if _message_type(message) != "MESSAGE":
+            continue
         content = (
             message.get("content")
             if isinstance(message, dict)
@@ -538,6 +544,10 @@ def _hist_entries(raw_messages):
     projection uses this superset instead. Turn anchoring itself is still
     computed on the old, text-only projection (see ``history_messages``), so
     adding attachments never changes which message owns a receipt.
+
+    A ``REASONING`` message keeps its identity on the wire (M46): its text is
+    joined with ``_reasoning_text`` -- the same rule the Markdown export uses
+    -- and the entry is tagged ``kind="reasoning"``.
     """
     entries = []
     if not isinstance(raw_messages, list):
@@ -545,20 +555,28 @@ def _hist_entries(raw_messages):
     for index, message in enumerate(raw_messages):
         if not isinstance(message, dict):
             continue
-        text = "".join(_part_texts(message.get("content")))
+        message_type = _message_type(message)
+        text = (
+            _reasoning_text(message)
+            if message_type == "REASONING"
+            else "".join(_part_texts(message.get("content")))
+        )
         files = _history_files(message)
         if not text and not files:
             continue
         role = message.get("role")
         role = getattr(role, "value", role)
-        entries.append({
+        entry = {
             "role": str(role or ""),
             "text": text,
-            "type": _message_type(message),
+            "type": message_type,
             "message": message,
             "index": index,
             "files": files,
-        })
+        }
+        if message_type == "REASONING":
+            entry["kind"] = "reasoning"
+        entries.append(entry)
     return entries
 
 
@@ -610,7 +628,8 @@ def history_messages(history, limit=DEFAULT_HIST_LIMIT, ref_factory=None):
     rules are computed on the text-only projection, so attachments can never
     move a receipt. Turns are attached to the full projection first and only
     then truncated, so a receipt survives a window that starts inside its
-    turn.
+    turn. A ``REASONING`` row carries ``kind:"reasoning"`` (M46, protocol
+    v13); every other row is unchanged.
     """
     if not isinstance(history, dict):
         return []
@@ -636,6 +655,8 @@ def history_messages(history, limit=DEFAULT_HIST_LIMIT, ref_factory=None):
     messages = []
     for entry in entries[-limit:]:
         projected = {"role": entry["role"], "text": entry["text"]}
+        if entry.get("kind"):
+            projected["kind"] = entry["kind"]
         files = _project_history_files(
             entry["files"], entry["message"], ref_factory,
         )
@@ -2677,8 +2698,16 @@ def _part_type(part):
 
 
 def _message_type(message):
-    """Upper-case ``Message.type`` (``MESSAGE`` unless absent)."""
-    raw = message.get("type")
+    """Upper-case ``Message.type`` (``MESSAGE`` unless absent).
+
+    Accepts a plain dict and a pydantic ``Message`` alike: ``hist`` always
+    sees dicts, while the cancelled-envelope hook sees model objects.
+    """
+    raw = (
+        message.get("type")
+        if isinstance(message, dict)
+        else getattr(message, "type", None)
+    )
     raw = getattr(raw, "value", raw)
     if raw is None:
         return "MESSAGE"
