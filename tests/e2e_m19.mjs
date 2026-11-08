@@ -54,6 +54,10 @@
  *   M42_ONLY=1         run only the M42 stop checks (fast loop)
  *   M43_ONLY=1         run only the M43 busy-queue checks (fast loop; the
  *                      mobile pass also writes a 390x844 evidence shot)
+ *   M44_ONLY=1         run only the M44 phone-composer checks (fast loop; the
+ *                      mobile pass writes the 390x844 after shots)
+ *   M44_BEFORE=1       evidence-only run of the M44 measurement against the
+ *                      unmodified build (writes tests/out/m44-before-idle.png)
  *   M42_LEGACY=1       M42 red run: the mock stops silently, like the
  *                      pre-fix plugin/runtime (no end/msg/turn frame)
  *
@@ -3413,6 +3417,15 @@ async function runM27Checks(page, pass, mobile) {
     await page.locator('.hamburger').click();
     await sleep(350);
   };
+  /** M44: on phones the segments live behind the 思考等级 chip's popover. */
+  const pickEffortLevel = async (label) => {
+    if (mobile && !(await page.locator('.effort-wrap.open').count())) {
+      await page.locator('.effort-chip').click();
+      await sleep(150);
+    }
+    await page.locator('.effort-opt', { hasText: label }).click();
+    await sleep(150);
+  };
 
   // ---- M27.1: restoring a chat that has never been sent to ---------------
   resetState();
@@ -3478,7 +3491,7 @@ async function runM27Checks(page, pass, mobile) {
     () => localStorage.getItem('webchannel.activeChat') || '',
   );
   state.notCreated.add(newId);
-  await page.locator('.effort-opt', { hasText: /^高$/ }).click();
+  await pickEffortLevel(/^高$/);
   const pickLogged = await waitUntil(
     () => state.effortLog.some((item) => item.chat === newId && item.level === 'high'),
     15000,
@@ -3522,7 +3535,7 @@ async function runM27Checks(page, pass, mobile) {
 
   // ---- M27.3: a real rejection on an existing chat stays visible ---------
   state.effortReject[newId] = 'max';
-  await page.locator('.effort-opt', { hasText: /^最大$/ }).click();
+  await pickEffortLevel(/^最大$/);
   await page.waitForSelector('.toast', { timeout: 5000 }).catch(() => {});
   const rejectToast = await toastText(page);
   check(
@@ -5626,6 +5639,425 @@ async function runM43Checks(page, pass, mobile) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// M44 — phone composer: two rows, ≤150 px idle, desktop untouched
+// ---------------------------------------------------------------------------
+
+/**
+ * The composer *card* is the measured block: textarea + every control row +
+ * the card's own padding. The context meter, the M37 outbox rows and the M43
+ * queue strip are siblings outside the card by design, so they are excluded
+ * by construction rather than by subtraction.
+ */
+const M44_CARD = `(() => {
+  const card = document.querySelector('.composer-card');
+  if (!card) return null;
+  const rect = card.getBoundingClientRect();
+  const box = (el) => {
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return {
+      x: Math.round(r.x * 10) / 10,
+      y: Math.round(r.y * 10) / 10,
+      w: Math.round(r.width * 10) / 10,
+      h: Math.round(r.height * 10) / 10,
+      bottom: Math.round(r.bottom * 10) / 10,
+    };
+  };
+  const textarea = card.querySelector('textarea');
+  const send = card.querySelector('.send');
+  const stop = card.querySelector('.stop');
+  const ta = textarea ? textarea.getBoundingClientRect() : null;
+  return {
+    height: Math.round(rect.height * 10) / 10,
+    top: Math.round(rect.top * 10) / 10,
+    bottom: Math.round(rect.bottom * 10) / 10,
+    viewport: { w: innerWidth, h: innerHeight },
+    padding: getComputedStyle(card).padding,
+    gap: getComputedStyle(card).gap,
+    textarea: box(textarea),
+    textareaFont: textarea ? getComputedStyle(textarea).fontSize : '',
+    textareaScrolls: textarea ? textarea.scrollHeight > textarea.clientHeight + 1 : null,
+    placeholder: textarea ? textarea.placeholder : '',
+    send: box(send),
+    stop: box(stop),
+    meter: box(document.querySelector('.context-meter')),
+    toolsLeft: box(card.querySelector('.composer-tools-left')),
+    toolsRight: box(card.querySelector('.composer-tools-right')),
+    toolbarDisplay: getComputedStyle(card.querySelector('.composer-toolbar')).display,
+    leftDisplay: getComputedStyle(card.querySelector('.composer-tools-left')).display,
+    rows: [...card.children].map((el) => ({
+      cls: typeof el.className === 'string' ? el.className : el.tagName,
+      h: Math.round(el.getBoundingClientRect().height * 10) / 10,
+    })),
+  };
+})()`;
+
+/** Every visible composer control must share one strip line (top within 2px). */
+const M44_STRIP = `(() => {
+  const card = document.querySelector('.composer-card');
+  const left = card && card.querySelector('.composer-tools-left');
+  if (!left) return null;
+  const items = [...left.children]
+    .filter((el) => el.getBoundingClientRect().height > 0)
+    .map((el) => {
+      const r = el.getBoundingClientRect();
+      return {
+        cls: typeof el.className === 'string' ? el.className : el.tagName,
+        x: Math.round(r.x * 10) / 10,
+        y: Math.round(r.y * 10) / 10,
+        w: Math.round(r.width * 10) / 10,
+        h: Math.round(r.height * 10) / 10,
+      };
+    });
+  const tops = items.map((item) => item.y + item.h / 2);
+  return {
+    display: getComputedStyle(left).display,
+    height: Math.round(left.getBoundingClientRect().height * 10) / 10,
+    items,
+    oneLine: Math.max(...tops) - Math.min(...tops) <= 2,
+    count: items.length,
+  };
+})()`;
+
+async function runM44Checks(page, pass, mobile) {
+  resetState();
+  if (mobile) await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => {
+    localStorage.setItem('webchannel.chats', JSON.stringify(['chat-alpha', 'chat-beta']));
+    localStorage.setItem('webchannel.activeChat', 'chat-alpha');
+    localStorage.setItem('webchannel.chatNames', '{}');
+    localStorage.setItem('webchannel.pinnedChats', '[]');
+    localStorage.removeItem('webchannel.drafts');
+    localStorage.removeItem('webchannel.outbox');
+    localStorage.removeItem('webchannel.busyQueue');
+    localStorage.removeItem('webchannel.busyMode');
+    localStorage.removeItem('webchannel.effort');
+    localStorage.setItem('webchannel.theme', 'light');
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await waitForHistory(page);
+  await sleep(500);
+
+  // The BEFORE run: same harness, unmodified build. Evidence only, no checks.
+  if (process.env.M44_BEFORE === '1') {
+    const before = await page.evaluate(M44_CARD);
+    log(`M44 BEFORE ${pass}: ${JSON.stringify(before)}`);
+    if (mobile) await page.screenshot({ path: join(OUT_DIR, 'm44-before-idle.png') });
+    return;
+  }
+
+  const card = () => page.evaluate(M44_CARD);
+  const idle = await card();
+  log(`M44 AFTER ${pass}: ${JSON.stringify(idle)}`);
+
+  if (!mobile) {
+    // Desktop: the two-deck toolbar must still be a real flex row, with the
+    // labelled pills and the inline effort segments exactly as before.
+    const desktop = await page.evaluate(() => {
+      const visible = (el) => {
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden';
+      };
+      const card = document.querySelector('.composer-card');
+      const labels = [...document.querySelectorAll('.composer-tools-left .attach span, .composer-tools-left .tool-pill span')]
+        .map((el) => ({ text: (el.textContent || '').trim(), visible: visible(el) }));
+      return {
+        toolbarDisplay: getComputedStyle(card.querySelector('.composer-toolbar')).display,
+        leftDisplay: getComputedStyle(card.querySelector('.composer-tools-left')).display,
+        sendInToolbar: Boolean(card.querySelector('.composer-toolbar .composer-tools-right .send')),
+        labels,
+        effortLabelVisible: visible(document.querySelector('.effort-label')),
+        effortOpts: [...document.querySelectorAll('.effort-opt')].filter(visible).length,
+        effortChip: visible(document.querySelector('.effort-chip')),
+        modelInToolbar: Boolean(card.querySelector('.composer-toolbar .model-button')),
+        placeholder: (document.querySelector('.composer textarea') || {}).placeholder || '',
+      };
+    });
+    check(
+      `${pass}: M44 desktop keeps the two-deck toolbar`,
+      desktop.toolbarDisplay === 'flex' &&
+        desktop.leftDisplay === 'flex' &&
+        desktop.sendInToolbar &&
+        desktop.modelInToolbar &&
+        desktop.effortLabelVisible &&
+        desktop.effortOpts === 5 &&
+        !desktop.effortChip,
+      JSON.stringify(desktop),
+    );
+    check(
+      `${pass}: M44 desktop keeps the labelled pills and the long placeholder`,
+      desktop.labels.length === 3 &&
+        desktop.labels.every((item) => item.visible && item.text) &&
+        desktop.placeholder.includes('敲 @ 调用技能'),
+      JSON.stringify(desktop.labels),
+    );
+    check(
+      `${pass}: M44 desktop composer height is unchanged`,
+      Math.abs(idle.height - 97) <= 0.6,
+      `${idle.height}px`,
+    );
+    await page.screenshot({ path: join(OUT_DIR, 'm44-after-desktop.png') });
+    return;
+  }
+
+  // ---- idle: two rows, one strip, ≤150 px --------------------------------
+  check(
+    `${pass}: M44 mobile idle composer is ≤150 px`,
+    idle.height <= 150,
+    `${idle.height}px (${JSON.stringify(idle.rows)})`,
+  );
+  check(
+    `${pass}: M44 mobile send stays inline with the textarea`,
+    Boolean(idle.send && idle.textarea) &&
+      idle.send.y >= idle.textarea.y - 1 &&
+      idle.send.bottom <= idle.textarea.bottom + 1 &&
+      idle.send.x > idle.textarea.x + idle.textarea.w - 1,
+    JSON.stringify({ textarea: idle.textarea, send: idle.send }),
+  );
+  const strip = await page.evaluate(M44_STRIP);
+  check(
+    `${pass}: M44 mobile controls collapse into one compact strip`,
+    Boolean(strip) && strip.oneLine && strip.height <= 48 && strip.count >= 5,
+    JSON.stringify(strip),
+  );
+  check(
+    `${pass}: M44 mobile keeps 44px tap targets`,
+    (await page.evaluate(TAP_TARGET_SCRIPT)).length === 0,
+    JSON.stringify((await page.evaluate(TAP_TARGET_SCRIPT)).slice(0, 4)),
+  );
+  check(
+    `${pass}: M44 mobile uses the single-line placeholder`,
+    idle.placeholder === '输入问题…' && idle.textareaFont === '16px',
+    JSON.stringify({ placeholder: idle.placeholder, font: idle.textareaFont }),
+  );
+  await page.screenshot({ path: join(OUT_DIR, 'm44-after-idle.png') });
+
+  // ---- typing: autogrow ~4 lines, then the field scrolls -----------------
+  await page.locator('.composer textarea').fill('第一行\n第二行\n第三行');
+  await sleep(150);
+  const typing = await card();
+  await page.screenshot({ path: join(OUT_DIR, 'm44-after-typing.png') });
+  check(
+    `${pass}: M44 mobile textarea autogrows with the text`,
+    typing.height > idle.height &&
+      typing.textarea.h > idle.textarea.h + 20 &&
+      typing.height <= 150,
+    JSON.stringify({ idle: idle.height, typing: typing.height, textarea: typing.textarea }),
+  );
+  await page.locator('.composer textarea').fill(Array.from({ length: 10 }, (_, i) => `第${i + 1}行`).join('\n'));
+  await sleep(200);
+  const capped = await card();
+  // Only IDLE has a height budget. A draft may grow the card, but the 4-line
+  // cap must be what stops it: the card gains exactly the field's gain.
+  const growth = Math.round((capped.height - idle.height) * 10) / 10;
+  const fieldGain = Math.round((capped.textarea.h - idle.textarea.h) * 10) / 10;
+  check(
+    `${pass}: M44 mobile textarea caps at ~4 lines and scrolls inside`,
+    capped.textarea.h <= 116 &&
+      capped.textareaScrolls === true &&
+      growth > 0 &&
+      growth <= fieldGain + 1,
+    JSON.stringify({
+      h: capped.textarea.h,
+      scrolls: capped.textareaScrolls,
+      card: capped.height,
+      growth,
+      fieldGain,
+    }),
+  );
+  await page.locator('.composer textarea').fill('');
+  await sleep(150);
+
+  // ---- model chip opens the existing picker ------------------------------
+  await page.locator('.model-button').click();
+  await page.waitForSelector('.model-picker', { timeout: 4000 });
+  await sleep(150);
+  const picker = await page.evaluate(() => {
+    const wrap = document.querySelector('.model-wrap').getBoundingClientRect();
+    const pick = document.querySelector('.model-picker').getBoundingClientRect();
+    return {
+      rows: [...document.querySelectorAll('.model-picker .model-row')].map((el) =>
+        (el.querySelector('.model-row-model') || {}).textContent?.trim(),
+      ),
+      inViewport: pick.left >= -1 && pick.right <= innerWidth + 1,
+      label: (document.querySelector('.model-label') || {}).textContent?.trim(),
+      chipHeight: Math.round(document.querySelector('.model-button').getBoundingClientRect().height),
+    };
+  });
+  check(
+    `${pass}: M44 the model chip opens the picker with every model`,
+    picker.rows.length === MOCK_MODELS.length && picker.inViewport && picker.chipHeight >= 44,
+    JSON.stringify(picker),
+  );
+  await page.locator('.model-row', { hasText: 'acme-pro' }).click();
+  const modelSwitched = await waitUntil(
+    () =>
+      page.evaluate(
+        () => (document.querySelector('.model-label') || {}).textContent?.trim(),
+      ).then((label) => label === 'acme / acme-pro'),
+    6000,
+  );
+  check(`${pass}: M44 a model can be selected from the chip`, modelSwitched, picker.label);
+  await page.locator('.model-button').click();
+  await page.waitForSelector('.model-picker', { timeout: 4000 });
+  await page.locator('.model-row', { hasText: 'mock-1' }).click();
+  await waitUntil(
+    () =>
+      page.evaluate(
+        () => (document.querySelector('.model-label') || {}).textContent?.trim(),
+      ).then((label) => label === 'mock / mock-1'),
+    6000,
+  );
+
+  // ---- effort chip expands the existing segments ------------------------
+  await page.locator('.effort-chip').click();
+  await sleep(200);
+  const effortOpen = await page.evaluate(() => {
+    const opts = [...document.querySelectorAll('.effort-opt')];
+    const shown = opts.filter((el) => el.getBoundingClientRect().height > 0);
+    const chip = document.querySelector('.effort-chip').getBoundingClientRect();
+    return {
+      shown: shown.length,
+      texts: shown.map((el) => (el.textContent || '').trim()),
+      chipHeight: Math.round(chip.height),
+      expanded: document.querySelector('.effort-chip').getAttribute('aria-expanded'),
+      inViewport: shown.every((el) => {
+        const r = el.getBoundingClientRect();
+        return r.left >= -1 && r.right <= innerWidth + 1;
+      }),
+    };
+  });
+  check(
+    `${pass}: M44 the effort chip expands the five levels`,
+    effortOpen.shown === 5 &&
+      effortOpen.texts.join('|') === '默认|低|中|高|最大' &&
+      effortOpen.chipHeight >= 44 &&
+      effortOpen.expanded === 'true' &&
+      effortOpen.inViewport,
+    JSON.stringify(effortOpen),
+  );
+  await page.locator('.effort-opt', { hasText: /^高$/ }).click();
+  await sleep(250);
+  const effortPicked = await page.evaluate(() => ({
+    chip: (document.querySelector('.effort-chip-label') || {}).textContent?.trim(),
+    open: Boolean(document.querySelector('.effort-wrap.open')),
+    shown: [...document.querySelectorAll('.effort-opt')].filter(
+      (el) => el.getBoundingClientRect().height > 0,
+    ).length,
+    logged: true,
+  }));
+  check(
+    `${pass}: M44 a level can be selected from the chip`,
+    effortPicked.chip === '高' &&
+      !effortPicked.open &&
+      effortPicked.shown === 0 &&
+      state.effortLog.some((item) => item.level === 'high'),
+    JSON.stringify(effortPicked),
+  );
+  // Re-open and pick 默认 so the rest of the pack starts from a clean level.
+  await page.locator('.effort-chip').click();
+  await sleep(200);
+  const effortReopened = await page.evaluate(
+    () => [...document.querySelectorAll('.effort-opt')].filter((el) => el.getBoundingClientRect().height > 0).length,
+  );
+  check(
+    `${pass}: M44 the effort popover reopens for another choice`,
+    effortReopened === 5,
+    String(effortReopened),
+  );
+  await page.locator('.effort-opt', { hasText: /^默认$/ }).click();
+  await sleep(250);
+
+  // ---- busy: stop + mode control visible without scrolling --------------
+  await page.locator('.composer textarea').fill('M43 M44 忙碌态截图');
+  await page.keyboard.press('Enter');
+  const busy = await waitUntil(
+    () => page.evaluate(() => Boolean(document.querySelector('.composer .stop'))),
+    8000,
+  );
+  await sleep(250);
+  const busyView = await page.evaluate(() => {
+    const card = document.querySelector('.composer-card').getBoundingClientRect();
+    const stop = document.querySelector('.composer .stop');
+    const mode = document.querySelector('.busy-mode');
+    const inView = (el) => {
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && r.top >= 0 && r.bottom <= innerHeight + 0.5 &&
+        r.left >= 0 && r.right <= innerWidth + 0.5;
+    };
+    const r = (el) => (el ? el.getBoundingClientRect() : null);
+    return {
+      stop: inView(stop),
+      mode: inView(mode),
+      options: mode
+        ? [...mode.querySelectorAll('.busy-mode-opt')].map((el) => (el.textContent || '').trim())
+        : [],
+      card: Math.round(card.height * 10) / 10,
+      send: Boolean(document.querySelector('.composer .send')),
+      model: Boolean(document.querySelector('.model-wrap')),
+      modelShown: Boolean(document.querySelector('.model-wrap') && r(document.querySelector('.model-wrap')).height > 0),
+      effortShown: Boolean(document.querySelector('.effort-wrap') && r(document.querySelector('.effort-wrap')).height > 0),
+      scrollTop: document.scrollingElement.scrollTop,
+      stopRect: stop ? { w: Math.round(r(stop).width), h: Math.round(r(stop).height) } : null,
+      modeRect: mode ? { w: Math.round(r(mode).width), h: Math.round(r(mode).height) } : null,
+    };
+  });
+  check(
+    `${pass}: M44 busy keeps 停止 and the queue switch on screen without scrolling`,
+    busy && busyView.stop && busyView.mode && busyView.options.join('|') === '排队|立即发送' &&
+      !busyView.send && busyView.scrollTop === 0,
+    JSON.stringify(busyView),
+  );
+  check(
+    `${pass}: M44 busy stop and switch stay 44px targets`,
+    Boolean(busyView.stopRect && busyView.modeRect) &&
+      busyView.stopRect.h >= 44 &&
+      busyView.modeRect.h >= 44,
+    JSON.stringify({ stop: busyView.stopRect, mode: busyView.modeRect }),
+  );
+  check(
+    `${pass}: M44 busy yields the model/effort chips`,
+    !busyView.modelShown && !busyView.effortShown,
+    JSON.stringify({ model: busyView.modelShown, effort: busyView.effortShown }),
+  );
+  await page.screenshot({ path: join(OUT_DIR, 'm44-after-busy.png') });
+  // The mock reply is ~3 s; the screenshot may already have outlived it. The
+  // busy assertions above ran while 停止 existed -- stopping is only cleanup.
+  if (await page.locator('.composer .stop').count()) {
+    await page.locator('.composer .stop').click();
+  }
+  await waitUntil(() => !state.streaming.has('chat-alpha'), 15000);
+  await waitUntil(() => !state.stopTurns.has('chat-alpha'), 15000);
+  await waitUntil(
+    () => page.evaluate(() => Boolean(document.querySelector('.composer .send'))),
+    8000,
+  );
+
+  // ---- the M41/M27 surfaces still route through the same controls -------
+  await page.locator('.composer textarea').fill('@');
+  await sleep(250);
+  const skillPalette = await page.evaluate(
+    () => document.querySelectorAll('.palette').length,
+  );
+  check(`${pass}: M44 @ still opens the skill palette from the textarea`, skillPalette === 1, String(skillPalette));
+  await page.locator('.composer textarea').fill('/');
+  await sleep(250);
+  const cmdPalette = await page.evaluate(
+    () => (document.querySelector('.palette-head') || {}).textContent || '',
+  );
+  check(
+    `${pass}: M44 / still opens the command palette from the textarea`,
+    /快捷指令面板/.test(cmdPalette),
+    cmdPalette.slice(0, 40),
+  );
+  await page.locator('.composer textarea').fill('');
+  await page.keyboard.press('Escape');
+  await sleep(200);
+}
+
 async function runPass(browser, pass, viewport, mobile) {
   resetState();
   const contextOptions = mobile
@@ -5714,6 +6146,12 @@ async function runPass(browser, pass, viewport, mobile) {
 
     if (process.env.M43_ONLY === '1') {
       await runM43Checks(page, pass, mobile);
+      check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
+      return;
+    }
+
+    if (process.env.M44_ONLY === '1') {
+      await runM44Checks(page, pass, mobile);
       check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
       return;
     }
@@ -6217,6 +6655,9 @@ async function runPass(browser, pass, viewport, mobile) {
 
     // ---- 15e. M43: 排队 / 立即发送 while a turn runs ----------------------
     await runM43Checks(page, pass, mobile);
+
+    // ---- 15f. M44: phone composer is two rows; desktop untouched ---------
+    await runM44Checks(page, pass, mobile);
 
     // ---- 16. M37: offline send queue (last: it restarts the relay) -------
     await runM37Checks(page, pass, mobile);

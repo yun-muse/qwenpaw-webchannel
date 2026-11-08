@@ -383,6 +383,30 @@ function asEffortLevel(value: unknown): EffortLevel | null {
     : null;
 }
 
+/**
+ * M44: the composer is a two-deck stack on desktop and a compact two-row card
+ * on phones. Only the placeholder text needs the breakpoint in JS; everything
+ * else is CSS, so this hook stays deliberately tiny.
+ */
+function useNarrowViewport(): boolean {
+  const query = '(max-width: 720px)';
+  const [narrow, setNarrow] = useState<boolean>(() => {
+    try {
+      return window.matchMedia(query).matches;
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return undefined;
+    const mq = window.matchMedia(query);
+    const onChange = () => setNarrow(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  return narrow;
+}
+
 /** Stored choice first, then the OS preference. */
 function initialTheme(): Theme {
   const stored = storageGet(THEME_KEY);
@@ -2184,6 +2208,8 @@ export default function App() {
    */
   const [attachNotice, setAttachNotice] = useState<string | null>(null);
   const [composerError, setComposerError] = useState<string | null>(null);
+  /** M44: the phone placeholder is a single short line (CSS cannot swap it). */
+  const narrowViewport = useNarrowViewport();
   const [toast, setToast] = useState<ToastNotice | null>(null);
   const [state, setState] = useState<ConnState>('idle');
   const [agentOnline, setAgentOnline] = useState(false);
@@ -2227,6 +2253,8 @@ export default function App() {
   const [currentModel, setCurrentModel] = useState<ModelRef | null>(null);
   const [modelBusy, setModelBusy] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  /** M44: the phone effort chip opens the existing segments as a popover. */
+  const [effortOpen, setEffortOpen] = useState(false);
   // M14: the narrow-screen overflow menu in the top bar (secondary actions).
   const [moreOpen, setMoreOpen] = useState(false);
 
@@ -2393,6 +2421,7 @@ export default function App() {
   const searchRef = useRef<SearchJob | null>(null);
   const modelsRequested = useRef(false);
   const modelWrapRef = useRef<HTMLDivElement | null>(null);
+  const effortWrapRef = useRef<HTMLDivElement | null>(null);
   const moreWrapRef = useRef<HTMLDivElement | null>(null);
   const promptLibRef = useRef<HTMLDivElement | null>(null);
   const nearBottomRef = useRef(true);
@@ -3689,7 +3718,11 @@ export default function App() {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+    // M44: the cap lives in CSS (200 px on desktop, ~4 lines on phones), so a
+    // phone grows to four lines and scrolls instead of taking the old 200 px.
+    const cssMax = Number.parseFloat(getComputedStyle(el).maxHeight);
+    const cap = Number.isFinite(cssMax) && cssMax > 0 ? cssMax : 200;
+    el.style.height = `${Math.min(el.scrollHeight, cap)}px`;
   }, [input]);
 
   useEffect(() => {
@@ -3710,6 +3743,27 @@ export default function App() {
       document.removeEventListener('keydown', onKey);
     };
   }, [pickerOpen]);
+
+  // M44: same dismissal contract for the phone effort popover. Desktop never
+  // opens it (the chip is hidden), so this effect is a no-op there.
+  useEffect(() => {
+    if (!effortOpen) return;
+    const onDown = (event: MouseEvent) => {
+      const wrap = effortWrapRef.current;
+      if (wrap && event.target instanceof Node && !wrap.contains(event.target)) {
+        setEffortOpen(false);
+      }
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setEffortOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [effortOpen]);
 
   useEffect(() => {
     if (!moreOpen) return;
@@ -4984,6 +5038,12 @@ export default function App() {
     }
   };
 
+  /** M44: a phone popover choice closes the popover even when it was a no-op. */
+  const pickEffort = (level: EffortLevel) => {
+    chooseEffort(level);
+    setEffortOpen(false);
+  };
+
   const openModelPicker = () => {
     setPickerOpen(true);
     if (modelItems.length === 0) requestModels();
@@ -5914,6 +5974,15 @@ export default function App() {
   // M37: sending is allowed offline on purpose -- the text becomes a queue
   // entry with a 待发送 row instead of being refused.
   const canSend = (input.trim().length > 0 || attachments.length > 0) && !uploadBlocked;
+  // M44: the phone keeps the placeholder to one ellipsised line; @ and /
+  // stay discoverable through the icon buttons in the strip.
+  const composerPlaceholder = narrowViewport
+    ? state === 'live' && agentOnline
+      ? '输入问题…'
+      : '断线中 — 发送会先排队'
+    : state === 'live' && agentOnline
+      ? '输入问题…（敲 @ 调用技能，敲 / 呼出指令与模型切换，支持粘贴截图）'
+      : '断线中 — 发送会先排队，连接恢复后自动发出';
 
   if (needsLogin) {
     return (
@@ -6753,7 +6822,7 @@ export default function App() {
             }}
           />
 
-          <div className="composer-card">
+          <div className={`composer-card${turnBusy ? ' busy' : ''}`}>
             {activeSkill || attachments.length ? (
               <div className="chips">
                 {activeSkill ? (
@@ -6807,11 +6876,7 @@ export default function App() {
                 ref={textareaRef}
                 rows={1}
                 value={input}
-                placeholder={
-                  state === 'live' && agentOnline
-                    ? '输入问题…（敲 @ 调用技能，敲 / 呼出指令与模型切换，支持粘贴截图）'
-                    : '断线中 — 发送会先排队，连接恢复后自动发出'
-                }
+                placeholder={composerPlaceholder}
                 onChange={(e) => setComposer(e.target.value)}
                 onKeyDown={onKeyDown}
                 onPaste={onPaste}
@@ -6824,6 +6889,7 @@ export default function App() {
                   className="attach"
                   onClick={() => fileRef.current?.click()}
                   title="上传文件或直接 Ctrl+V 粘贴截图（单条消息最多 10 个、合计 10MB）"
+                  aria-label="附件"
                 >
                   <Paperclip size={13} />
                   <span>附件</span>
@@ -6838,6 +6904,7 @@ export default function App() {
                     textareaRef.current?.focus();
                   }}
                   title="挂载 Skill 技能 (@)"
+                  aria-label="技能"
                 >
                   <AtSign size={13} />
                   <span>技能</span>
@@ -6850,6 +6917,7 @@ export default function App() {
                     onClick={() => (promptLibOpen ? setPromptLibOpen(false) : openPromptLibrary())}
                     aria-haspopup="dialog"
                     aria-expanded={promptLibOpen}
+                    aria-label="提示词库"
                     title="提示词库：保存当前输入，或插入已保存的提示词"
                   >
                     <BookmarkPlus size={13} />
@@ -7040,7 +7108,27 @@ export default function App() {
                   </span>
                 ) : null}
 
-                <div className="effort-wrap" title={EFFORT_TITLE}>
+                <div
+                  className={`effort-wrap${effortOpen ? ' open' : ''}`}
+                  title={EFFORT_TITLE}
+                  ref={effortWrapRef}
+                >
+                  {/* M44: on phones the five segments live behind this chip
+                      (the group below becomes a floating panel). Desktop
+                      hides the chip and keeps the inline segmented control. */}
+                  <button
+                    type="button"
+                    className="effort-chip"
+                    aria-haspopup="true"
+                    aria-expanded={effortOpen}
+                    aria-label={`思考等级：${EFFORT_LABELS[activeEffort]}`}
+                    onClick={() => setEffortOpen((open) => !open)}
+                  >
+                    <span className="effort-chip-label">{EFFORT_LABELS[activeEffort]}</span>
+                    <span className="model-caret" aria-hidden="true">
+                      <ChevronUp size={12} />
+                    </span>
+                  </button>
                   <span className="effort-label">思考等级</span>
                   <div className="effort-group" role="group" aria-label="思考等级">
                     {EFFORT_LEVELS.map((level) => {
@@ -7060,7 +7148,7 @@ export default function App() {
                               ? `${EFFORT_LABELS[level]} — ${EFFORT_TITLE} · 当前模型未声明支持该档位`
                               : `${EFFORT_LABELS[level]} — ${EFFORT_TITLE}`
                           }
-                          onClick={() => chooseEffort(level)}
+                          onClick={() => pickEffort(level)}
                         >
                           {EFFORT_LABELS[level]}
                         </button>

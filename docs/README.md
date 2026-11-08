@@ -82,5 +82,6 @@ M8 – M15 没有单独的 `*-report.md`。这些能力直接记录在协议文�
 | M41 | [`m41-report.md`](m41-report.md) | 粘贴永不发送：真实粘贴矩阵全 0 帧（桌面/手机 × 单行/多行/尾换行），真凶是未防的 IME Enter（`isComposing` / `keyCode 229`），发送按钮显式 `type="button"` |
 | M42 | [`m42-report.md`](m42-report.md) | 停止修复（协议 v12：`turn` 终结帧 + `ChatSpec.id` 失效重解析 + 4 秒预生成轮询；忙碌判定与气泡流解耦）+ 撤回探针后跳过（控制台专属内存回退、滚动历史无按轮删除、归档 INSERT-only 无删除面） |
 | M43 | [`m43-report.md`](m43-report.md) | 忙碌排队/立即发送（探针确认 QwenPaw 按 session 串行排队；SPA 本地 FIFO 队列 + 记住默认模式；离线移交 outbox 只移不抄；排队不收附件） |
+| M44 | [`m44-report.md`](m44-report.md) | 手机端紧凑输入区：同一 DOM 的 grid 重排，空闲卡片 216→110 px；工具收成一条 44 px 图标带，模型/思考等级改浮动面板；桌面 97 px 不变 |
 
 进度与验证记录还可以看仓库根目录的 `AGENTS.md`（只记非显然的约定和教训）以及 `tasks/` 下的任务书。

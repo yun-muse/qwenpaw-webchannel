@@ -3000,6 +3000,11 @@ button:disabled {
   white-space: nowrap;
 }
 
+/* M44: phone-only chip; the desktop deck keeps the inline segments below. */
+.effort-chip {
+  display: none;
+}
+
 .effort-group {
   display: inline-flex;
   align-items: center;
@@ -4363,54 +4368,107 @@ button:disabled {
     font-size: 12px;
   }
 
+  /* ===== M44: compact two-row composer ==================================
+     A CSS-only reflow of the same DOM. The card becomes a two-column grid:
+     the textarea keeps column 1, 发送/停止 sit inline in column 2, and the
+     toolbar's children (display:contents) fold into one 44 px strip in row 3.
+     Nothing is duplicated; desktop never sees any of this. */
   .composer-card {
-    padding: 10px 12px 8px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    column-gap: 8px;
+    row-gap: 0;
+    padding: 8px 10px;
     border-radius: 16px;
   }
 
-  .composer-toolbar {
-    justify-content: flex-start;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding-top: 8px;
+  /* Pending skill/attachment chips stay above the textarea, as before. */
+  .composer-card > .chips {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    margin-bottom: 4px;
+    padding-bottom: 0;
+  }
+
+  .composer-row {
+    grid-column: 1;
+    grid-row: 2;
+    align-self: end;
+  }
+
+  .composer-toolbar,
+  .composer-tools-right {
+    display: contents;
+  }
+
+  .composer-tools-right > .send,
+  .composer-tools-right > .stop {
+    grid-column: 2;
+    grid-row: 2;
+    align-self: end;
   }
 
   .composer-tools-left {
-    display: contents;
+    grid-column: 1 / -1;
+    grid-row: 3;
+    justify-self: start;
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+    margin-top: 4px;
   }
 
   .attach,
   .tool-pill {
+    flex: 0 0 44px;
+    width: 44px;
     height: 44px;
-    padding: 0 12px;
+    padding: 0;
+    justify-content: center;
     font-size: 13px;
   }
 
+  /* Icon-only on phones: the accessible name is the aria-label and the
+     tooltip is unchanged, so nothing is lost. */
+  .attach > span,
+  .tool-pill > span {
+    display: none;
+  }
+
+  .prompt-lib-wrap {
+    flex: 0 0 auto;
+    position: static;
+  }
+
   .model-wrap {
-    flex: 1 1 120px;
-    min-width: 0;
+    flex: 1 1 auto;
+    min-width: 44px;
+    /* static so the panel can anchor to .composer, not to a mid-strip chip */
+    position: static;
   }
 
   .model-button {
     width: 100%;
     max-width: none;
     height: 44px;
-    font-size: 12.5px;
+    padding: 0 8px;
+    gap: 4px;
+    font-size: 12px;
   }
 
   .model-picker {
-    left: auto;
-    right: 0;
-    width: min(calc(100vw - 48px), 330px);
+    left: 8px;
+    right: 8px;
+    width: auto;
     min-width: 0;
   }
 
   /* M22: the prompt library is thumb-sized too, and anchored to the composer
      (not the narrow toolbar button) so a 390 px screen never clips it. */
-  .prompt-lib-wrap {
-    position: static;
-  }
-
   .prompt-lib {
     left: 8px;
     right: 8px;
@@ -4446,21 +4504,55 @@ button:disabled {
   }
 
   .effort-wrap {
-    flex: 1 1 auto;
-    justify-content: center;
-    min-width: 0;
-    height: 48px;
-    padding: 0 3px;
+    flex: 0 0 auto;
+    position: static;
+    height: 44px;
+    padding: 0;
     gap: 0;
+    border: 0;
+    background: transparent;
   }
 
   .effort-label {
     display: none;
   }
 
+  .effort-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    height: 44px;
+    min-width: 56px;
+    padding: 0 8px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    white-space: nowrap;
+  }
+
+  /* The five levels become a floating panel above the composer, matching the
+     model picker's language instead of pushing the card taller. */
   .effort-group {
+    display: none;
+    position: absolute;
+    left: auto;
+    right: 8px;
+    bottom: calc(100% + 8px);
+    z-index: 46;
+    padding: 3px;
     gap: 0;
-    padding: 1px;
+    background: var(--card);
+    border: 1px solid var(--line-strong);
+    border-radius: 12px;
+    box-shadow: var(--shadow-lg);
+  }
+
+  .effort-wrap.open .effort-group {
+    display: inline-flex;
   }
 
   .effort-opt {
@@ -4469,10 +4561,6 @@ button:disabled {
     padding: 0 4px;
     border-radius: 6px;
     font-size: 12px;
-  }
-
-  .composer-tools-right {
-    margin-left: auto;
   }
 
   .send,
@@ -4484,7 +4572,47 @@ button:disabled {
   }
 
   .composer-row textarea {
+    min-height: 44px; /* one line, bottom-aligned with the 44 px send button */
+    max-height: 104px; /* ~4 lines at 16px/1.5, then the field scrolls */
+    padding: 4px 2px;
+    line-height: 1.5;
     font-size: 16px; /* iOS Safari zooms in on focused fields below 16px */
+  }
+
+  /* Busy (M42/M43): the model/effort chips yield; 停止 and the 排队 switch
+     stay on screen without scrolling. */
+  .composer-card.busy .model-wrap,
+  .composer-card.busy .effort-wrap {
+    display: none;
+  }
+
+  .composer-card.busy .composer-tools-left {
+    width: auto;
+  }
+
+  .busy-mode {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    justify-self: end;
+    margin-top: 4px;
+  }
+
+  /* An icon-only badge keeps the strip one line; title text is unchanged. */
+  .vision-hint {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .vision-hint::before {
+    content: '!';
+    font-size: 11px;
+    font-weight: 700;
   }
 
   /* ===== Message actions: always visible and thumb-sized ================= */
