@@ -58,6 +58,10 @@
  *                      mobile pass writes the 390x844 after shots)
  *   M44_BEFORE=1       evidence-only run of the M44 measurement against the
  *                      unmodified build (writes tests/out/m44-before-idle.png)
+ *   M45_ONLY=1         run only the M45 icon action-row checks (fast loop;
+ *                      writes the 390x844/1280x900 after shots)
+ *   M45_BEFORE=1       evidence-only run of the M45 inventory against the
+ *                      unmodified build (writes tests/out/m45-before-*.png)
  *   M42_LEGACY=1       M42 red run: the mock stops silently, like the
  *                      pre-fix plugin/runtime (no end/msg/turn frame)
  *
@@ -84,7 +88,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { artifactDir } from './artifacts.mjs';
+import { artifactDir, artifactFile } from './artifacts.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -229,6 +233,17 @@ const M36_STREAM_TEXT = [
   '公式之后还有一段很长的说明文字，用来把上面的块推进冻结区，让断言有足够的时间观察“冻结块已渲染、活尾巴仍是原文”的同时状态，而不是在流结束之后才看到结果。',
   '',
   '结束。',
+].join('\n');
+
+/** M45: one message whose table toolbar and footer both fit one screen. */
+const M45_TABLE_TEXT = [
+  '下面是对比数据：',
+  '',
+  '| 项目 | 旧版 | 新版 |',
+  '| --- | --- | --- |',
+  '| 按钮高度 | 24 px | 30 px |',
+  '| 可见文字 | 有 | 悬停提示 |',
+  '| 点击区域 | 44 px | 44 px |',
 ].join('\n');
 
 /** M23: a hit whose chat is not in localStorage/chats (仅归档 behaviour). */
@@ -6058,6 +6073,261 @@ async function runM44Checks(page, pass, mobile) {
   await sleep(200);
 }
 
+/**
+ * M45: the per-message footer and the markdown table toolbar are icon-only
+ * buttons. One injected message carries a table, so a single screen holds a
+ * message footer and a table toolbar. The BEFORE run only records the
+ * inventory and the screenshots (against the unmodified build); the AFTER run
+ * also clicks every button and proves the original action still happens.
+ */
+const M45_INVENTORY = `(() => {
+  const round = (n) => Math.round(n * 10) / 10;
+  const info = (el) => {
+    const r = el.getBoundingClientRect();
+    const svg = el.querySelector('svg');
+    const sr = svg ? svg.getBoundingClientRect() : null;
+    return {
+      cls: typeof el.className === 'string' ? el.className : el.tagName,
+      label: el.getAttribute('aria-label') || '',
+      title: el.getAttribute('title') || '',
+      text: (el.textContent || '').trim(),
+      w: round(r.width),
+      h: round(r.height),
+      glyph: svg ? { w: round(sr.width), h: round(sr.height) } : null,
+      iconOnly: Boolean(svg) && (el.textContent || '').trim() === '',
+    };
+  };
+  const rows = [...document.querySelectorAll('.row')];
+  const assistant = rows.filter((r) => r.classList.contains('assistant')).pop() || null;
+  const user = rows.find((r) => r.classList.contains('user')) || null;
+  const bar = document.querySelector('.md .table-bar');
+  const title = bar ? bar.querySelector('.table-bar-title') : null;
+  return {
+    assistant: assistant ? [...assistant.querySelectorAll('.bubble-foot button')].map(info) : [],
+    user: user ? [...user.querySelectorAll('.bubble-foot button')].map(info) : [],
+    table: bar ? {
+      title: ((title && title.textContent) || '').trim(),
+      titleGlyph: Boolean(title && title.querySelector('svg')),
+      buttons: [...bar.querySelectorAll('button')].map(info),
+    } : null,
+    viewport: { w: innerWidth, h: innerHeight },
+  };
+})()`;
+
+async function runM45Checks(page, pass, mobile) {
+  resetState();
+  if (mobile) await page.setViewportSize({ width: 390, height: 844 });
+  // The table rides a third message; resetState() gave chat-alpha a copy of
+  // HISTORY, so this never leaks into another block's fixture.
+  state.history['chat-alpha'] = [
+    ...HISTORY.map((message) => ({ ...message })),
+    { role: 'assistant', text: M45_TABLE_TEXT },
+  ];
+  await page.evaluate(() => {
+    localStorage.setItem('webchannel.chats', JSON.stringify(['chat-alpha', 'chat-beta']));
+    localStorage.setItem('webchannel.activeChat', 'chat-alpha');
+    localStorage.setItem('webchannel.pinnedChats', '[]');
+    localStorage.removeItem('webchannel.drafts');
+    localStorage.removeItem('webchannel.outbox');
+    localStorage.removeItem('webchannel.busyQueue');
+    localStorage.removeItem('webchannel.theme');
+    localStorage.setItem('webchannel.theme', 'light');
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await waitForHistory(page);
+  await sleep(400);
+
+  // Both the table toolbar and the message footer must be on screen at once.
+  await page
+    .locator('.row.assistant')
+    .last()
+    .evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  await sleep(250);
+
+  const inventory = await page.evaluate(M45_INVENTORY);
+  const phase = process.env.M45_BEFORE === '1' ? 'before' : 'after';
+  const size = mobile ? 'mobile' : 'desktop';
+  log(`M45 ${phase} ${pass}: ${JSON.stringify(inventory)}`);
+
+  const onScreen = await page.evaluate(() => {
+    const bar = document.querySelector('.md .table-bar');
+    const foot = [...document.querySelectorAll('.row.assistant')]
+      .pop()
+      ?.querySelector('.bubble-foot');
+    const inside = (el) => {
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.top >= 0 && r.bottom <= innerHeight;
+    };
+    return { bar: inside(bar), foot: inside(foot) };
+  });
+  const combined = artifactFile(`m45-${phase}-${size}.png`);
+  if (onScreen.bar && onScreen.foot) {
+    await page.screenshot({ path: combined, fullPage: false });
+  } else {
+    // The brief's fallback: one shot per element when they cannot share a
+    // screen. Named -msg / -table so the report can point at each.
+    await page.screenshot({ path: artifactFile(`m45-${phase}-${size}-msg.png`), fullPage: false });
+    await page
+      .locator('.md .table-bar')
+      .last()
+      .evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await sleep(200);
+    await page.screenshot({ path: artifactFile(`m45-${phase}-${size}-table.png`), fullPage: false });
+  }
+  log(`M45 ${phase} ${size}: table+foot on one screen = ${onScreen.bar && onScreen.foot}`);
+
+  if (process.env.M45_BEFORE === '1') return;
+
+  const rowButtons = [...inventory.assistant, ...inventory.user];
+  check(
+    `${pass}: M45 every message action is an icon-only button`,
+    rowButtons.length === 4 &&
+      rowButtons.every((b) => b.iconOnly && b.glyph && b.glyph.w === 16 && b.glyph.h === 16),
+    JSON.stringify(rowButtons.map((b) => [b.label, b.text, b.glyph])),
+  );
+  check(
+    `${pass}: M45 message actions keep their original names via aria-label`,
+    inventory.assistant.map((b) => b.label).join('|') === '复制 Markdown|重新生成' &&
+      inventory.user.map((b) => b.label).join('|') === '复制|编辑',
+    JSON.stringify([inventory.assistant.map((b) => b.label), inventory.user.map((b) => b.label)]),
+  );
+  check(
+    `${pass}: M45 message actions carry the hover title`,
+    rowButtons.every((b) => b.title.length > 0),
+    JSON.stringify(rowButtons.map((b) => b.title)),
+  );
+  const box = mobile ? { min: 44, max: 44 } : { min: 28, max: 32 };
+  check(
+    `${pass}: M45 message actions are ${mobile ? '44x44 (audit floor)' : '28-32px'}`,
+    rowButtons.every((b) => b.w >= box.min && b.w <= box.max && b.h >= box.min && b.h <= box.max),
+    JSON.stringify(rowButtons.map((b) => [b.w, b.h])),
+  );
+
+  check(
+    `${pass}: M45 table bar keeps its label with a glyph`,
+    Boolean(inventory.table) &&
+      inventory.table.title === '结构化表格' &&
+      inventory.table.titleGlyph,
+    JSON.stringify(inventory.table && { title: inventory.table.title, glyph: inventory.table.titleGlyph }),
+  );
+  check(
+    `${pass}: M45 table actions keep their original names via aria-label`,
+    Boolean(inventory.table) &&
+      inventory.table.buttons.map((b) => b.label).join('|') === '复制 Markdown 表格|复制到 Excel',
+    JSON.stringify(inventory.table && inventory.table.buttons.map((b) => b.label)),
+  );
+  check(
+    `${pass}: M45 table actions are icon-only with a hover title`,
+    Boolean(inventory.table) &&
+      inventory.table.buttons.length === 2 &&
+      inventory.table.buttons.every(
+        (b) => b.iconOnly && b.title.length > 0 && b.glyph && b.glyph.w === 16,
+      ),
+    JSON.stringify(inventory.table && inventory.table.buttons.map((b) => [b.label, b.title, b.text])),
+  );
+  check(
+    `${pass}: M45 table actions are ${mobile ? '44x44 (audit floor)' : '28-32px'}`,
+    Boolean(inventory.table) &&
+      inventory.table.buttons.every(
+        (b) => b.w >= box.min && b.w <= box.max && b.h >= box.min && b.h <= box.max,
+      ),
+    JSON.stringify(inventory.table && inventory.table.buttons.map((b) => [b.w, b.h])),
+  );
+
+  if (mobile) {
+    // This block is the only one with a table on screen, so it is the run
+    // that actually audits the table toolbar's hit areas.
+    const audit = await page.evaluate(TAP_TARGET_SCRIPT);
+    check(
+      `${pass}: M45 mobile icon buttons meet the 44px audit`,
+      audit.length === 0,
+      JSON.stringify(audit.slice(0, 4)),
+    );
+  }
+
+  const readClip = async () => {
+    try {
+      return await page.evaluate(() => navigator.clipboard.readText());
+    } catch (err) {
+      log(`${pass}: M45 clipboard read unavailable — ${err.message}`);
+      return null;
+    }
+  };
+
+  // ---- copy: raw Markdown, unchanged action ------------------------------
+  const lastCopy = page.locator('.row.assistant').last().locator('.bubble-foot button').first();
+  await lastCopy.click();
+  await sleep(200);
+  const copiedState = await page.evaluate(() => {
+    const btn = [...document.querySelectorAll('.row.assistant')]
+      .pop()
+      .querySelector('.bubble-foot button');
+    return { cls: btn.className, text: (btn.textContent || '').trim(), title: btn.title };
+  });
+  check(
+    `${pass}: M45 copy feedback is a check glyph, not a text swap`,
+    /copied/.test(copiedState.cls) && copiedState.text === '',
+    JSON.stringify(copiedState),
+  );
+  const clip = await readClip();
+  check(
+    `${pass}: M45 copy still copies the raw Markdown`,
+    clip !== null && clip.replace(/\n+$/, '') === M45_TABLE_TEXT.replace(/\n+$/, ''),
+    JSON.stringify((clip || '').slice(0, 60)),
+  );
+
+  // ---- table: Markdown + Excel payloads, unchanged ----------------------
+  await page.locator('.md .table-copy-md').last().click();
+  await sleep(200);
+  const mdClip = await readClip();
+  const mdCopied = await page.evaluate(() => {
+    const btn = document.querySelector('.md .table-copy-md');
+    return { cls: btn.className, text: (btn.textContent || '').trim() };
+  });
+  check(
+    `${pass}: M45 table Markdown copy still emits the pipe table`,
+    mdClip !== null && mdClip.includes('| 项目 | 旧版 | 新版 |') && mdClip.includes('| --- | --- | --- |'),
+    JSON.stringify((mdClip || '').slice(0, 60)),
+  );
+  check(
+    `${pass}: M45 table Markdown feedback stays icon-only`,
+    /copied/.test(mdCopied.cls) && mdCopied.text === '',
+    JSON.stringify(mdCopied),
+  );
+
+  await page.locator('.md .table-copy-tsv').last().click();
+  await sleep(200);
+  const tsvClip = await readClip();
+  check(
+    `${pass}: M45 table Excel copy still emits tabs`,
+    tsvClip !== null && tsvClip.includes('项目\t旧版\t新版'),
+    JSON.stringify((tsvClip || '').slice(0, 60)),
+  );
+
+  // ---- edit: still returns the user text to the composer -----------------
+  await page.locator('.row.user .bubble-foot button').last().click();
+  await sleep(200);
+  const composerText = await page.locator('.composer textarea').inputValue();
+  check(
+    `${pass}: M45 edit still puts the user text back in the composer`,
+    composerText === '给我一段 Python 代码',
+    JSON.stringify(composerText),
+  );
+  await page.locator('.composer textarea').fill('');
+
+  // ---- regenerate: still sends the preceding user turn ------------------
+  const before = state.received.length;
+  await page.locator('.row.assistant').last().locator('.bubble-foot button').last().click();
+  await waitUntil(() => state.received.length > before, 4000);
+  const sent = state.received[state.received.length - 1];
+  check(
+    `${pass}: M45 regenerate still sends the preceding user turn`,
+    Boolean(sent) && sent.text === '给我一段 Python 代码',
+    JSON.stringify(sent && sent.text),
+  );
+}
+
 async function runPass(browser, pass, viewport, mobile) {
   resetState();
   const contextOptions = mobile
@@ -6152,6 +6422,12 @@ async function runPass(browser, pass, viewport, mobile) {
 
     if (process.env.M44_ONLY === '1') {
       await runM44Checks(page, pass, mobile);
+      check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
+      return;
+    }
+
+    if (process.env.M45_ONLY === '1') {
+      await runM45Checks(page, pass, mobile);
       check(`${pass}: no page errors`, pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
       return;
     }
@@ -6658,6 +6934,9 @@ async function runPass(browser, pass, viewport, mobile) {
 
     // ---- 15f. M44: phone composer is two rows; desktop untouched ---------
     await runM44Checks(page, pass, mobile);
+
+    // ---- 15g. M45: icon-only message footer + table toolbar --------------
+    await runM45Checks(page, pass, mobile);
 
     // ---- 16. M37: offline send queue (last: it restarts the relay) -------
     await runM37Checks(page, pass, mobile);

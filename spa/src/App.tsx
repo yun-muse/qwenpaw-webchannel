@@ -20,6 +20,7 @@ import DOMPurify from 'dompurify';
 import hljs from 'highlight.js/lib/common';
 import { md } from './lib/markdown';
 import { hydrateMath } from './lib/mathRender';
+import { glyphSvg } from './lib/glyphs';
 import {
   Archive,
   ArrowDown,
@@ -37,6 +38,7 @@ import {
   Cpu,
   Download,
   Edit3,
+  FileCode2,
   FileText,
   GitCompare,
   HelpCircle,
@@ -1042,8 +1044,12 @@ function decorateMarkdown(root: HTMLElement | null, math: boolean) {
 
     const bar = document.createElement('div');
     bar.className = 'table-bar';
+    // M45: the bar is a label plus two icon-only actions. Text stays on the
+    // label (it is not clickable); the buttons get the same aria-label/title
+    // pair as the React-rendered message actions.
     const titleSpan = document.createElement('span');
-    titleSpan.textContent = '📊 结构化表格';
+    titleSpan.className = 'table-bar-title';
+    titleSpan.innerHTML = `${glyphSvg('table', 14)}<span>结构化表格</span>`;
 
     const actions = document.createElement('div');
     actions.className = 'table-bar-actions';
@@ -1051,12 +1057,16 @@ function decorateMarkdown(root: HTMLElement | null, math: boolean) {
     const mdBtn = document.createElement('button');
     mdBtn.type = 'button';
     mdBtn.className = 'table-copy-btn table-copy-md';
-    mdBtn.textContent = '📋 复制 Markdown 表格';
+    mdBtn.title = '复制 Markdown 表格';
+    mdBtn.setAttribute('aria-label', '复制 Markdown 表格');
+    mdBtn.innerHTML = glyphSvg('clipboardList', 16);
 
     const tsvBtn = document.createElement('button');
     tsvBtn.type = 'button';
     tsvBtn.className = 'table-copy-btn table-copy-tsv';
-    tsvBtn.textContent = '📊 复制到 Excel';
+    tsvBtn.title = '复制到 Excel';
+    tsvBtn.setAttribute('aria-label', '复制到 Excel');
+    tsvBtn.innerHTML = glyphSvg('fileSpreadsheet', 16);
 
     actions.appendChild(mdBtn);
     actions.appendChild(tsvBtn);
@@ -1153,9 +1163,13 @@ function Markdown({ text, streaming }: { text: string; streaming?: boolean }) {
       if (!table) return;
       void copyText(htmlTableToMarkdown(table)).then((ok) => {
         if (!ok) return;
-        mdTableBtn.textContent = '✅ 已复制 Markdown';
+        // M45: icon-only feedback — a green check for 1.4 s. The accessible
+        // name stays 复制 Markdown 表格.
+        mdTableBtn.innerHTML = glyphSvg('check', 16);
+        mdTableBtn.classList.add('copied');
         window.setTimeout(() => {
-          mdTableBtn.textContent = '📋 复制 Markdown 表格';
+          mdTableBtn.innerHTML = glyphSvg('clipboardList', 16);
+          mdTableBtn.classList.remove('copied');
         }, 1400);
       });
       return;
@@ -1168,9 +1182,11 @@ function Markdown({ text, streaming }: { text: string; streaming?: boolean }) {
       if (!table) return;
       void copyText(htmlTableToTsv(table)).then((ok) => {
         if (!ok) return;
-        tsvTableBtn.textContent = '✅ 已复制 Excel 格式';
+        tsvTableBtn.innerHTML = glyphSvg('check', 16);
+        tsvTableBtn.classList.add('copied');
         window.setTimeout(() => {
-          tsvTableBtn.textContent = '📊 复制到 Excel';
+          tsvTableBtn.innerHTML = glyphSvg('fileSpreadsheet', 16);
+          tsvTableBtn.classList.remove('copied');
         }, 1400);
       });
     }
@@ -1557,29 +1573,39 @@ const MessageView = memo(function MessageView({
           <button
             className={`copy-btn${copied ? ' copied' : ''}`}
             onClick={copy}
-            title={isAssistant ? '直接复制未渲染的原始 Markdown 源码' : '复制消息文本'}
+            title={
+              isAssistant
+                ? '复制 Markdown（未渲染的原始源码）'
+                : '复制消息文本'
+            }
+            aria-label={isAssistant ? '复制 Markdown' : '复制'}
           >
-            {copied ? <Check size={12} /> : <Copy size={12} />}
-            <span>{copied ? '已复制 Markdown' : isAssistant ? '复制 Markdown' : '复制'}</span>
+            {copied ? (
+              <Check size={16} />
+            ) : isAssistant ? (
+              <FileCode2 size={16} />
+            ) : (
+              <Copy size={16} />
+            )}
           </button>
           {isAssistant && onRegenerate ? (
             <button
               className="msg-act-btn"
               onClick={() => onRegenerate(message)}
               title="重新生成此回答"
+              aria-label="重新生成"
             >
-              <RotateCcw size={12} />
-              <span>重新生成</span>
+              <RotateCcw size={16} />
             </button>
           ) : null}
           {!isAssistant && onEditResend ? (
             <button
               className="msg-act-btn"
               onClick={() => onEditResend(message)}
-              title="放回输入框修改并重发"
+              title="编辑：放回输入框修改并重发"
+              aria-label="编辑"
             >
-              <Edit3 size={12} />
-              <span>编辑</span>
+              <Edit3 size={16} />
             </button>
           ) : null}
         </div>
